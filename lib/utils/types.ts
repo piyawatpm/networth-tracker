@@ -1,0 +1,128 @@
+export type Currency = "AUD" | "USD" | "THB";
+
+export const CURRENCY_SYMBOLS: Record<Currency, string> = {
+  AUD: "A$",
+  USD: "$",
+  THB: "฿",
+};
+
+export type IncomeType =
+  | "salary"
+  | "super_employer"
+  | "super_personal"
+  | "arena_bot"
+  | "arb_bot"
+  | "uber"
+  | "freelance"
+  | "dividend"
+  | "crypto_yield"
+  | "interest"
+  | "rental"
+  | "bonus"
+  | "other";
+
+export type ExpenseType =
+  | "food"
+  | "transport"
+  | "rent"
+  | "utilities"
+  | "entertainment"
+  | "shopping"
+  | "health"
+  | "insurance"
+  | "subscriptions"
+  | "education"
+  | "travel"
+  | "gifts"
+  | "other";
+
+export type HoldingType = "stock" | "etf" | "fund" | "bond" | "other";
+export type AccountType = "normal" | "super";
+export type DebtDirection = "i_owe" | "owed_to_me";
+
+export interface IncomeEntry {
+  id: string;
+  type: IncomeType;
+  description: string;
+  amount: number;
+  currency: Currency;
+  date: string; // YYYY-MM-DD
+  notes: string;
+  createdAt: number;
+}
+
+export interface ExpenseEntry {
+  id: string;
+  type: ExpenseType;
+  description: string;
+  amount: number;
+  currency: Currency;
+  vendor: string;
+  date: string; // YYYY-MM-DD
+  notes: string;
+  images: string[]; // base64 data URLs
+  createdAt: number;
+}
+
+export interface PortfolioHolding {
+  id: string;
+  name: string;
+  ticker: string;
+  type: HoldingType;
+  accountType: AccountType;
+  broker: string;
+  country: string;
+  link: string;
+  units: number;
+  amountInvested: number;
+  currentValue: number;
+  currency: Currency;
+  notes: string;
+  createdAt: number;
+}
+
+export interface DebtRecord {
+  id: string;
+  person: string;
+  direction: DebtDirection;
+  reason: string;
+  originalAmount: number;
+  currency: Currency;
+  notes: string;
+  images: string[];
+  createdAt: number;
+}
+
+export interface DebtTransaction {
+  id: string;
+  debtId: string;
+  amount: number; // positive = reduce debt, negative = add more
+  date: string; // YYYY-MM-DD
+  notes: string;
+  images: string[];
+  createdAt: number;
+}
+
+export interface CryptoHolding {
+  token: string;
+  amount: number;
+  totalCostUsd: number;
+  currentValueUsd: number;
+}
+
+export interface CryptoTransaction {
+  date: string;
+  token: string;
+  type: "buy" | "sell" | "transferIn" | "transferOut";
+  priceUsd: number | null;
+  amount: number;
+  totalValueUsd: number | null;
+  fee: number | null;
+  feeCurrency: string;
+  notes: string;
+}
+
+export interface CachedRates {
+  rates: Record<string, number>;
+  fetchedAt: number; // unix timestamp ms
+}
