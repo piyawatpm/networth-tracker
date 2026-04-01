@@ -4,19 +4,14 @@ import { useState, useMemo } from "react";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 import { useCurrency } from "@/components/providers/currency-provider";
 import type { IncomeEntry, IncomeType } from "@/lib/utils/types";
-import { CURRENCY_SYMBOLS } from "@/lib/utils/types";
 import {
   INCOME_TYPE_LABELS,
   INCOME_TYPE_COLORS,
-  CHART_COLORS,
-  CURRENCIES,
 } from "@/lib/utils/constants";
 import {
-  getSydneyDateString,
   getCurrentMonthKey,
   getLastMonthKey,
   getCurrentYearKey,
-  getMonthKey,
   formatDateString,
 } from "@/lib/utils/timezone";
 import { cn } from "@/lib/utils";
@@ -40,7 +35,7 @@ import {
   type ChartConfig,
 } from "@/components/ui/chart";
 import { PieChart, Pie, Cell } from "recharts";
-import { Plus, Pencil, Trash2, TrendingUp } from "lucide-react";
+import { Plus, Pencil, Trash2 } from "lucide-react";
 import { IncomeDialog } from "@/components/income/income-dialog";
 
 // ---------------------------------------------------------------------------

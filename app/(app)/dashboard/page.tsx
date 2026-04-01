@@ -37,7 +37,6 @@ import {
 } from "@/lib/utils/crypto-csv";
 import {
   getSydneyDateString,
-  getCurrentYearKey,
   getLast6MonthKeys,
   monthKeyToLabel,
   formatDateString,
@@ -81,7 +80,7 @@ function getWeekStart(): string {
   const day = now.getDay();
   const diff = now.getDate() - day + (day === 0 ? -6 : 1); // Monday
   const monday = new Date(now.setDate(diff));
-  return monday.toISOString().slice(0, 10);
+  return monday.toLocaleDateString("en-CA", { timeZone: "Australia/Sydney" });
 }
 
 function isInPeriod(dateStr: string, period: Period): boolean {
@@ -164,7 +163,6 @@ export default function DashboardPage() {
     return parseAndComputeHoldings(cryptoCsvText);
   }, [cryptoCsvText]);
 
-  const currentYear = getCurrentYearKey();
   const last6Keys = getLast6MonthKeys();
 
   // Portfolio total
@@ -322,7 +320,7 @@ export default function DashboardPage() {
     for (let i = 13; i >= 0; i--) {
       const d = new Date();
       d.setDate(d.getDate() - i);
-      const ds = d.toISOString().slice(0, 10);
+      const ds = d.toLocaleDateString("en-CA", { timeZone: "Australia/Sydney" });
       let inc = 0, exp = 0;
       for (const e of incomeEntries) { if (e.date === ds) inc += convert(e.amount, e.currency); }
       for (const e of expenseEntries) { if (e.date === ds) exp += convert(e.amount, e.currency); }

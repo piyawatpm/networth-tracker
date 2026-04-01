@@ -30,8 +30,6 @@ const CurrencyContext = createContext<CurrencyContextValue | null>(null);
 export function CurrencyProvider({ children }: { children: ReactNode }) {
   const [currency, setCurrencyState] = useState<Currency>("AUD");
   const [cachedRates, setCachedRates] = useState<CachedRates | null>(null);
-  const [hydrated, setHydrated] = useState(false);
-
   // Hydrate from localStorage
   useEffect(() => {
     try {
@@ -42,7 +40,6 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
     } catch {
       // Ignore
     }
-    setHydrated(true);
   }, []);
 
   // Fetch FX rates

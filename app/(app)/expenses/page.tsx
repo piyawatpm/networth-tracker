@@ -8,7 +8,6 @@ import { CURRENCY_SYMBOLS } from "@/lib/utils/types";
 import {
   EXPENSE_TYPE_LABELS,
   EXPENSE_TYPE_COLORS,
-  CHART_COLORS,
 } from "@/lib/utils/constants";
 import {
   getCurrentMonthKey,

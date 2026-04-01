@@ -77,6 +77,3 @@ export function formatCurrency(
   })}`;
 }
 
-export function formatCurrencyShort(amount: number, currency: Currency): string {
-  return formatCurrency(amount, currency, true);
-}
