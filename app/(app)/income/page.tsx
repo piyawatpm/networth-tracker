@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import { useTheme } from "next-themes";
+import ReactECharts from "echarts-for-react";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 import { useCurrency } from "@/components/providers/currency-provider";
 import type { IncomeEntry, IncomeType } from "@/lib/utils/types";
@@ -15,6 +17,7 @@ import {
   formatDateString,
 } from "@/lib/utils/timezone";
 import { cn } from "@/lib/utils";
+import { getEchartsBaseOption, ECHARTS_COLORS } from "@/lib/utils/echarts";
 import { BlurFade } from "@/components/ui/blur-fade";
 import { NumberTicker } from "@/components/ui/number-ticker";
 import {
@@ -28,13 +31,6 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import {
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-  type ChartConfig,
-} from "@/components/ui/chart";
-import { PieChart, Pie, Cell } from "recharts";
 import { Plus, Pencil, Trash2 } from "lucide-react";
 import { IncomeDialog } from "@/components/income/income-dialog";
 
@@ -95,6 +91,7 @@ export default function IncomePage() {
   );
   const { currency, format, convert, symbol } = useCurrency();
   const [typeFilter, setTypeFilter] = useState<IncomeType | "all">("all");
+  const { theme } = useTheme();
 
   // ---- Derived data --------------------------------------------------------
 
@@ -154,19 +151,6 @@ export default function IncomePage() {
       }))
       .sort((a, b) => b.value - a.value);
   }, [thisMonthEntries, convert]);
-
-  // ---- Chart config --------------------------------------------------------
-
-  const chartConfig = useMemo<ChartConfig>(() => {
-    const config: ChartConfig = {};
-    breakdownByType.forEach((item) => {
-      config[item.type] = {
-        label: item.label,
-        color: item.color,
-      };
-    });
-    return config;
-  }, [breakdownByType]);
 
   // ---- Filter pills --------------------------------------------------------
 
@@ -266,34 +250,28 @@ export default function IncomePage() {
           ) : (
             <div className="grid md:grid-cols-[280px_1fr] gap-8 items-center">
               {/* Donut */}
-              <ChartContainer
-                config={chartConfig}
-                className="aspect-square max-h-[240px] mx-auto md:mx-0"
-              >
-                <PieChart>
-                  <ChartTooltip
-                    content={
-                      <ChartTooltipContent
-                        nameKey="type"
-                        formatter={(value) => format(value as number)}
-                      />
-                    }
-                  />
-                  <Pie
-                    data={breakdownByType}
-                    dataKey="value"
-                    nameKey="type"
-                    innerRadius="60%"
-                    outerRadius="90%"
-                    paddingAngle={2}
-                    strokeWidth={0}
-                  >
-                    {breakdownByType.map((item) => (
-                      <Cell key={item.type} fill={item.color} />
-                    ))}
-                  </Pie>
-                </PieChart>
-              </ChartContainer>
+              <ReactECharts
+                option={{
+                  ...getEchartsBaseOption(theme === "dark"),
+                  series: [{
+                    type: "pie",
+                    radius: ["55%", "85%"],
+                    center: ["50%", "50%"],
+                    data: breakdownByType.map((d, i) => ({
+                      name: d.label,
+                      value: d.value,
+                      itemStyle: { color: d.color },
+                    })),
+                    label: { show: false },
+                    emphasis: { scale: true, scaleSize: 5 },
+                  }],
+                  tooltip: {
+                    trigger: "item",
+                    ...getEchartsBaseOption(theme === "dark").tooltip,
+                  },
+                }}
+                style={{ height: "200px" }}
+              />
 
               {/* Progress bars */}
               <div className="space-y-3 min-w-0">

@@ -7,6 +7,7 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
   --font-heading: var(--font-geist-sans);
@@ -50,41 +51,81 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/* ── Light Theme (Sand/Terracotta) ────────────────────────────────────── */
 :root {
-  --background: oklch(0.985 0.004 85);
-  --foreground: oklch(0.175 0.008 75);
-  --card: oklch(1 0.002 85);
-  --card-foreground: oklch(0.175 0.008 75);
-  --popover: oklch(1 0.002 85);
-  --popover-foreground: oklch(0.175 0.008 75);
-  --primary: oklch(0.28 0.006 75);
-  --primary-foreground: oklch(0.985 0.004 85);
-  --secondary: oklch(0.955 0.005 85);
-  --secondary-foreground: oklch(0.28 0.008 75);
-  --muted: oklch(0.955 0.005 85);
-  --muted-foreground: oklch(0.50 0.008 75);
-  --accent: oklch(0.58 0.09 65);
-  --accent-foreground: oklch(0.175 0.008 75);
-  --destructive: oklch(0.60 0.18 25);
-  --border: oklch(0.925 0.004 85);
-  --input: oklch(0.925 0.004 85);
-  --ring: oklch(0.58 0.09 65);
-  --income: oklch(0.55 0.16 155);
-  --expense: oklch(0.58 0.16 25);
-  --chart-1: oklch(0.58 0.09 65);
-  --chart-2: oklch(0.55 0.16 155);
-  --chart-3: oklch(0.58 0.16 25);
-  --chart-4: oklch(0.52 0.08 35);
-  --chart-5: oklch(0.52 0.10 110);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.98 0.003 85);
-  --sidebar-foreground: oklch(0.175 0.008 75);
-  --sidebar-primary: oklch(0.28 0.006 75);
-  --sidebar-primary-foreground: oklch(0.985 0.004 85);
-  --sidebar-accent: oklch(0.955 0.005 85);
-  --sidebar-accent-foreground: oklch(0.28 0.008 75);
-  --sidebar-border: oklch(0.925 0.004 85);
-  --sidebar-ring: oklch(0.58 0.09 65);
+  --background: #efeee5;
+  --foreground: #2c251e;
+  --surface: #f4f3ed;
+  --card: #f4f3ed;
+  --card-foreground: #2c251e;
+  --popover: #f4f3ed;
+  --popover-foreground: #2c251e;
+  --primary: #c95f3f;
+  --primary-foreground: #f4f3ed;
+  --secondary: #dedbca;
+  --secondary-foreground: #2c251e;
+  --muted: #dedbca;
+  --muted-foreground: #968360;
+  --accent: #c95f3f;
+  --accent-foreground: #f4f3ed;
+  --destructive: oklch(0.637 0.237 25.331);
+  --border: #c9c3a8;
+  --input: #c9c3a8;
+  --ring: #c95f3f;
+  --income: oklch(0.723 0.219 149.579);
+  --expense: oklch(0.637 0.237 25.331);
+  --chart-1: oklch(0.623 0.214 259.815);
+  --chart-2: oklch(0.696 0.170 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.637 0.237 25.331);
+  --chart-5: oklch(0.715 0.143 215.221);
+  --radius: 0.5rem;
+  --sidebar: #efeee5;
+  --sidebar-foreground: #2c251e;
+  --sidebar-primary: #c95f3f;
+  --sidebar-primary-foreground: #f4f3ed;
+  --sidebar-accent: #dedbca;
+  --sidebar-accent-foreground: #2c251e;
+  --sidebar-border: #c9c3a8;
+  --sidebar-ring: #c95f3f;
+}
+
+/* ── Dark Theme ───────────────────────────────────────────────────────── */
+.dark {
+  --background: #1a1a1a;
+  --foreground: #f6f6f6;
+  --surface: #242424;
+  --card: #242424;
+  --card-foreground: #f6f6f6;
+  --popover: #242424;
+  --popover-foreground: #f6f6f6;
+  --primary: #e09770;
+  --primary-foreground: #1a1a1a;
+  --secondary: #3d3d3d;
+  --secondary-foreground: #f6f6f6;
+  --muted: #3d3d3d;
+  --muted-foreground: #888888;
+  --accent: #e09770;
+  --accent-foreground: #1a1a1a;
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: #454545;
+  --input: #454545;
+  --ring: #e09770;
+  --income: oklch(0.723 0.219 149.579);
+  --expense: oklch(0.704 0.191 22.216);
+  --chart-1: oklch(0.623 0.214 259.815);
+  --chart-2: oklch(0.696 0.170 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.637 0.237 25.331);
+  --chart-5: oklch(0.715 0.143 215.221);
+  --sidebar: #1a1a1a;
+  --sidebar-foreground: #f6f6f6;
+  --sidebar-primary: #e09770;
+  --sidebar-primary-foreground: #1a1a1a;
+  --sidebar-accent: #3d3d3d;
+  --sidebar-accent-foreground: #f6f6f6;
+  --sidebar-border: #454545;
+  --sidebar-ring: #e09770;
 }
 
 @layer base {
@@ -120,7 +161,7 @@
     background-color: oklch(from var(--income) l c h / 0.1);
   }
   .bg-expense\/10 {
-    background-color: oklch(from var(--income) l c h / 0.1);
+    background-color: oklch(from var(--expense) l c h / 0.1);
   }
   .display-number {
     @apply text-4xl md:text-6xl tracking-tighter leading-none font-semibold tabular-nums;
@@ -132,9 +173,9 @@
     @apply text-base text-muted-foreground leading-relaxed max-w-[65ch];
   }
   .finance-card {
-    @apply bg-card rounded-[2rem] shadow-[0_1px_3px_0_rgba(0,0,0,0.04),0_1px_2px_-1px_rgba(0,0,0,0.03)] border border-border/60 transition-all duration-300;
+    @apply bg-card rounded-xl border border-border/50 transition-all duration-200;
   }
   .finance-card:hover {
-    @apply shadow-[0_4px_12px_0_rgba(0,0,0,0.06),0_2px_4px_-2px_rgba(0,0,0,0.04)] -translate-y-[1px];
+    @apply border-border;
   }
 }

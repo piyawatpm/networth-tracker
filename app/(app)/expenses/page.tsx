@@ -29,13 +29,9 @@ import {
   DialogClose,
   DialogDescription,
 } from "@/components/ui/dialog";
-import {
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-  type ChartConfig,
-} from "@/components/ui/chart";
-import { PieChart, Pie, Cell } from "recharts";
+import ReactECharts from "echarts-for-react";
+import { useTheme } from "next-themes";
+import { getEchartsBaseOption } from "@/lib/utils/echarts";
 import { Plus, Pencil, Trash2, Receipt } from "lucide-react";
 import { ExpenseDialog } from "@/components/expenses/expense-dialog";
 
@@ -62,6 +58,8 @@ export default function ExpensesPage() {
     []
   );
   const { currency, format, convert, symbol } = useCurrency();
+  const { resolvedTheme } = useTheme();
+  const isDark = resolvedTheme === "dark";
 
   // Filters
   const [typeFilter, setTypeFilter] = useState<ExpenseType | "all">("all");
@@ -110,14 +108,43 @@ export default function ExpensesPage() {
     }));
   }, [thisMonthEntries, convert]);
 
-  // Chart config for recharts
-  const chartConfig: ChartConfig = useMemo(() => {
-    const cfg: ChartConfig = {};
-    for (const item of breakdownByType) {
-      cfg[item.type] = { label: item.label, color: item.color };
-    }
-    return cfg;
-  }, [breakdownByType]);
+  // ECharts pie option
+  const pieOption = useMemo(() => {
+    const base = getEchartsBaseOption(isDark);
+    return {
+      ...base,
+      tooltip: {
+        ...base.tooltip,
+        trigger: "item" as const,
+        formatter: (params: { name: string; value: number; percent: number }) => {
+          const label =
+            EXPENSE_TYPE_LABELS[params.name as ExpenseType] ?? params.name;
+          return `<div style="display:flex;align-items:center;justify-content:space-between;gap:16px">
+            <span style="color:${isDark ? "#888" : "#968360"}">${label}</span>
+            <span style="font-family:var(--font-geist-mono),ui-monospace,monospace;font-weight:500">${format(params.value)} (${params.percent.toFixed(1)}%)</span>
+          </div>`;
+        },
+      },
+      series: [
+        {
+          type: "pie",
+          radius: ["60%", "85%"],
+          padAngle: 2,
+          itemStyle: { borderWidth: 0 },
+          label: { show: false },
+          emphasis: {
+            scale: true,
+            scaleSize: 4,
+          },
+          data: breakdownByType.map((item) => ({
+            name: item.type,
+            value: item.value,
+            itemStyle: { color: item.color },
+          })),
+        },
+      ],
+    };
+  }, [breakdownByType, isDark, format]);
 
   // Filtered + sorted entries for the table
   const filteredEntries = useMemo(() => {
@@ -222,44 +249,13 @@ export default function ExpensesPage() {
             <div className="finance-card p-6">
               <div className="grid gap-6 md:grid-cols-[240px_1fr]">
                 {/* Donut Chart */}
-                <ChartContainer
-                  config={chartConfig}
-                  className="mx-auto aspect-square w-full max-w-[240px]"
-                >
-                  <PieChart>
-                    <ChartTooltip
-                      content={
-                        <ChartTooltipContent
-                          hideLabel
-                          formatter={(value, name) => (
-                            <div className="flex items-center justify-between gap-4">
-                              <span className="text-muted-foreground">
-                                {EXPENSE_TYPE_LABELS[name as ExpenseType] ??
-                                  name}
-                              </span>
-                              <span className="font-mono font-medium tabular-nums">
-                                {format(Number(value))}
-                              </span>
-                            </div>
-                          )}
-                        />
-                      }
-                    />
-                    <Pie
-                      data={breakdownByType}
-                      dataKey="value"
-                      nameKey="type"
-                      innerRadius="60%"
-                      outerRadius="85%"
-                      paddingAngle={2}
-                      strokeWidth={0}
-                    >
-                      {breakdownByType.map((item) => (
-                        <Cell key={item.type} fill={item.color} />
-                      ))}
-                    </Pie>
-                  </PieChart>
-                </ChartContainer>
+                <div className="mx-auto aspect-square w-full max-w-[240px]">
+                  <ReactECharts
+                    option={pieOption}
+                    style={{ width: "100%", height: "100%" }}
+                    opts={{ renderer: "svg" }}
+                  />
+                </div>
 
                 {/* Progress bars */}
                 <div className="flex flex-col justify-center gap-2.5">

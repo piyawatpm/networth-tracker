@@ -9,7 +9,10 @@ import {
   Bitcoin,
   Briefcase,
   Handshake,
+  Moon,
+  Sun,
 } from "lucide-react";
+import { useTheme } from "next-themes";
 import { useCurrency } from "@/components/providers/currency-provider";
 import { cn } from "@/lib/utils";
 import { CURRENCY_SYMBOLS } from "@/lib/utils/types";
@@ -27,6 +30,19 @@ const NAV_ITEMS = [
   { href: "/portfolio", label: "Portfolio", icon: Briefcase },
   { href: "/debts", label: "Debts", icon: Handshake },
 ];
+
+function ThemeToggle() {
+  const { theme, setTheme } = useTheme();
+  return (
+    <button
+      onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+      className="flex items-center justify-center h-8 w-8 rounded-full bg-secondary text-secondary-foreground transition-colors hover:bg-secondary/80"
+    >
+      <Sun className="h-3.5 w-3.5 rotate-0 scale-100 transition-transform dark:rotate-90 dark:scale-0" />
+      <Moon className="absolute h-3.5 w-3.5 rotate-90 scale-0 transition-transform dark:rotate-0 dark:scale-100" />
+    </button>
+  );
+}
 
 function CurrencyToggle() {
   const { currency, cycleCurrency, rates, ratesFetchedAt } = useCurrency();
@@ -124,7 +140,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               })}
             </nav>
           </div>
-          <CurrencyToggle />
+          <div className="flex items-center gap-1.5">
+            <ThemeToggle />
+            <CurrencyToggle />
+          </div>
         </div>
       </header>
 

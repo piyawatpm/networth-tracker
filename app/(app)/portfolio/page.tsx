@@ -21,22 +21,9 @@ import { cn } from "@/lib/utils";
 import { BlurFade } from "@/components/ui/blur-fade";
 import { NumberTicker } from "@/components/ui/number-ticker";
 import { Input } from "@/components/ui/input";
-import {
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-  type ChartConfig,
-} from "@/components/ui/chart";
-import {
-  PieChart,
-  Pie,
-  Cell,
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-} from "recharts";
+import ReactECharts from "echarts-for-react";
+import { useTheme } from "next-themes";
+import { getEchartsBaseOption, ECHARTS_COLORS, formatAxisValue } from "@/lib/utils/echarts";
 import { Plus, Pencil, Trash2, Briefcase, ExternalLink, RefreshCw, Check, Zap, Hand, History } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -76,6 +63,8 @@ export default function PortfolioPage() {
     []
   );
   const { format, convert, currency, symbol } = useCurrency();
+  const { resolvedTheme } = useTheme();
+  const isDark = resolvedTheme === "dark";
 
   const [includeSuper, setIncludeSuper] = useState(true);
   const [typeFilter, setTypeFilter] = useState<HoldingType | "all">("all");
@@ -275,10 +264,6 @@ export default function PortfolioPage() {
     }));
   }, [snapshots, includeSuper]);
 
-  const trendConfig: ChartConfig = {
-    value: { label: "Portfolio Value", color: "var(--accent)" },
-  };
-
   // Allocation data
   const allocationData = useMemo(() => {
     const byType: Record<string, number> = {};
@@ -295,13 +280,98 @@ export default function PortfolioPage() {
       .sort((a, b) => b.value - a.value);
   }, [filteredHoldings, convert]);
 
-  const chartConfig: ChartConfig = useMemo(() => {
-    const config: ChartConfig = {};
-    for (const d of allocationData) {
-      config[d.name] = { label: d.name, color: d.fill };
-    }
-    return config;
-  }, [allocationData]);
+  // ECharts: Value Trend area chart option
+  const trendChartOption = useMemo(() => {
+    const base = getEchartsBaseOption(isDark);
+    return {
+      ...base,
+      grid: { top: 12, right: 12, bottom: 32, left: 56, containLabel: false },
+      xAxis: {
+        ...base.xAxis,
+        type: "category" as const,
+        data: trendData.map((d) => d.date),
+        boundaryGap: false,
+      },
+      yAxis: {
+        ...base.yAxis,
+        type: "value" as const,
+        axisLabel: {
+          ...base.yAxis.axisLabel,
+          formatter: formatAxisValue,
+        },
+      },
+      tooltip: {
+        ...base.tooltip,
+        trigger: "axis" as const,
+        formatter: (params: { name: string; value: number }[]) => {
+          const p = Array.isArray(params) ? params[0] : params;
+          return `<div style="font-size:12px"><span style="color:${isDark ? "#888" : "#968360"}">${p.name}</span><br/><b style="font-family:var(--font-geist-mono),monospace">${format(p.value)}</b></div>`;
+        },
+      },
+      series: [
+        {
+          type: "line" as const,
+          data: trendData.map((d) => d.value),
+          smooth: true,
+          symbol: "circle",
+          symbolSize: 4,
+          showSymbol: false,
+          emphasis: { focus: "series" as const, itemStyle: { borderWidth: 2 } },
+          lineStyle: { width: 2, color: ECHARTS_COLORS[0] },
+          itemStyle: { color: ECHARTS_COLORS[0] },
+          areaStyle: {
+            opacity: 0.15,
+            color: {
+              type: "linear" as const,
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
+              colorStops: [
+                { offset: 0, color: ECHARTS_COLORS[0] },
+                { offset: 1, color: "transparent" },
+              ],
+            },
+          },
+        },
+      ],
+    };
+  }, [trendData, isDark, format]);
+
+  // ECharts: Allocation donut option
+  const allocationChartOption = useMemo(() => {
+    const base = getEchartsBaseOption(isDark);
+    return {
+      ...base,
+      tooltip: {
+        ...base.tooltip,
+        trigger: "item" as const,
+        formatter: (params: { name: string; value: number; percent: number; color: string }) => {
+          return `<div style="font-size:12px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${params.color};margin-right:6px"></span>${params.name}<br/><b style="font-family:var(--font-geist-mono),monospace">${format(params.value)}</b> <span style="color:${isDark ? "#888" : "#968360"}">${params.percent.toFixed(1)}%</span></div>`;
+        },
+      },
+      series: [
+        {
+          type: "pie" as const,
+          radius: ["55%", "85%"],
+          center: ["50%", "50%"],
+          avoidLabelOverlap: false,
+          padAngle: 2,
+          itemStyle: { borderRadius: 4 },
+          label: { show: false },
+          emphasis: {
+            scale: true,
+            scaleSize: 4,
+          },
+          data: allocationData.map((d) => ({
+            name: d.name,
+            value: d.value,
+            itemStyle: { color: d.fill },
+          })),
+        },
+      ],
+    };
+  }, [allocationData, isDark, format]);
 
   // Broker breakdown
   const brokerBreakdown = useMemo(() => {
@@ -439,59 +509,12 @@ export default function PortfolioPage() {
         <div className="finance-card p-6">
           <p className="label-mono mb-4">Value Trend</p>
           {trendData.length > 1 ? (
-            <ChartContainer config={trendConfig} className="h-48 w-full">
-              <AreaChart
-                data={trendData}
-                margin={{ top: 4, right: 0, bottom: 0, left: 0 }}
-              >
-                <defs>
-                  <linearGradient id="portfolioGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="var(--accent)" stopOpacity={0.2} />
-                    <stop offset="100%" stopColor="var(--accent)" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid
-                  vertical={false}
-                  strokeDasharray="3 3"
-                  className="stroke-border/40"
-                />
-                <XAxis
-                  dataKey="date"
-                  tickLine={false}
-                  axisLine={false}
-                  className="text-xs"
-                />
-                <YAxis
-                  tickLine={false}
-                  axisLine={false}
-                  width={56}
-                  tickFormatter={(v: number) => {
-                    if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
-                    if (v >= 1_000) return `${(v / 1_000).toFixed(0)}k`;
-                    return String(v);
-                  }}
-                  className="text-xs"
-                />
-                <ChartTooltip
-                  content={
-                    <ChartTooltipContent
-                      formatter={(value) => (
-                        <span className="font-mono tabular-nums font-medium">
-                          {format(Number(value))}
-                        </span>
-                      )}
-                    />
-                  }
-                />
-                <Area
-                  type="monotone"
-                  dataKey="value"
-                  stroke="var(--accent)"
-                  strokeWidth={2}
-                  fill="url(#portfolioGrad)"
-                />
-              </AreaChart>
-            </ChartContainer>
+            <ReactECharts
+              option={trendChartOption}
+              style={{ height: 192, width: "100%" }}
+              notMerge
+              lazyUpdate
+            />
           ) : (
             <div className="flex h-48 items-center justify-center">
               <p className="text-sm text-muted-foreground/50">
@@ -553,41 +576,14 @@ export default function PortfolioPage() {
               <p className="label-mono mb-4">Allocation by Type</p>
               {allocationData.length > 0 ? (
                 <div className="flex items-center gap-6">
-                  <ChartContainer
-                    config={chartConfig}
-                    className="aspect-square w-36 shrink-0"
-                  >
-                    <PieChart>
-                      <ChartTooltip
-                        content={
-                          <ChartTooltipContent
-                            hideLabel
-                            formatter={(value, name) => (
-                              <div className="flex items-center justify-between gap-4 w-full">
-                                <span className="text-muted-foreground">{name}</span>
-                                <span className="font-mono tabular-nums font-medium">
-                                  {format(Number(value))}
-                                </span>
-                              </div>
-                            )}
-                          />
-                        }
-                      />
-                      <Pie
-                        data={allocationData}
-                        dataKey="value"
-                        nameKey="name"
-                        innerRadius="55%"
-                        outerRadius="90%"
-                        paddingAngle={2}
-                        strokeWidth={0}
-                      >
-                        {allocationData.map((entry, i) => (
-                          <Cell key={i} fill={entry.fill} />
-                        ))}
-                      </Pie>
-                    </PieChart>
-                  </ChartContainer>
+                  <div className="aspect-square w-36 shrink-0">
+                    <ReactECharts
+                      option={allocationChartOption}
+                      style={{ height: 144, width: 144 }}
+                      notMerge
+                      lazyUpdate
+                    />
+                  </div>
                   <div className="flex-1 space-y-1.5">
                     {allocationData.map((d) => (
                       <div key={d.type} className="flex items-center gap-2 text-sm">

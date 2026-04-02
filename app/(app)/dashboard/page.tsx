@@ -2,33 +2,18 @@
 
 import { useState, useMemo, useEffect } from "react";
 import {
-  PieChart,
-  Pie,
-  Cell,
-  BarChart,
-  Bar,
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-} from "recharts";
-import {
   ArrowUpRight,
   ArrowDownRight,
   TrendingUp,
   TrendingDown,
 } from "lucide-react";
+import ReactECharts from "echarts-for-react";
+import { useTheme } from "next-themes";
 
 import { cn } from "@/lib/utils";
 import { BlurFade } from "@/components/ui/blur-fade";
 import { NumberTicker } from "@/components/ui/number-ticker";
-import {
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-  type ChartConfig,
-} from "@/components/ui/chart";
+import { getEchartsBaseOption, ECHARTS_COLORS, formatAxisValue } from "@/lib/utils/echarts";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 import { useCurrency } from "@/components/providers/currency-provider";
 import { GoalSection } from "@/components/dashboard/goal-section";
@@ -156,6 +141,8 @@ export default function DashboardPage() {
 
   const { convert, format, symbol } = useCurrency();
   const [period, setPeriod] = useState<Period>("M");
+  const { resolvedTheme } = useTheme();
+  const isDark = resolvedTheme === "dark";
 
   // ---- Derived data -------------------------------------------------------
 
@@ -204,10 +191,6 @@ export default function DashboardPage() {
   const nwTrendData = useMemo(() => {
     return nwSnapshots.map((s) => ({ date: s.date.slice(5), value: s.value }));
   }, [nwSnapshots]);
-
-  const nwTrendConfig: ChartConfig = {
-    value: { label: "Net Worth", color: "var(--accent)" },
-  };
 
   // ---- Period-filtered income/expenses ------------------------------------
 
@@ -265,18 +248,6 @@ export default function DashboardPage() {
       .sort((a, b) => b.value - a.value);
   }, [periodExpenses, convert]);
 
-  const incomeTypeConfig = useMemo(() => {
-    const cfg: ChartConfig = {};
-    for (const d of incomeByType) cfg[d.name] = { label: d.name, color: d.color };
-    return cfg;
-  }, [incomeByType]);
-
-  const expenseTypeConfig = useMemo(() => {
-    const cfg: ChartConfig = {};
-    for (const d of expenseByType) cfg[d.name] = { label: d.name, color: d.color };
-    return cfg;
-  }, [expenseByType]);
-
   // ---- Asset allocation ---------------------------------------------------
 
   const allocationData = useMemo(() => {
@@ -291,12 +262,6 @@ export default function DashboardPage() {
     return slices.filter((s) => s.value > 0).sort((a, b) => b.value - a.value);
   }, [portfolioHoldings, cryptoHoldings, convert]);
 
-  const allocationConfig = useMemo(() => {
-    const cfg: ChartConfig = {};
-    for (const s of allocationData) cfg[s.name] = { label: s.name, color: s.color };
-    return cfg;
-  }, [allocationData]);
-
   // ---- Income vs Expenses bar chart ---------------------------------------
 
   const barData = useMemo(() => {
@@ -307,11 +272,6 @@ export default function DashboardPage() {
       return { month: monthKeyToLabel(key), income: inc, expenses: exp, net: inc - exp };
     });
   }, [last6Keys, incomeEntries, expenseEntries, convert]);
-
-  const barConfig: ChartConfig = {
-    income: { label: "Income", color: "var(--income)" },
-    expenses: { label: "Expenses", color: "var(--expense)" },
-  };
 
   // ---- Daily cash flow (last 14 days) for sparkline -----------------------
 
@@ -329,11 +289,6 @@ export default function DashboardPage() {
     }
     return days;
   }, [incomeEntries, expenseEntries, convert]);
-
-  const cashFlowConfig: ChartConfig = {
-    income: { label: "Income", color: "var(--income)" },
-    expenses: { label: "Expenses", color: "var(--expense)" },
-  };
 
   // ---- Top spending categories (period) -----------------------------------
 
@@ -357,6 +312,278 @@ export default function DashboardPage() {
     }
     return items.sort((a, b) => (b.date ?? "").localeCompare(a.date ?? "")).slice(0, 10);
   }, [incomeEntries, expenseEntries]);
+
+  // ---- ECharts base -------------------------------------------------------
+
+  const base = useMemo(() => getEchartsBaseOption(isDark), [isDark]);
+
+  // CSS variable colors need to be resolved at render time for ECharts
+  // We use computed style to get actual hex values
+  const [chartColors, setChartColors] = useState({ accent: "#c95f3f", income: "#22c55e", expense: "#ef4444" });
+  useEffect(() => {
+    const root = document.documentElement;
+    const computed = getComputedStyle(root);
+    const accent = computed.getPropertyValue("--accent").trim();
+    const income = computed.getPropertyValue("--income").trim();
+    const expense = computed.getPropertyValue("--expense").trim();
+    setChartColors({
+      accent: accent || (isDark ? "#e09770" : "#c95f3f"),
+      income: income || "#22c55e",
+      expense: expense || "#ef4444",
+    });
+  }, [isDark]);
+
+  // ---- ECharts options ----------------------------------------------------
+
+  // 1. Net Worth Trend (Area)
+  const nwTrendOption = useMemo(() => {
+    return {
+      ...base,
+      grid: { top: 12, right: 8, bottom: 28, left: 50, containLabel: false },
+      xAxis: {
+        ...base.xAxis,
+        type: "category" as const,
+        data: nwTrendData.map((d) => d.date),
+        boundaryGap: false,
+      },
+      yAxis: {
+        ...base.yAxis,
+        type: "value" as const,
+        axisLabel: {
+          ...base.yAxis.axisLabel,
+          formatter: (v: number) => formatAxisValue(v),
+        },
+      },
+      tooltip: {
+        ...base.tooltip,
+        trigger: "axis" as const,
+        formatter: (params: { data: number; axisValue: string }[]) => {
+          const p = Array.isArray(params) ? params[0] : params;
+          return `<span style="font-weight:600">${p.axisValue}</span><br/><span style="font-family:ui-monospace,monospace">${format(p.data)}</span>`;
+        },
+      },
+      series: [
+        {
+          type: "line" as const,
+          data: nwTrendData.map((d) => d.value),
+          smooth: true,
+          showSymbol: false,
+          lineStyle: { color: chartColors.accent, width: 2 },
+          itemStyle: { color: chartColors.accent },
+          areaStyle: {
+            color: {
+              type: "linear" as const,
+              x: 0, y: 0, x2: 0, y2: 1,
+              colorStops: [
+                { offset: 0, color: chartColors.accent + "33" },
+                { offset: 1, color: chartColors.accent + "00" },
+              ],
+            },
+          },
+        },
+      ],
+    };
+  }, [base, nwTrendData, chartColors.accent, format]);
+
+  // 2. Daily Cash Flow (Bar - 14 days)
+  const dailyCashFlowOption = useMemo(() => {
+    return {
+      ...base,
+      grid: { top: 12, right: 8, bottom: 28, left: 44, containLabel: false },
+      xAxis: {
+        ...base.xAxis,
+        type: "category" as const,
+        data: dailyCashFlow.map((d) => d.date),
+        axisLabel: {
+          ...base.xAxis.axisLabel,
+          interval: 1,
+        },
+      },
+      yAxis: {
+        ...base.yAxis,
+        type: "value" as const,
+        axisLabel: {
+          ...base.yAxis.axisLabel,
+          formatter: (v: number) => formatAxisValue(v),
+        },
+      },
+      tooltip: {
+        ...base.tooltip,
+        trigger: "axis" as const,
+        formatter: (params: { seriesName: string; value: number; color: string }[]) => {
+          if (!Array.isArray(params)) return "";
+          const header = `<div style="margin-bottom:4px;font-weight:600">${params[0].value !== undefined ? dailyCashFlow[0]?.date : ""}</div>`;
+          const rows = params.map(
+            (p) =>
+              `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><span style="display:flex;align-items:center;gap:6px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color}"></span>${p.seriesName}</span><span style="font-family:ui-monospace,monospace;font-weight:500">${format(p.value)}</span></div>`
+          );
+          return header + rows.join("");
+        },
+      },
+      series: [
+        {
+          name: "Income",
+          type: "bar" as const,
+          data: dailyCashFlow.map((d) => d.income),
+          itemStyle: { color: chartColors.income, borderRadius: [3, 3, 0, 0] },
+          barGap: "10%",
+        },
+        {
+          name: "Expenses",
+          type: "bar" as const,
+          data: dailyCashFlow.map((d) => d.expenses),
+          itemStyle: { color: chartColors.expense, borderRadius: [3, 3, 0, 0] },
+        },
+      ],
+    };
+  }, [base, dailyCashFlow, chartColors, format]);
+
+  // 3. Income vs Expenses (Bar - 6 months)
+  const incExpBarOption = useMemo(() => {
+    return {
+      ...base,
+      grid: { top: 12, right: 8, bottom: 28, left: 48, containLabel: false },
+      xAxis: {
+        ...base.xAxis,
+        type: "category" as const,
+        data: barData.map((d) => d.month),
+      },
+      yAxis: {
+        ...base.yAxis,
+        type: "value" as const,
+        axisLabel: {
+          ...base.yAxis.axisLabel,
+          formatter: (v: number) => formatAxisValue(v),
+        },
+      },
+      tooltip: {
+        ...base.tooltip,
+        trigger: "axis" as const,
+        formatter: (params: { seriesName: string; value: number; color: string }[]) => {
+          if (!Array.isArray(params)) return "";
+          const rows = params.map(
+            (p) =>
+              `<div style="display:flex;align-items:center;justify-content:space-between;gap:16px"><span style="display:flex;align-items:center;gap:6px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color}"></span>${p.seriesName}</span><span style="font-family:ui-monospace,monospace;font-weight:500">${format(p.value)}</span></div>`
+          );
+          return rows.join("");
+        },
+      },
+      series: [
+        {
+          name: "Income",
+          type: "bar" as const,
+          data: barData.map((d) => d.income),
+          itemStyle: { color: chartColors.income, borderRadius: [6, 6, 0, 0] },
+          barGap: "15%",
+        },
+        {
+          name: "Expenses",
+          type: "bar" as const,
+          data: barData.map((d) => d.expenses),
+          itemStyle: { color: chartColors.expense, borderRadius: [6, 6, 0, 0] },
+        },
+      ],
+    };
+  }, [base, barData, chartColors, format]);
+
+  // 4. Asset Allocation (Pie/Donut)
+  const allocationPieOption = useMemo(() => {
+    return {
+      ...base,
+      series: [
+        {
+          type: "pie" as const,
+          radius: ["55%", "90%"],
+          center: ["50%", "50%"],
+          data: allocationData.map((d) => ({
+            name: d.name,
+            value: d.value,
+            itemStyle: { color: d.color },
+          })),
+          label: { show: false },
+          emphasis: { scale: true, scaleSize: 6 },
+          itemStyle: {
+            borderColor: isDark ? "#1a1a1a" : "#f4f3ed",
+            borderWidth: 2,
+            borderRadius: 4,
+          },
+          padAngle: 2,
+        },
+      ],
+      tooltip: {
+        ...base.tooltip,
+        trigger: "item" as const,
+        formatter: (params: { name: string; value: number; percent: number }) =>
+          `<span style="font-weight:600">${params.name}</span><br/><span style="font-family:ui-monospace,monospace">${format(params.value)}</span> (${params.percent}%)`,
+      },
+    };
+  }, [base, allocationData, isDark, format]);
+
+  // 5. Income Breakdown (Pie/Donut)
+  const incomePieOption = useMemo(() => {
+    return {
+      ...base,
+      series: [
+        {
+          type: "pie" as const,
+          radius: ["50%", "90%"],
+          center: ["50%", "50%"],
+          data: incomeByType.map((d) => ({
+            name: d.name,
+            value: d.value,
+            itemStyle: { color: d.color },
+          })),
+          label: { show: false },
+          emphasis: { scale: true, scaleSize: 6 },
+          itemStyle: {
+            borderColor: isDark ? "#1a1a1a" : "#f4f3ed",
+            borderWidth: 2,
+            borderRadius: 4,
+          },
+          padAngle: 2,
+        },
+      ],
+      tooltip: {
+        ...base.tooltip,
+        trigger: "item" as const,
+        formatter: (params: { name: string; value: number; percent: number }) =>
+          `<span style="font-weight:600">${params.name}</span><br/><span style="font-family:ui-monospace,monospace">${format(params.value)}</span> (${params.percent}%)`,
+      },
+    };
+  }, [base, incomeByType, isDark, format]);
+
+  // 6. Expenses Breakdown (Pie/Donut)
+  const expensePieOption = useMemo(() => {
+    return {
+      ...base,
+      series: [
+        {
+          type: "pie" as const,
+          radius: ["50%", "90%"],
+          center: ["50%", "50%"],
+          data: expenseByType.map((d) => ({
+            name: d.name,
+            value: d.value,
+            itemStyle: { color: d.color },
+          })),
+          label: { show: false },
+          emphasis: { scale: true, scaleSize: 6 },
+          itemStyle: {
+            borderColor: isDark ? "#1a1a1a" : "#f4f3ed",
+            borderWidth: 2,
+            borderRadius: 4,
+          },
+          padAngle: 2,
+        },
+      ],
+      tooltip: {
+        ...base.tooltip,
+        trigger: "item" as const,
+        formatter: (params: { name: string; value: number; percent: number }) =>
+          `<span style="font-weight:600">${params.name}</span><br/><span style="font-family:ui-monospace,monospace">${format(params.value)}</span> (${params.percent}%)`,
+      },
+    };
+  }, [base, expenseByType, isDark, format]);
 
   // ---- Render -------------------------------------------------------------
 
@@ -418,23 +645,11 @@ export default function DashboardPage() {
           <div className="finance-card p-5">
             <p className="label-mono mb-3">Net Worth Trend</p>
             {nwTrendData.length > 1 ? (
-              <ChartContainer config={nwTrendConfig} className="h-36 w-full">
-                <AreaChart data={nwTrendData} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
-                  <defs>
-                    <linearGradient id="nwGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="var(--accent)" stopOpacity={0.2} />
-                      <stop offset="100%" stopColor="var(--accent)" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid vertical={false} strokeDasharray="3 3" className="stroke-border/40" />
-                  <XAxis dataKey="date" tickLine={false} axisLine={false} className="text-[10px]" />
-                  <YAxis tickLine={false} axisLine={false} width={50} tickFormatter={(v: number) => v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M` : v >= 1_000 ? `${(v / 1_000).toFixed(0)}k` : String(v)} className="text-[10px]" />
-                  <ChartTooltip content={<ChartTooltipContent formatter={(value) => (
-                    <span className="font-mono tabular-nums font-medium">{format(Number(value))}</span>
-                  )} />} />
-                  <Area type="monotone" dataKey="value" stroke="var(--accent)" strokeWidth={2} fill="url(#nwGrad)" />
-                </AreaChart>
-              </ChartContainer>
+              <ReactECharts
+                option={nwTrendOption}
+                style={{ height: 144, width: "100%" }}
+                notMerge
+              />
             ) : (
               <div className="flex h-36 items-center justify-center">
                 <p className="text-sm text-muted-foreground/50">
@@ -518,21 +733,11 @@ export default function DashboardPage() {
         <BlurFade delay={D * 3} className="md:col-span-7">
           <div className="finance-card p-6">
             <p className="label-mono mb-4">Daily Flow (14 days)</p>
-            <ChartContainer config={cashFlowConfig} className="h-40 w-full">
-              <BarChart data={dailyCashFlow} barGap={2} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
-                <CartesianGrid vertical={false} strokeDasharray="3 3" className="stroke-border/40" />
-                <XAxis dataKey="date" tickLine={false} axisLine={false} className="text-[10px]" interval={1} />
-                <YAxis tickLine={false} axisLine={false} width={40} tickFormatter={(v: number) => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v)} className="text-[10px]" />
-                <ChartTooltip content={<ChartTooltipContent formatter={(value, name) => (
-                  <div className="flex items-center justify-between gap-4 w-full">
-                    <span className="text-muted-foreground capitalize">{String(name)}</span>
-                    <span className="font-mono tabular-nums font-medium">{format(Number(value))}</span>
-                  </div>
-                )} />} />
-                <Bar dataKey="income" fill="var(--income)" radius={[3, 3, 0, 0]} />
-                <Bar dataKey="expenses" fill="var(--expense)" radius={[3, 3, 0, 0]} />
-              </BarChart>
-            </ChartContainer>
+            <ReactECharts
+              option={dailyCashFlowOption}
+              style={{ height: 160, width: "100%" }}
+              notMerge
+            />
           </div>
         </BlurFade>
 
@@ -542,19 +747,13 @@ export default function DashboardPage() {
             <p className="label-mono mb-4">Asset Allocation</p>
             {allocationData.length > 0 ? (
               <div className="flex items-center gap-5">
-                <ChartContainer config={allocationConfig} className="aspect-square w-36 shrink-0">
-                  <PieChart>
-                    <ChartTooltip content={<ChartTooltipContent hideLabel formatter={(value, name) => (
-                      <div className="flex items-center justify-between gap-4 w-full">
-                        <span className="text-muted-foreground">{name}</span>
-                        <span className="font-mono tabular-nums font-medium">{format(Number(value))}</span>
-                      </div>
-                    )} />} />
-                    <Pie data={allocationData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius="55%" outerRadius="90%" paddingAngle={2} strokeWidth={0}>
-                      {allocationData.map((entry, idx) => (<Cell key={idx} fill={entry.color} />))}
-                    </Pie>
-                  </PieChart>
-                </ChartContainer>
+                <div className="w-36 shrink-0">
+                  <ReactECharts
+                    option={allocationPieOption}
+                    style={{ height: 144, width: 144 }}
+                    notMerge
+                  />
+                </div>
                 <div className="flex-1 space-y-1.5 overflow-hidden">
                   {allocationData.slice(0, 8).map((s, idx) => (
                     <div key={idx} className="flex items-center gap-2 text-sm">
@@ -576,21 +775,11 @@ export default function DashboardPage() {
         <BlurFade delay={D * 5} className="md:col-span-7">
           <div className="finance-card p-6">
             <p className="label-mono mb-4">Income vs Expenses (6 months)</p>
-            <ChartContainer config={barConfig} className="h-48 w-full">
-              <BarChart data={barData} barGap={4} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
-                <CartesianGrid vertical={false} strokeDasharray="3 3" className="stroke-border/40" />
-                <XAxis dataKey="month" tickLine={false} axisLine={false} className="text-xs" />
-                <YAxis tickLine={false} axisLine={false} width={48} tickFormatter={(v: number) => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v)} className="text-xs" />
-                <ChartTooltip content={<ChartTooltipContent formatter={(value, name) => (
-                  <div className="flex items-center justify-between gap-4 w-full">
-                    <span className="text-muted-foreground capitalize">{String(name)}</span>
-                    <span className="font-mono tabular-nums font-medium">{format(Number(value))}</span>
-                  </div>
-                )} />} />
-                <Bar dataKey="income" fill="var(--income)" radius={[6, 6, 0, 0]} />
-                <Bar dataKey="expenses" fill="var(--expense)" radius={[6, 6, 0, 0]} />
-              </BarChart>
-            </ChartContainer>
+            <ReactECharts
+              option={incExpBarOption}
+              style={{ height: 192, width: "100%" }}
+              notMerge
+            />
           </div>
         </BlurFade>
 
@@ -630,19 +819,13 @@ export default function DashboardPage() {
             <p className="label-mono mb-4">Income — {PERIOD_LABELS[period]}</p>
             {incomeByType.length > 0 ? (
               <div className="flex items-center gap-6">
-                <ChartContainer config={incomeTypeConfig} className="aspect-square w-32 shrink-0">
-                  <PieChart>
-                    <ChartTooltip content={<ChartTooltipContent hideLabel formatter={(value, name) => (
-                      <div className="flex items-center justify-between gap-4 w-full">
-                        <span className="text-muted-foreground">{name}</span>
-                        <span className="font-mono tabular-nums font-medium">{format(Number(value))}</span>
-                      </div>
-                    )} />} />
-                    <Pie data={incomeByType} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius="50%" outerRadius="90%" paddingAngle={2} strokeWidth={0}>
-                      {incomeByType.map((entry, idx) => (<Cell key={idx} fill={entry.color} />))}
-                    </Pie>
-                  </PieChart>
-                </ChartContainer>
+                <div className="w-32 shrink-0">
+                  <ReactECharts
+                    option={incomePieOption}
+                    style={{ height: 128, width: 128 }}
+                    notMerge
+                  />
+                </div>
                 <div className="flex-1 space-y-1.5 overflow-hidden">
                   {incomeByType.map((d, idx) => (
                     <div key={idx} className="flex items-center gap-2 text-sm">
@@ -665,19 +848,13 @@ export default function DashboardPage() {
             <p className="label-mono mb-4">Expenses — {PERIOD_LABELS[period]}</p>
             {expenseByType.length > 0 ? (
               <div className="flex items-center gap-6">
-                <ChartContainer config={expenseTypeConfig} className="aspect-square w-32 shrink-0">
-                  <PieChart>
-                    <ChartTooltip content={<ChartTooltipContent hideLabel formatter={(value, name) => (
-                      <div className="flex items-center justify-between gap-4 w-full">
-                        <span className="text-muted-foreground">{name}</span>
-                        <span className="font-mono tabular-nums font-medium">{format(Number(value))}</span>
-                      </div>
-                    )} />} />
-                    <Pie data={expenseByType} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius="50%" outerRadius="90%" paddingAngle={2} strokeWidth={0}>
-                      {expenseByType.map((entry, idx) => (<Cell key={idx} fill={entry.color} />))}
-                    </Pie>
-                  </PieChart>
-                </ChartContainer>
+                <div className="w-32 shrink-0">
+                  <ReactECharts
+                    option={expensePieOption}
+                    style={{ height: 128, width: 128 }}
+                    notMerge
+                  />
+                </div>
                 <div className="flex-1 space-y-1.5 overflow-hidden">
                   {expenseByType.map((d, idx) => (
                     <div key={idx} className="flex items-center gap-2 text-sm">

@@ -12,19 +12,16 @@ import {
 import { cn } from "@/lib/utils";
 import { BlurFade } from "@/components/ui/blur-fade";
 import { NumberTicker } from "@/components/ui/number-ticker";
-import {
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-  type ChartConfig,
-} from "@/components/ui/chart";
-import { PieChart, Pie, Cell } from "recharts";
-import { CHART_COLORS } from "@/lib/utils/constants";
+import ReactECharts from "echarts-for-react";
+import { useTheme } from "next-themes";
+import { getEchartsBaseOption, ECHARTS_COLORS } from "@/lib/utils/echarts";
 import { Upload, FileText, X, Bitcoin } from "lucide-react";
 
 export default function CryptoPage() {
   const [csvText, setCsvText] = useLocalStorage<string>("crypto_csv_text", "");
   const { format, convert, symbol } = useCurrency();
+  const { resolvedTheme } = useTheme();
+  const isDark = resolvedTheme === "dark";
   const [isDragOver, setIsDragOver] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -59,17 +56,9 @@ export default function CryptoPage() {
       .map((h, i) => ({
         token: h.token,
         value: h.currentValueUsd,
-        fill: CHART_COLORS[i % CHART_COLORS.length],
+        fill: ECHARTS_COLORS[i % ECHARTS_COLORS.length],
       }));
   }, [holdings, totalValueUsd]);
-
-  const chartConfig: ChartConfig = useMemo(() => {
-    const config: ChartConfig = {};
-    chartData.forEach((d) => {
-      config[d.token] = { label: d.token, color: d.fill };
-    });
-    return config;
-  }, [chartData]);
 
   const handleFile = useCallback(
     (file: File) => {
@@ -251,37 +240,41 @@ export default function CryptoPage() {
           <div className="finance-card p-6">
             <p className="label-mono mb-4">ALLOCATION</p>
             {chartData.length > 0 && (
-              <ChartContainer
-                config={chartConfig}
-                className="mx-auto aspect-square max-h-[260px]"
-              >
-                <PieChart>
-                  <ChartTooltip
-                    content={
-                      <ChartTooltipContent
-                        nameKey="token"
-                        formatter={(value) => {
-                          const num = typeof value === "number" ? value : Number(value);
-                          return format(num, "USD");
-                        }}
-                      />
-                    }
-                  />
-                  <Pie
-                    data={chartData}
-                    dataKey="value"
-                    nameKey="token"
-                    innerRadius={60}
-                    outerRadius={100}
-                    strokeWidth={2}
-                    stroke="var(--background)"
-                  >
-                    {chartData.map((entry) => (
-                      <Cell key={entry.token} fill={entry.fill} />
-                    ))}
-                  </Pie>
-                </PieChart>
-              </ChartContainer>
+              <ReactECharts
+                option={{
+                  ...getEchartsBaseOption(isDark),
+                  series: [
+                    {
+                      type: "pie",
+                      radius: ["46%", "76%"],
+                      center: ["50%", "50%"],
+                      data: chartData.map((d) => ({
+                        name: d.token,
+                        value: d.value,
+                        itemStyle: { color: d.fill },
+                      })),
+                      label: { show: false },
+                      emphasis: {
+                        scale: true,
+                        scaleSize: 6,
+                      },
+                      itemStyle: {
+                        borderColor: isDark ? "#1a1a1a" : "#f4f3ed",
+                        borderWidth: 2,
+                        borderRadius: 4,
+                      },
+                    },
+                  ],
+                  tooltip: {
+                    ...getEchartsBaseOption(isDark).tooltip,
+                    trigger: "item",
+                    formatter: (params: { name: string; value: number; percent: number }) =>
+                      `<span style="font-weight:600">${params.name}</span><br/>${format(params.value, "USD")} (${params.percent}%)`,
+                  },
+                }}
+                style={{ height: 260, width: "100%" }}
+                notMerge
+              />
             )}
             {/* Legend */}
             <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1.5">
@@ -360,7 +353,7 @@ export default function CryptoPage() {
                               className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full"
                               style={{
                                 backgroundColor:
-                                  CHART_COLORS[i % CHART_COLORS.length],
+                                  ECHARTS_COLORS[i % ECHARTS_COLORS.length],
                                 opacity: 0.15,
                               }}
                             >
@@ -368,7 +361,7 @@ export default function CryptoPage() {
                                 className="h-3 w-3"
                                 style={{
                                   color:
-                                    CHART_COLORS[i % CHART_COLORS.length],
+                                    ECHARTS_COLORS[i % ECHARTS_COLORS.length],
                                 }}
                               />
                             </div>
