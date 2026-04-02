@@ -476,18 +476,9 @@ export default function DashboardPage() {
   const allocationPieOption = {
     backgroundColor: "transparent",
     tooltip: pieTooltip,
-    legend: {
-      show: true,
-      bottom: 0,
-      left: "center",
-      textStyle: { fontSize: 10 },
-      icon: "circle",
-      itemWidth: 8,
-      itemHeight: 8,
-      itemGap: 12,
-    },
+    legend: { show: false },
     series: [{
-      type: "pie" as const, radius: ["55%", "90%"], center: ["50%", "45%"], padAngle: 2,
+      type: "pie" as const, radius: ["55%", "90%"], center: ["50%", "50%"], padAngle: 2,
       data: allocationData.map((d) => ({ name: d.name, value: d.value, itemStyle: { color: d.color } })),
       label: { show: false }, emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: "rgba(0,0,0,0.3)" } },
     }],
