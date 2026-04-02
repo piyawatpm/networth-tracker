@@ -12,6 +12,7 @@ import {
   EyeOff,
 } from "lucide-react";
 import ReactECharts from "echarts-for-react";
+import { InteractiveDonut } from "@/components/ui/interactive-donut";
 import { motion, AnimatePresence } from "motion/react";
 
 import { cn } from "@/lib/utils";
@@ -463,26 +464,7 @@ export default function DashboardPage() {
     ],
   };
 
-  // Shared pie tooltip
-  const pieTooltip = {
-    trigger: "item" as const,
-    formatter: "{b}: {c} ({d}%)",
-    backgroundColor: CC.tooltipBg, borderColor: CC.border, borderWidth: 1,
-    padding: [8, 12], textStyle: { color: CC.fg, fontSize: 12 },
-    extraCssText: "border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);",
-  };
-
-  // 3. Asset Allocation (Pie/Donut)
-  const allocationPieOption = {
-    backgroundColor: "transparent",
-    tooltip: pieTooltip,
-    legend: { show: false },
-    series: [{
-      type: "pie" as const, radius: ["55%", "90%"], center: ["50%", "50%"], padAngle: 2,
-      data: allocationData.map((d) => ({ name: d.name, value: d.value, itemStyle: { color: d.color } })),
-      label: { show: false }, emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: "rgba(0,0,0,0.3)" } },
-    }],
-  };
+  // Asset allocation chart moved to InteractiveDonut component
 
   // ---- Render -------------------------------------------------------------
 
@@ -710,31 +692,11 @@ export default function DashboardPage() {
         </BlurFade>
 
         <BlurFade delay={D * 4} className="md:col-span-5">
-          <div className="finance-card p-6">
-            <p className="label-mono mb-4">Asset Allocation</p>
-            {allocationData.length > 0 ? (
-              <div className="flex items-center gap-5">
-                <div className="w-36 shrink-0">
-                  <ReactECharts
-                    option={allocationPieOption}
-                    style={{ height: 144, width: 144 }}
-                  />
-                </div>
-                <div className="flex-1 space-y-1.5 overflow-hidden">
-                  {allocationData.slice(0, 8).map((s, idx) => (
-                    <div key={idx} className="flex items-center gap-2 text-sm">
-                      <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: s.color }} />
-                      <span className="truncate text-muted-foreground">{s.name}</span>
-                      <span className="ml-auto font-mono tabular-nums text-xs whitespace-nowrap">{format(s.value, undefined, true)}</span>
-                    </div>
-                  ))}
-                  {allocationData.length > 8 && <p className="text-xs text-muted-foreground/60 pl-4">+{allocationData.length - 8} more</p>}
-                </div>
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground/50 py-8">No holdings yet</p>
-            )}
-          </div>
+          <InteractiveDonut
+            title="Asset Allocation"
+            data={allocationData.map((d) => ({ name: d.name, value: d.value, color: d.color }))}
+            format={format}
+          />
         </BlurFade>
       </div>
 

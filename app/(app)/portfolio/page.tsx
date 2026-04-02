@@ -42,11 +42,11 @@ import { HoldingDialog } from "@/components/portfolio/holding-dialog";
 import { FundBreakdown, type FundAllocations } from "@/components/portfolio/fund-breakdown";
 import { LookThroughView } from "@/components/portfolio/look-through-view";
 import ReactECharts from "echarts-for-react";
+import { InteractiveDonut } from "@/components/ui/interactive-donut";
 import {
   ECHARTS_COLORS,
   formatAxisValue,
   getCartesianBaseOption,
-  getPieBaseOption,
 } from "@/lib/utils/echarts";
 import {
   Plus,
@@ -515,93 +515,6 @@ export default function PortfolioPage() {
     };
   }, [trendData, isDark]);
 
-  const allocationChartOption = useMemo(() => {
-    const base = getPieBaseOption(isDark);
-    return {
-      ...base,
-      legend: { show: false },
-      series: [
-        {
-          type: "pie" as const,
-          radius: ["55%", "85%"],
-          center: ["50%", "50%"],
-          padAngle: 2,
-          data: allocationData.map((d) => ({
-            name: d.name,
-            value: d.value,
-            itemStyle: { color: d.fill },
-          })),
-          label: { show: false },
-          emphasis: {
-            itemStyle: {
-              shadowBlur: 10,
-              shadowOffsetX: 0,
-              shadowColor: "rgba(0,0,0,0.3)",
-            },
-          },
-        },
-      ],
-    };
-  }, [allocationData, isDark]);
-
-  const topHoldingsChartOption = useMemo(() => {
-    const base = getPieBaseOption(isDark);
-    return {
-      ...base,
-      legend: { show: false },
-      series: [
-        {
-          type: "pie" as const,
-          radius: ["55%", "85%"],
-          center: ["50%", "50%"],
-          padAngle: 2,
-          data: topHoldingsData.map((d, i) => ({
-            name: d.name,
-            value: d.value,
-            itemStyle: { color: ECHARTS_COLORS[i % ECHARTS_COLORS.length] },
-          })),
-          label: { show: false },
-          emphasis: {
-            itemStyle: {
-              shadowBlur: 10,
-              shadowOffsetX: 0,
-              shadowColor: "rgba(0,0,0,0.3)",
-            },
-          },
-        },
-      ],
-    };
-  }, [topHoldingsData, isDark]);
-
-  const countryChartOption = useMemo(() => {
-    const base = getPieBaseOption(isDark);
-    return {
-      ...base,
-      legend: { show: false },
-      series: [
-        {
-          type: "pie" as const,
-          radius: ["55%", "85%"],
-          center: ["50%", "50%"],
-          padAngle: 2,
-          data: countryData.map((d, i) => ({
-            name: d.name,
-            value: d.value,
-            itemStyle: { color: ECHARTS_COLORS[i % ECHARTS_COLORS.length] },
-          })),
-          label: { show: false },
-          emphasis: {
-            itemStyle: {
-              shadowBlur: 10,
-              shadowOffsetX: 0,
-              shadowColor: "rgba(0,0,0,0.3)",
-            },
-          },
-        },
-      ],
-    };
-  }, [countryData, isDark]);
-
   // ---------------------------------------------------------------------------
   // Broker breakdown
   // ---------------------------------------------------------------------------
@@ -936,129 +849,31 @@ export default function PortfolioPage() {
         <div className="grid gap-6 md:grid-cols-3">
           {/* Allocation by Type */}
           <BlurFade delay={DELAY * 4}>
-            <div className="finance-card p-5 h-full">
-              <p className="label-mono mb-4">Allocation by Type</p>
-              {allocationData.length > 0 ? (
-                <div className="flex flex-col items-center gap-4">
-                  <div className="aspect-square w-36 shrink-0">
-                    <ReactECharts
-                      option={allocationChartOption}
-                      style={{ height: 144, width: 144 }}
-                    />
-                  </div>
-                  <div className="w-full space-y-1.5">
-                    {allocationData.map((d) => (
-                      <div
-                        key={d.type}
-                        className="flex items-center gap-2 text-sm"
-                      >
-                        <span
-                          className="h-2 w-2 shrink-0 rounded-full"
-                          style={{ backgroundColor: d.fill }}
-                        />
-                        <span className="text-muted-foreground truncate">
-                          {d.name}
-                        </span>
-                        <span className="ml-auto font-mono tabular-nums text-xs whitespace-nowrap">
-                          {format(d.value, undefined, true)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
-                  No data
-                </div>
-              )}
-            </div>
+            <InteractiveDonut
+              title="Allocation by Type"
+              data={allocationData.map((d) => ({ name: d.name, value: d.value, color: d.fill }))}
+              format={format}
+            />
           </BlurFade>
 
           {/* Top Holdings */}
           <BlurFade delay={DELAY * 4.5}>
-            <div className="finance-card p-5 h-full">
-              <p className="label-mono mb-4">Top Holdings</p>
-              {topHoldingsData.length > 0 ? (
-                <div className="flex flex-col items-center gap-4">
-                  <div className="aspect-square w-36 shrink-0">
-                    <ReactECharts
-                      option={topHoldingsChartOption}
-                      style={{ height: 144, width: 144 }}
-                    />
-                  </div>
-                  <div className="w-full space-y-1.5">
-                    {topHoldingsData.map((d, i) => (
-                      <div
-                        key={d.name}
-                        className="flex items-center gap-2 text-sm"
-                      >
-                        <span
-                          className="h-2 w-2 shrink-0 rounded-full"
-                          style={{
-                            backgroundColor:
-                              ECHARTS_COLORS[i % ECHARTS_COLORS.length],
-                          }}
-                        />
-                        <span className="text-muted-foreground truncate">
-                          {d.name}
-                        </span>
-                        <span className="ml-auto font-mono tabular-nums text-xs whitespace-nowrap">
-                          {format(d.value, undefined, true)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
-                  No data
-                </div>
-              )}
-            </div>
+            <InteractiveDonut
+              title="Top Holdings"
+              data={topHoldingsData.map((d, i) => ({ name: d.name, value: d.value, color: ECHARTS_COLORS[i % ECHARTS_COLORS.length] }))}
+              format={format}
+            />
           </BlurFade>
 
           {/* Country / Region */}
           <BlurFade delay={DELAY * 5}>
-            <div className="finance-card p-5 h-full">
-              <p className="label-mono mb-4">By Country</p>
-              {countryData.length > 0 ? (
-                <div className="flex flex-col items-center gap-4">
-                  <div className="aspect-square w-36 shrink-0">
-                    <ReactECharts
-                      option={countryChartOption}
-                      style={{ height: 144, width: 144 }}
-                    />
-                  </div>
-                  <div className="w-full space-y-1.5">
-                    {countryData.map((d, i) => (
-                      <div
-                        key={d.name}
-                        className="flex items-center gap-2 text-sm"
-                      >
-                        <span
-                          className="h-2 w-2 shrink-0 rounded-full"
-                          style={{
-                            backgroundColor:
-                              ECHARTS_COLORS[i % ECHARTS_COLORS.length],
-                          }}
-                        />
-                        <span className="text-muted-foreground truncate">
-                          {d.name}
-                        </span>
-                        <span className="ml-auto font-mono tabular-nums text-xs whitespace-nowrap">
-                          {format(d.value, undefined, true)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
-                  No data
-                </div>
-              )}
-            </div>
+            <InteractiveDonut
+              title="By Country"
+              data={countryData.map((d, i) => ({ name: d.name, value: d.value, color: ECHARTS_COLORS[i % ECHARTS_COLORS.length] }))}
+              format={format}
+            />
           </BlurFade>
+
         </div>
       )}
 
