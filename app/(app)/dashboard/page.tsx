@@ -12,6 +12,7 @@ import {
   EyeOff,
 } from "lucide-react";
 import ReactECharts from "echarts-for-react";
+import { motion, AnimatePresence } from "motion/react";
 
 import { cn } from "@/lib/utils";
 import { BlurFade } from "@/components/ui/blur-fade";
@@ -146,6 +147,14 @@ export default function DashboardPage() {
 
   const { convert, format, symbol } = useCurrency();
   const [period, setPeriod] = useState<Period>("M");
+
+  // Dashboard section visibility (persisted)
+  const [hiddenSections, setHiddenSections] = useLocalStorage<string[]>("dashboard_hidden_sections", []);
+  const [showSectionSettings, setShowSectionSettings] = useState(false);
+  const toggleSection = (key: string) => {
+    setHiddenSections((prev) => prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]);
+  };
+  const isVisible = (key: string) => !hiddenSections.includes(key);
 
   // ---- Derived data -------------------------------------------------------
 
@@ -531,20 +540,66 @@ export default function DashboardPage() {
       {/* 3. ASSET BREAKDOWN + NET WORTH TREND */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
         <BlurFade delay={D * 0.5} className="md:col-span-5">
-          <div className="divide-y divide-border">
-            {[
-              { label: "Portfolio", value: portfolioTotal },
-              { label: "Crypto", value: cryptoTotal },
-              { label: "Owed to Me", value: owedToMe },
-              { label: "I Owe", value: -iOwe, negative: true },
-            ].map((row) => (
-              <div key={row.label} className="flex items-center justify-between py-3">
-                <span className="label-mono">{row.label}</span>
-                <span className={cn("font-mono text-sm tabular-nums", row.negative ? "text-expense" : "text-foreground")}>
-                  {row.negative ? "-" : ""}{format(Math.abs(row.value))}
-                </span>
-              </div>
-            ))}
+          <div className="relative">
+            {/* Settings toggle */}
+            <button
+              onClick={() => setShowSectionSettings(!showSectionSettings)}
+              className="absolute -top-1 right-0 p-1 rounded-md text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+            >
+              <Settings2 className="h-3.5 w-3.5" />
+            </button>
+
+            {/* Section visibility editor */}
+            <AnimatePresence>
+              {showSectionSettings && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="overflow-hidden mb-3"
+                >
+                  <div className="rounded-lg bg-secondary/50 p-2.5 space-y-1">
+                    <p className="label-mono mb-1.5">Show / Hide</p>
+                    {[
+                      { key: "portfolio", label: "Portfolio" },
+                      { key: "crypto", label: "Crypto" },
+                      { key: "owed_to_me", label: "Owed to Me" },
+                      { key: "i_owe", label: "I Owe" },
+                    ].map((item) => (
+                      <button
+                        key={item.key}
+                        onClick={() => toggleSection(item.key)}
+                        className="flex items-center justify-between w-full px-2 py-1 rounded text-xs hover:bg-secondary transition-colors"
+                      >
+                        <span className={cn(!isVisible(item.key) && "text-muted-foreground/50")}>{item.label}</span>
+                        {isVisible(item.key) ? (
+                          <Eye className="h-3 w-3 text-income" />
+                        ) : (
+                          <EyeOff className="h-3 w-3 text-muted-foreground/40" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <div className="divide-y divide-border">
+              {[
+                { key: "portfolio", label: "Portfolio", value: portfolioTotal, negative: false },
+                { key: "crypto", label: "Crypto", value: cryptoTotal, negative: false },
+                { key: "owed_to_me", label: "Owed to Me", value: owedToMe, negative: false },
+                { key: "i_owe", label: "I Owe", value: -iOwe, negative: true },
+              ].filter((row) => isVisible(row.key)).map((row) => (
+                <div key={row.key} className="flex items-center justify-between py-3">
+                  <span className="label-mono">{row.label}</span>
+                  <span className={cn("font-mono text-sm tabular-nums", row.negative ? "text-expense" : "text-foreground")}>
+                    {row.negative ? "-" : ""}{format(Math.abs(row.value))}
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
         </BlurFade>
 
@@ -573,7 +628,7 @@ export default function DashboardPage() {
       {/* 5. VITALS + FINANCIAL HEALTH SCORE */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
         <BlurFade delay={D} className="md:col-span-8">
-          <div className="finance-card p-6">
+          <div className="finance-card p-6 h-full flex flex-col justify-center">
             <p className="label-mono mb-4">{PERIOD_LABELS[period]}</p>
             <div className="grid grid-cols-3 divide-x divide-border">
               {/* Income */}
