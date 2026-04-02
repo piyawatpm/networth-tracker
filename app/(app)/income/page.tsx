@@ -62,7 +62,7 @@ import {
 } from "@/components/expenses/date-range-filter";
 import { IncomeTrend } from "@/components/income/income-trend";
 import { IncomePaceChart } from "@/components/income/cumulative-pace-chart";
-import { IncomeComparisonView } from "@/components/income/comparison-view";
+import { ComparisonView } from "@/components/expenses/comparison-view";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -143,9 +143,6 @@ export default function IncomePage() {
   // Comparison tab
   const currentMonth = getCurrentMonthKey();
   const lastMonth = getLastMonthKey();
-  const [compMonthA, setCompMonthA] = useState(lastMonth);
-  const [compMonthB, setCompMonthB] = useState(currentMonth);
-
   // Delete confirmation
   const [deleteTarget, setDeleteTarget] = useState<IncomeEntry | null>(null);
 
@@ -759,14 +756,12 @@ export default function IncomePage() {
             </div>
 
             <div className="finance-card p-6">
-              <IncomeComparisonView
+              <ComparisonView
                 entries={entries}
-                monthA={compMonthA}
-                monthB={compMonthB}
-                onMonthAChange={setCompMonthA}
-                onMonthBChange={setCompMonthB}
+                initialMonths={[lastMonth, currentMonth]}
                 getLabel={getLabel}
                 getColor={getColor}
+                upIsGood
               />
             </div>
           </TabsContent>

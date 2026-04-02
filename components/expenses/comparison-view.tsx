@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import ReactECharts from "echarts-for-react";
 import { useTheme } from "next-themes";
 import { useCurrency } from "@/components/providers/currency-provider";
-import type { ExpenseEntry } from "@/lib/utils/types";
+// Using generic ComparisonEntry interface instead of ExpenseEntry
 import {
   getMonthKey,
   getMonthKeysFromEntries,
@@ -24,11 +24,20 @@ const SERIES_COLORS = [
   { light: "#708090", dark: "#98a8b8" },
 ];
 
+interface ComparisonEntry {
+  date: string;
+  type: string;
+  amount: number;
+  currency: string;
+}
+
 interface ComparisonViewProps {
-  entries: ExpenseEntry[];
+  entries: ComparisonEntry[];
   initialMonths: string[];
   getLabel: (type: string) => string;
   getColor: (type: string) => string;
+  /** For income: up is good (green). For expenses: up is bad (red). Default: expenses */
+  upIsGood?: boolean;
 }
 
 type ChartMode = "bar" | "radar";
@@ -38,6 +47,7 @@ export function ComparisonView({
   initialMonths,
   getLabel,
   getColor,
+  upIsGood = false,
 }: ComparisonViewProps) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
@@ -251,7 +261,7 @@ export function ComparisonView({
               {pct !== null && (
                 <span className={cn(
                   "inline-flex items-center gap-0.5 text-xs mt-1",
-                  pct > 0 ? "text-expense" : pct < 0 ? "text-income" : "text-muted-foreground",
+                  pct > 0 ? (upIsGood ? "text-income" : "text-expense") : pct < 0 ? (upIsGood ? "text-expense" : "text-income") : "text-muted-foreground",
                 )}>
                   {pct > 0 ? <ArrowUpRight className="h-3 w-3" /> : pct < 0 ? <ArrowDownRight className="h-3 w-3" /> : <Minus className="h-3 w-3" />}
                   {Math.abs(pct).toFixed(1)}%
@@ -309,7 +319,7 @@ export function ComparisonView({
                             {delta !== null && (
                               <span className={cn(
                                 "ml-1.5",
-                                delta > 0 ? "text-expense" : delta < 0 ? "text-income" : "text-muted-foreground",
+                                delta > 0 ? (upIsGood ? "text-income" : "text-expense") : delta < 0 ? (upIsGood ? "text-expense" : "text-income") : "text-muted-foreground",
                               )}>
                                 {delta > 0 ? "↑" : delta < 0 ? "↓" : "—"}{Math.abs(delta).toFixed(0)}%
                               </span>
