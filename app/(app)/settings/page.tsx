@@ -3,9 +3,7 @@
 import { useState, useRef } from "react";
 import { useTheme } from "next-themes";
 import { useCurrency } from "@/components/providers/currency-provider";
-import { CURRENCY_SYMBOLS } from "@/lib/utils/types";
-import type { Currency } from "@/lib/utils/types";
-import { CURRENCIES } from "@/lib/utils/constants";
+import { ALL_CURRENCIES, getCurrencySymbol } from "@/lib/utils/types";
 import { BlurFade } from "@/components/ui/blur-fade";
 import { Button } from "@/components/ui/button";
 import {
@@ -78,7 +76,7 @@ function getKeyCount(): number {
 
 export default function SettingsPage() {
   const { theme, setTheme } = useTheme();
-  const { currency, setCurrency, ratesFetchedAt, ratesLoaded } = useCurrency();
+  const { currency, setCurrency, enabledCurrencies, setEnabledCurrencies, ratesFetchedAt, ratesLoaded } = useCurrency();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [status, setStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
@@ -250,13 +248,14 @@ export default function SettingsPage() {
             <h2 className="text-sm font-semibold">Currency</h2>
           </div>
 
+          {/* Display currency */}
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm">Display Currency</p>
               <p className="text-xs text-muted-foreground">All amounts converted to this currency</p>
             </div>
-            <div className="flex items-center rounded-full bg-secondary p-0.5 gap-0.5">
-              {CURRENCIES.map((c) => (
+            <div className="flex items-center flex-wrap gap-1">
+              {enabledCurrencies.map((c) => (
                 <button
                   key={c}
                   onClick={() => setCurrency(c)}
@@ -264,15 +263,52 @@ export default function SettingsPage() {
                     "flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-mono font-medium transition-colors",
                     currency === c
                       ? "bg-foreground text-background"
-                      : "text-muted-foreground hover:text-foreground"
+                      : "bg-secondary text-muted-foreground hover:text-foreground"
                   )}
                 >
-                  {CURRENCY_SYMBOLS[c]} {c}
+                  {getCurrencySymbol(c)} {c}
                 </button>
               ))}
             </div>
           </div>
 
+          {/* Manage currencies */}
+          <div className="pt-2 border-t border-border/50">
+            <p className="text-sm mb-2">Enabled Currencies</p>
+            <p className="text-xs text-muted-foreground mb-3">
+              Toggle currencies to show in the nav bar toggle. Click to add/remove.
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {Object.entries(ALL_CURRENCIES).map(([code, sym]) => {
+                const isEnabled = enabledCurrencies.includes(code);
+                return (
+                  <button
+                    key={code}
+                    onClick={() => {
+                      if (isEnabled) {
+                        if (enabledCurrencies.length <= 1) return; // keep at least 1
+                        setEnabledCurrencies(enabledCurrencies.filter((c) => c !== code));
+                      } else {
+                        setEnabledCurrencies([...enabledCurrencies, code]);
+                      }
+                    }}
+                    className={cn(
+                      "flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-mono transition-colors border",
+                      isEnabled
+                        ? "bg-primary/10 border-primary/30 text-foreground"
+                        : "bg-transparent border-border/50 text-muted-foreground hover:border-border"
+                    )}
+                  >
+                    <span className="opacity-60">{sym}</span>
+                    <span>{code}</span>
+                    {isEnabled && <Check className="h-3 w-3 text-primary ml-0.5" />}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* FX status */}
           <div className="flex items-center justify-between pt-2 border-t border-border/50">
             <div>
               <p className="text-sm">FX Rates</p>

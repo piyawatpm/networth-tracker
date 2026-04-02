@@ -1,10 +1,41 @@
-export type Currency = "AUD" | "USD" | "THB";
+export type Currency = string;
 
-export const CURRENCY_SYMBOLS: Record<Currency, string> = {
+// All supported currencies with symbols
+export const ALL_CURRENCIES: Record<string, string> = {
   AUD: "A$",
   USD: "$",
   THB: "฿",
+  EUR: "€",
+  GBP: "£",
+  JPY: "¥",
+  CNY: "¥",
+  KRW: "₩",
+  SGD: "S$",
+  HKD: "HK$",
+  CAD: "C$",
+  NZD: "NZ$",
+  CHF: "CHF",
+  SEK: "kr",
+  INR: "₹",
+  MYR: "RM",
+  IDR: "Rp",
+  PHP: "₱",
+  TWD: "NT$",
+  BRL: "R$",
+  ZAR: "R",
+  AED: "د.إ",
 };
+
+// Default enabled currencies
+export const DEFAULT_CURRENCIES = ["AUD", "USD", "THB"];
+
+// Get symbol for any currency (fallback to code)
+export function getCurrencySymbol(code: string): string {
+  return ALL_CURRENCIES[code] ?? code;
+}
+
+// Legacy compat — maps to ALL_CURRENCIES for existing code
+export const CURRENCY_SYMBOLS = ALL_CURRENCIES;
 
 export type IncomeType =
   | "salary"

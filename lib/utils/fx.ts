@@ -1,5 +1,7 @@
-import type { Currency, CachedRates } from "./types";
-import { CURRENCY_SYMBOLS } from "./types";
+import type { CachedRates } from "./types";
+import { getCurrencySymbol } from "./types";
+
+type Currency = string;
 
 const FX_CACHE_KEY = "fx_rates_cache";
 const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours
@@ -60,7 +62,7 @@ export function formatCurrency(
   currency: Currency,
   compact = false
 ): string {
-  const symbol = CURRENCY_SYMBOLS[currency];
+  const symbol = getCurrencySymbol(currency);
   const abs = Math.abs(amount);
   const sign = amount < 0 ? "-" : "";
 

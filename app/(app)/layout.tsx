@@ -16,7 +16,7 @@ import {
 import { useTheme } from "next-themes";
 import { useCurrency } from "@/components/providers/currency-provider";
 import { cn } from "@/lib/utils";
-import { CURRENCY_SYMBOLS } from "@/lib/utils/types";
+import { getCurrencySymbol } from "@/lib/utils/types";
 
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -41,14 +41,17 @@ function ThemeToggle() {
 }
 
 function CurrencyToggle() {
-  const { currency, cycleCurrency, rates, ratesFetchedAt, ratesLoaded } = useCurrency();
+  const { currency, cycleCurrency, enabledCurrencies, rates, ratesFetchedAt, ratesLoaded } = useCurrency();
 
+  // Build FX pairs from enabled currencies vs USD
   const fxPairs = rates
-    ? [
-        { label: "AUD/USD", value: (1 / (rates["AUD"] ?? 1)).toFixed(4) },
-        { label: "USD/THB", value: (rates["THB"] ?? 1).toFixed(2) },
-        { label: "AUD/THB", value: ((rates["THB"] ?? 1) / (rates["AUD"] ?? 1)).toFixed(2) },
-      ]
+    ? enabledCurrencies
+        .filter((c) => c !== "USD")
+        .slice(0, 5)
+        .map((c) => ({
+          label: `${c}/USD`,
+          value: (1 / (rates[c] ?? 1)).toFixed(4),
+        }))
     : [];
 
   const lastUpdated = ratesFetchedAt
@@ -68,7 +71,7 @@ function CurrencyToggle() {
         className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-secondary text-secondary-foreground text-sm font-mono font-medium transition-colors hover:bg-secondary/80 cursor-pointer"
       >
         <span className="text-xs opacity-60">FX</span>
-        <span>{CURRENCY_SYMBOLS[currency]}</span>
+        <span>{getCurrencySymbol(currency)}</span>
         <span className="text-xs">{currency}</span>
         {ratesLoaded && (
           <span className="h-1.5 w-1.5 rounded-full bg-income" />

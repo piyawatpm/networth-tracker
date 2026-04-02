@@ -40,7 +40,8 @@ export const HOLDING_TYPE_LABELS: Record<HoldingType, string> = {
   other: "Other",
 };
 
-export const CURRENCIES: Currency[] = ["AUD", "USD", "THB"];
+// This is now just the fallback. Actual list comes from localStorage "enabled_currencies"
+export const CURRENCIES: string[] = ["AUD", "USD", "THB"];
 
 export const STABLECOINS = new Set([
   "USDC",

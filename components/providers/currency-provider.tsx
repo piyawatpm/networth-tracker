@@ -8,34 +8,54 @@ import {
   useCallback,
   type ReactNode,
 } from "react";
-import type { Currency, CachedRates } from "@/lib/utils/types";
-import { CURRENCY_SYMBOLS } from "@/lib/utils/types";
+import type { CachedRates } from "@/lib/utils/types";
+import { getCurrencySymbol, DEFAULT_CURRENCIES } from "@/lib/utils/types";
 import { fetchFxRates, convertCurrency, formatCurrency } from "@/lib/utils/fx";
-import { CURRENCIES } from "@/lib/utils/constants";
+
+const ENABLED_KEY = "enabled_currencies";
+
+function getEnabledCurrencies(): string[] {
+  try {
+    const saved = localStorage.getItem(ENABLED_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {
+    // ignore
+  }
+  return DEFAULT_CURRENCIES;
+}
 
 interface CurrencyContextValue {
-  currency: Currency;
-  setCurrency: (c: Currency) => void;
+  currency: string;
+  setCurrency: (c: string) => void;
   cycleCurrency: () => void;
+  enabledCurrencies: string[];
+  setEnabledCurrencies: (currencies: string[]) => void;
   rates: Record<string, number> | null;
   ratesLoaded: boolean;
   ratesFetchedAt: number | null;
-  convert: (amount: number, from: Currency, to?: Currency) => number;
-  format: (amount: number, from?: Currency, compact?: boolean) => string;
+  convert: (amount: number, from: string, to?: string) => number;
+  format: (amount: number, from?: string, compact?: boolean) => string;
   symbol: string;
 }
 
 const CurrencyContext = createContext<CurrencyContextValue | null>(null);
 
 export function CurrencyProvider({ children }: { children: ReactNode }) {
-  const [currency, setCurrencyState] = useState<Currency>("AUD");
+  const [currency, setCurrencyState] = useState<string>("AUD");
+  const [enabledCurrencies, setEnabledState] = useState<string[]>(DEFAULT_CURRENCIES);
   const [cachedRates, setCachedRates] = useState<CachedRates | null>(null);
+
   // Hydrate from localStorage
   useEffect(() => {
     try {
       const saved = localStorage.getItem("preferred_currency");
-      if (saved && CURRENCIES.includes(saved as Currency)) {
-        setCurrencyState(saved as Currency);
+      const enabled = getEnabledCurrencies();
+      setEnabledState(enabled);
+      if (saved && enabled.includes(saved)) {
+        setCurrencyState(saved);
       }
     } catch {
       // Ignore
@@ -49,7 +69,7 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const setCurrency = useCallback((c: Currency) => {
+  const setCurrency = useCallback((c: string) => {
     setCurrencyState(c);
     try {
       localStorage.setItem("preferred_currency", c);
@@ -58,21 +78,34 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const cycleCurrency = useCallback(() => {
-    setCurrency(
-      currency === "AUD" ? "USD" : currency === "USD" ? "THB" : "AUD"
-    );
+  const setEnabledCurrencies = useCallback((currencies: string[]) => {
+    setEnabledState(currencies);
+    try {
+      localStorage.setItem(ENABLED_KEY, JSON.stringify(currencies));
+    } catch {
+      // Ignore
+    }
+    // If current currency is no longer enabled, switch to first enabled
+    if (!currencies.includes(currency)) {
+      setCurrency(currencies[0] ?? "USD");
+    }
   }, [currency, setCurrency]);
 
+  const cycleCurrency = useCallback(() => {
+    const idx = enabledCurrencies.indexOf(currency);
+    const next = enabledCurrencies[(idx + 1) % enabledCurrencies.length];
+    setCurrency(next);
+  }, [currency, enabledCurrencies, setCurrency]);
+
   const convert = useCallback(
-    (amount: number, from: Currency, to?: Currency) => {
+    (amount: number, from: string, to?: string) => {
       return convertCurrency(amount, from, to ?? currency, cachedRates?.rates ?? null);
     },
     [currency, cachedRates]
   );
 
   const format = useCallback(
-    (amount: number, from?: Currency, compact?: boolean) => {
+    (amount: number, from?: string, compact?: boolean) => {
       const converted = from ? convert(amount, from) : amount;
       return formatCurrency(converted, currency, compact);
     },
@@ -85,12 +118,14 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
         currency,
         setCurrency,
         cycleCurrency,
+        enabledCurrencies,
+        setEnabledCurrencies,
         rates: cachedRates?.rates ?? null,
         ratesLoaded: cachedRates !== null,
         ratesFetchedAt: cachedRates?.fetchedAt ?? null,
         convert,
         format,
-        symbol: CURRENCY_SYMBOLS[currency],
+        symbol: getCurrencySymbol(currency),
       }}
     >
       {children}
