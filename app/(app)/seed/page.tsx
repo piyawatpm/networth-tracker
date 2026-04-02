@@ -24,38 +24,38 @@ function generateSampleData() {
   // ---- INCOME (4 months: Jan-Apr 2026) ------------------------------------
   const incomeEntries: IncomeEntry[] = [
     // January
-    { id: id(), type: "salary", description: "Fortnightly salary", amount: 4500, currency: "AUD", date: "2026-01-09", notes: "", createdAt: now },
-    { id: id(), type: "salary", description: "Fortnightly salary", amount: 4500, currency: "AUD", date: "2026-01-23", notes: "", createdAt: now },
-    { id: id(), type: "super_employer", description: "Employer super contribution", amount: 540, currency: "AUD", date: "2026-01-23", notes: "12% of salary", createdAt: now },
-    { id: id(), type: "uber", description: "Uber driving income", amount: 380, currency: "AUD", date: "2026-01-31", notes: "Weekend driving", createdAt: now },
-    { id: id(), type: "arena_bot", description: "Arena trading bot profit", amount: 145, currency: "USD", date: "2026-01-28", notes: "", createdAt: now },
-    { id: id(), type: "arb_bot", description: "Arb bot profit", amount: 67, currency: "USD", date: "2026-01-30", notes: "", createdAt: now },
+    { id: id(), type: "salary", description: "Fortnightly salary", amount: 4500, currency: "AUD", date: "2026-01-09", notes: "", source: "", createdAt: now },
+    { id: id(), type: "salary", description: "Fortnightly salary", amount: 4500, currency: "AUD", date: "2026-01-23", notes: "", source: "", createdAt: now },
+    { id: id(), type: "super_employer", description: "Employer super contribution", amount: 540, currency: "AUD", date: "2026-01-23", notes: "12% of salary", source: "", createdAt: now },
+    { id: id(), type: "uber", description: "Uber driving income", amount: 380, currency: "AUD", date: "2026-01-31", notes: "Weekend driving", source: "", createdAt: now },
+    { id: id(), type: "arena_bot", description: "Arena trading bot profit", amount: 145, currency: "USD", date: "2026-01-28", notes: "", source: "", createdAt: now },
+    { id: id(), type: "arb_bot", description: "Arb bot profit", amount: 67, currency: "USD", date: "2026-01-30", notes: "", source: "", createdAt: now },
 
     // February
-    { id: id(), type: "salary", description: "Fortnightly salary", amount: 4500, currency: "AUD", date: "2026-02-06", notes: "", createdAt: now },
-    { id: id(), type: "salary", description: "Fortnightly salary", amount: 4500, currency: "AUD", date: "2026-02-20", notes: "", createdAt: now },
-    { id: id(), type: "super_employer", description: "Employer super contribution", amount: 540, currency: "AUD", date: "2026-02-20", notes: "", createdAt: now },
-    { id: id(), type: "uber", description: "Uber driving income", amount: 520, currency: "AUD", date: "2026-02-28", notes: "Busy month", createdAt: now },
-    { id: id(), type: "arena_bot", description: "Arena trading bot profit", amount: 210, currency: "USD", date: "2026-02-25", notes: "", createdAt: now },
-    { id: id(), type: "freelance", description: "Website for friend's cafe", amount: 800, currency: "AUD", date: "2026-02-15", notes: "One-time project", createdAt: now },
-    { id: id(), type: "crypto_yield", description: "syrupUSDC yield", amount: 42, currency: "USD", date: "2026-02-28", notes: "", createdAt: now },
+    { id: id(), type: "salary", description: "Fortnightly salary", amount: 4500, currency: "AUD", date: "2026-02-06", notes: "", source: "", createdAt: now },
+    { id: id(), type: "salary", description: "Fortnightly salary", amount: 4500, currency: "AUD", date: "2026-02-20", notes: "", source: "", createdAt: now },
+    { id: id(), type: "super_employer", description: "Employer super contribution", amount: 540, currency: "AUD", date: "2026-02-20", notes: "", source: "", createdAt: now },
+    { id: id(), type: "uber", description: "Uber driving income", amount: 520, currency: "AUD", date: "2026-02-28", notes: "Busy month", source: "", createdAt: now },
+    { id: id(), type: "arena_bot", description: "Arena trading bot profit", amount: 210, currency: "USD", date: "2026-02-25", notes: "", source: "", createdAt: now },
+    { id: id(), type: "freelance", description: "Website for friend's cafe", amount: 800, currency: "AUD", date: "2026-02-15", notes: "One-time project", source: "", createdAt: now },
+    { id: id(), type: "crypto_yield", description: "syrupUSDC yield", amount: 42, currency: "USD", date: "2026-02-28", notes: "", source: "", createdAt: now },
 
     // March
-    { id: id(), type: "salary", description: "Fortnightly salary", amount: 4500, currency: "AUD", date: "2026-03-06", notes: "", createdAt: now },
-    { id: id(), type: "salary", description: "Fortnightly salary", amount: 4500, currency: "AUD", date: "2026-03-20", notes: "", createdAt: now },
-    { id: id(), type: "super_employer", description: "Employer super contribution", amount: 540, currency: "AUD", date: "2026-03-20", notes: "", createdAt: now },
-    { id: id(), type: "super_personal", description: "Personal super contribution", amount: 200, currency: "AUD", date: "2026-03-20", notes: "Voluntary", createdAt: now },
-    { id: id(), type: "uber", description: "Uber driving income", amount: 290, currency: "AUD", date: "2026-03-31", notes: "", createdAt: now },
-    { id: id(), type: "arena_bot", description: "Arena trading bot profit", amount: 178, currency: "USD", date: "2026-03-28", notes: "", createdAt: now },
-    { id: id(), type: "arb_bot", description: "Arb bot profit", amount: 89, currency: "USD", date: "2026-03-30", notes: "", createdAt: now },
-    { id: id(), type: "dividend", description: "VAS dividend", amount: 125, currency: "AUD", date: "2026-03-15", notes: "Quarterly", createdAt: now },
-    { id: id(), type: "interest", description: "HISA interest", amount: 48, currency: "AUD", date: "2026-03-31", notes: "ING savings", createdAt: now },
+    { id: id(), type: "salary", description: "Fortnightly salary", amount: 4500, currency: "AUD", date: "2026-03-06", notes: "", source: "", createdAt: now },
+    { id: id(), type: "salary", description: "Fortnightly salary", amount: 4500, currency: "AUD", date: "2026-03-20", notes: "", source: "", createdAt: now },
+    { id: id(), type: "super_employer", description: "Employer super contribution", amount: 540, currency: "AUD", date: "2026-03-20", notes: "", source: "", createdAt: now },
+    { id: id(), type: "super_personal", description: "Personal super contribution", amount: 200, currency: "AUD", date: "2026-03-20", notes: "Voluntary", source: "", createdAt: now },
+    { id: id(), type: "uber", description: "Uber driving income", amount: 290, currency: "AUD", date: "2026-03-31", notes: "", source: "", createdAt: now },
+    { id: id(), type: "arena_bot", description: "Arena trading bot profit", amount: 178, currency: "USD", date: "2026-03-28", notes: "", source: "", createdAt: now },
+    { id: id(), type: "arb_bot", description: "Arb bot profit", amount: 89, currency: "USD", date: "2026-03-30", notes: "", source: "", createdAt: now },
+    { id: id(), type: "dividend", description: "VAS dividend", amount: 125, currency: "AUD", date: "2026-03-15", notes: "Quarterly", source: "", createdAt: now },
+    { id: id(), type: "interest", description: "HISA interest", amount: 48, currency: "AUD", date: "2026-03-31", notes: "ING savings", source: "", createdAt: now },
 
     // April
-    { id: id(), type: "salary", description: "Fortnightly salary", amount: 4500, currency: "AUD", date: "2026-04-01", notes: "", createdAt: now },
-    { id: id(), type: "super_employer", description: "Employer super contribution", amount: 540, currency: "AUD", date: "2026-04-01", notes: "", createdAt: now },
-    { id: id(), type: "uber", description: "Uber driving - Easter weekend", amount: 650, currency: "AUD", date: "2026-04-01", notes: "Surge pricing", createdAt: now },
-    { id: id(), type: "arena_bot", description: "Arena trading bot profit", amount: 92, currency: "USD", date: "2026-04-01", notes: "", createdAt: now },
+    { id: id(), type: "salary", description: "Fortnightly salary", amount: 4500, currency: "AUD", date: "2026-04-01", notes: "", source: "", createdAt: now },
+    { id: id(), type: "super_employer", description: "Employer super contribution", amount: 540, currency: "AUD", date: "2026-04-01", notes: "", source: "", createdAt: now },
+    { id: id(), type: "uber", description: "Uber driving - Easter weekend", amount: 650, currency: "AUD", date: "2026-04-01", notes: "Surge pricing", source: "", createdAt: now },
+    { id: id(), type: "arena_bot", description: "Arena trading bot profit", amount: 92, currency: "USD", date: "2026-04-01", notes: "", source: "", createdAt: now },
   ];
 
   // ---- EXPENSES (4 months) ------------------------------------------------

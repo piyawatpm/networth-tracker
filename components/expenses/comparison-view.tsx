@@ -1,41 +1,41 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import ReactECharts from "echarts-for-react";
 import { useTheme } from "next-themes";
 import { useCurrency } from "@/components/providers/currency-provider";
 import type { ExpenseEntry } from "@/lib/utils/types";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   getMonthKey,
   getMonthKeysFromEntries,
   monthKeyToFullLabel,
 } from "@/lib/utils/timezone";
 import { getCartesianBaseOption, formatAxisValue } from "@/lib/utils/echarts";
+import { cn } from "@/lib/utils";
 import { ArrowUpRight, ArrowDownRight, Minus } from "lucide-react";
+
+// Distinct series colors that work in both themes
+const SERIES_COLORS = [
+  { light: "#c95f3f", dark: "#e09770" },
+  { light: "#4d7cc7", dark: "#4da8b8" },
+  { light: "#2e8b57", dark: "#5ec48e" },
+  { light: "#d4a033", dark: "#e8bd60" },
+  { light: "#9e5e8e", dark: "#c48eb8" },
+  { light: "#708090", dark: "#98a8b8" },
+];
 
 interface ComparisonViewProps {
   entries: ExpenseEntry[];
-  monthA: string;
-  monthB: string;
-  onMonthAChange: (v: string) => void;
-  onMonthBChange: (v: string) => void;
+  initialMonths: string[];
   getLabel: (type: string) => string;
   getColor: (type: string) => string;
 }
 
+type ChartMode = "bar" | "radar";
+
 export function ComparisonView({
   entries,
-  monthA,
-  monthB,
-  onMonthAChange,
-  onMonthBChange,
+  initialMonths,
   getLabel,
   getColor,
 }: ComparisonViewProps) {
@@ -43,45 +43,63 @@ export function ComparisonView({
   const isDark = resolvedTheme === "dark";
   const { convert, format: formatCur } = useCurrency();
 
-  const monthKeys = useMemo(() => getMonthKeysFromEntries(entries), [entries]);
+  const availableMonths = useMemo(() => getMonthKeysFromEntries(entries), [entries]);
+  const [selectedMonths, setSelectedMonths] = useState<string[]>(initialMonths);
+  const [chartMode, setChartMode] = useState<ChartMode>("bar");
 
-  const { totalA, totalB, categoryData } = useMemo(() => {
-    const entriesA = entries.filter((e) => getMonthKey(e.date) === monthA);
-    const entriesB = entries.filter((e) => getMonthKey(e.date) === monthB);
+  function toggleMonth(mk: string) {
+    setSelectedMonths((prev) => {
+      if (prev.includes(mk)) {
+        if (prev.length <= 1) return prev; // keep at least 1
+        return prev.filter((m) => m !== mk);
+      }
+      if (prev.length >= 6) return prev; // max 6
+      return [...prev, mk].sort((a, b) => a.localeCompare(b));
+    });
+  }
 
-    const tA = entriesA.reduce((s, e) => s + convert(e.amount, e.currency), 0);
-    const tB = entriesB.reduce((s, e) => s + convert(e.amount, e.currency), 0);
+  // Per-month totals + per-category breakdown
+  const { monthTotals, categories, categoryMonthData } = useMemo(() => {
+    const totals: Record<string, number> = {};
+    const catMap: Record<string, Record<string, number>> = {};
 
-    const catMap: Record<string, { a: number; b: number }> = {};
-    for (const e of entriesA) {
-      catMap[e.type] = catMap[e.type] ?? { a: 0, b: 0 };
-      catMap[e.type].a += convert(e.amount, e.currency);
+    for (const mk of selectedMonths) {
+      totals[mk] = 0;
+      const monthEntries = entries.filter((e) => getMonthKey(e.date) === mk);
+      for (const e of monthEntries) {
+        const v = convert(e.amount, e.currency);
+        totals[mk] += v;
+        catMap[e.type] = catMap[e.type] ?? {};
+        catMap[e.type][mk] = (catMap[e.type][mk] ?? 0) + v;
+      }
     }
-    for (const e of entriesB) {
-      catMap[e.type] = catMap[e.type] ?? { a: 0, b: 0 };
-      catMap[e.type].b += convert(e.amount, e.currency);
-    }
 
-    const data = Object.entries(catMap)
-      .map(([type, { a, b }]) => ({ type, a, b }))
-      .sort((x, y) => Math.max(y.a, y.b) - Math.max(x.a, x.b))
-      .slice(0, 8);
+    // Sort categories by max value across all months
+    const cats = Object.keys(catMap)
+      .map((type) => ({
+        type,
+        maxVal: Math.max(...selectedMonths.map((mk) => catMap[type][mk] ?? 0)),
+      }))
+      .sort((a, b) => b.maxVal - a.maxVal)
+      .slice(0, 10)
+      .map((c) => c.type);
 
-    return { totalA: tA, totalB: tB, categoryData: data };
-  }, [entries, monthA, monthB, convert]);
+    return { monthTotals: totals, categories: cats, categoryMonthData: catMap };
+  }, [entries, selectedMonths, convert]);
 
-  const chartOption = useMemo(() => {
+  // Bar chart option
+  const barOption = useMemo(() => {
     const base = getCartesianBaseOption(isDark);
-    const categories = categoryData.map((d) => getLabel(d.type));
+    const catLabels = categories.map((t) => getLabel(t));
 
     return {
       ...base,
-      grid: { ...base.grid, left: 80, bottom: 32 },
+      grid: { ...base.grid, left: 80, bottom: 40 },
       xAxis: {
         ...base.xAxis,
         type: "category" as const,
-        data: categories,
-        axisLabel: { ...base.xAxis.axisLabel, rotate: 30 },
+        data: catLabels,
+        axisLabel: { ...base.xAxis.axisLabel, rotate: categories.length > 5 ? 30 : 0 },
       },
       yAxis: {
         ...base.yAxis,
@@ -93,98 +111,218 @@ export function ComparisonView({
         bottom: 0,
         textStyle: { color: isDark ? "#888" : "#968360", fontSize: 10 },
       },
+      tooltip: {
+        ...base.tooltip,
+        trigger: "axis" as const,
+      },
+      series: selectedMonths.map((mk, i) => ({
+        name: monthKeyToFullLabel(mk),
+        type: "bar" as const,
+        data: categories.map((t) => Math.round((categoryMonthData[t]?.[mk] ?? 0) * 100) / 100),
+        barGap: "10%",
+        itemStyle: {
+          color: SERIES_COLORS[i % SERIES_COLORS.length][isDark ? "dark" : "light"],
+          borderRadius: [3, 3, 0, 0],
+        },
+      })),
+    };
+  }, [categories, categoryMonthData, selectedMonths, isDark, getLabel]);
+
+  // Radar chart option
+  const radarOption = useMemo(() => {
+    const c = isDark
+      ? { text: "#888", border: "#454545", fg: "#f6f6f6", tooltipBg: "#2a2a2a" }
+      : { text: "#968360", border: "#c9c3a8", fg: "#2c251e", tooltipBg: "#f4f3ed" };
+
+    // Find max value per category for radar scale
+    const maxVals = categories.map((t) =>
+      Math.max(...selectedMonths.map((mk) => categoryMonthData[t]?.[mk] ?? 0), 1),
+    );
+
+    const indicator = categories.map((t, i) => ({
+      name: getLabel(t),
+      max: maxVals[i] * 1.2,
+    }));
+
+    return {
+      backgroundColor: "transparent",
+      tooltip: {
+        backgroundColor: c.tooltipBg,
+        borderColor: c.border,
+        borderWidth: 1,
+        textStyle: { color: c.fg, fontSize: 12 },
+        padding: [8, 12],
+        extraCssText: "border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);",
+      },
+      legend: {
+        show: true,
+        bottom: 0,
+        textStyle: { color: c.text, fontSize: 10 },
+      },
+      radar: {
+        indicator,
+        shape: "polygon" as const,
+        splitNumber: 4,
+        axisName: { color: c.text, fontSize: 10 },
+        splitLine: { lineStyle: { color: c.border, opacity: 0.5 } },
+        splitArea: { show: false },
+        axisLine: { lineStyle: { color: c.border, opacity: 0.3 } },
+      },
       series: [
         {
-          name: monthKeyToFullLabel(monthA),
-          type: "bar" as const,
-          data: categoryData.map((d) => d.a),
-          barGap: "10%",
-          itemStyle: { color: isDark ? "#e09770" : "#c95f3f", borderRadius: [3, 3, 0, 0] },
-        },
-        {
-          name: monthKeyToFullLabel(monthB),
-          type: "bar" as const,
-          data: categoryData.map((d) => d.b),
-          itemStyle: { color: isDark ? "#4da8b8" : "#4d7cc7", borderRadius: [3, 3, 0, 0] },
+          type: "radar" as const,
+          data: selectedMonths.map((mk, i) => ({
+            name: monthKeyToFullLabel(mk),
+            value: categories.map((t) => Math.round((categoryMonthData[t]?.[mk] ?? 0) * 100) / 100),
+            lineStyle: {
+              width: 2,
+              color: SERIES_COLORS[i % SERIES_COLORS.length][isDark ? "dark" : "light"],
+            },
+            itemStyle: {
+              color: SERIES_COLORS[i % SERIES_COLORS.length][isDark ? "dark" : "light"],
+            },
+            areaStyle: {
+              color: SERIES_COLORS[i % SERIES_COLORS.length][isDark ? "dark" : "light"],
+              opacity: 0.1,
+            },
+          })),
         },
       ],
     };
-  }, [categoryData, monthA, monthB, isDark]);
+  }, [categories, categoryMonthData, selectedMonths, isDark, getLabel]);
 
-  const pctChange = totalA > 0 ? ((totalB - totalA) / totalA) * 100 : 0;
+  // First month is "baseline" for delta calculations
+  const baseMonth = selectedMonths[0];
+  const baseTotal = monthTotals[baseMonth] ?? 0;
 
   return (
     <div className="space-y-4">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <p className="label-mono">Compare Months</p>
-        <div className="flex items-center gap-2">
-          <Select value={monthA} onValueChange={(v: string | null) => v && onMonthAChange(v)}>
-            <SelectTrigger className="w-[120px]" size="sm"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {monthKeys.map((mk) => (
-                <SelectItem key={mk} value={mk}>{monthKeyToFullLabel(mk)}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <span className="text-xs text-muted-foreground">vs</span>
-          <Select value={monthB} onValueChange={(v: string | null) => v && onMonthBChange(v)}>
-            <SelectTrigger className="w-[120px]" size="sm"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {monthKeys.map((mk) => (
-                <SelectItem key={mk} value={mk}>{monthKeyToFullLabel(mk)}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        <div className="flex gap-1">
+          {(["bar", "radar"] as ChartMode[]).map((mode) => (
+            <button
+              key={mode}
+              onClick={() => setChartMode(mode)}
+              className={cn(
+                "rounded-full px-3 py-1 text-xs font-medium transition-colors capitalize",
+                chartMode === mode
+                  ? "bg-foreground text-background"
+                  : "bg-secondary text-secondary-foreground hover:bg-secondary/80",
+              )}
+            >
+              {mode}
+            </button>
+          ))}
         </div>
+      </div>
+
+      {/* Month selector chips */}
+      <div className="flex flex-wrap gap-1.5">
+        {availableMonths.map((mk) => {
+          const isSelected = selectedMonths.includes(mk);
+          return (
+            <button
+              key={mk}
+              onClick={() => toggleMonth(mk)}
+              className={cn(
+                "rounded-full px-3 py-1 text-xs font-medium transition-colors",
+                isSelected
+                  ? "bg-foreground text-background"
+                  : "bg-secondary text-secondary-foreground hover:bg-secondary/80",
+              )}
+            >
+              {monthKeyToFullLabel(mk)}
+            </button>
+          );
+        })}
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 gap-3">
-        <div className="finance-card p-3 text-center">
-          <p className="label-mono mb-1">{monthKeyToFullLabel(monthA)}</p>
-          <p className="text-lg font-semibold tabular-nums">{formatCur(totalA)}</p>
-        </div>
-        <div className="finance-card p-3 text-center">
-          <p className="label-mono mb-1">{monthKeyToFullLabel(monthB)}</p>
-          <p className="text-lg font-semibold tabular-nums">{formatCur(totalB)}</p>
-          {totalA > 0 && (
-            <span className={`inline-flex items-center gap-0.5 text-xs mt-1 ${pctChange > 0 ? "text-expense" : pctChange < 0 ? "text-income" : "text-muted-foreground"}`}>
-              {pctChange > 0 ? <ArrowUpRight className="h-3 w-3" /> : pctChange < 0 ? <ArrowDownRight className="h-3 w-3" /> : <Minus className="h-3 w-3" />}
-              {Math.abs(pctChange).toFixed(1)}%
-            </span>
-          )}
-        </div>
+      <div className={cn("grid gap-2", selectedMonths.length <= 3 ? `grid-cols-${selectedMonths.length}` : "grid-cols-2 sm:grid-cols-3")}>
+        {selectedMonths.map((mk, i) => {
+          const total = monthTotals[mk] ?? 0;
+          const pct = i > 0 && baseTotal > 0 ? ((total - baseTotal) / baseTotal) * 100 : null;
+          return (
+            <div key={mk} className="finance-card p-3 text-center">
+              <p className="label-mono mb-1">{monthKeyToFullLabel(mk)}</p>
+              <p className="text-lg font-semibold tabular-nums">{formatCur(total)}</p>
+              {pct !== null && (
+                <span className={cn(
+                  "inline-flex items-center gap-0.5 text-xs mt-1",
+                  pct > 0 ? "text-expense" : pct < 0 ? "text-income" : "text-muted-foreground",
+                )}>
+                  {pct > 0 ? <ArrowUpRight className="h-3 w-3" /> : pct < 0 ? <ArrowDownRight className="h-3 w-3" /> : <Minus className="h-3 w-3" />}
+                  {Math.abs(pct).toFixed(1)}%
+                </span>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       {/* Chart */}
-      {categoryData.length > 0 && (
-        <ReactECharts option={chartOption} style={{ height: "280px" }} />
+      {categories.length > 0 && (
+        <ReactECharts
+          key={`${chartMode}-${selectedMonths.join(",")}`}
+          option={chartMode === "bar" ? barOption : radarOption}
+          style={{ height: chartMode === "radar" ? "340px" : "280px" }}
+        />
       )}
 
-      {/* Per-category deltas */}
-      {categoryData.length > 0 && (
-        <div className="space-y-1.5">
-          {categoryData.map((d) => {
-            const delta = d.a > 0 ? ((d.b - d.a) / d.a) * 100 : 0;
-            return (
-              <div key={d.type} className="flex items-center justify-between text-xs">
-                <div className="flex items-center gap-2">
-                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: getColor(d.type) }} />
-                  <span>{getLabel(d.type)}</span>
-                </div>
-                <div className="flex items-center gap-3 tabular-nums">
-                  <span className="text-muted-foreground">{formatCur(d.a)}</span>
-                  <span>→</span>
-                  <span>{formatCur(d.b)}</span>
-                  {d.a > 0 && (
-                    <span className={delta > 0 ? "text-expense" : delta < 0 ? "text-income" : "text-muted-foreground"}>
-                      {delta > 0 ? "↑" : delta < 0 ? "↓" : "—"} {Math.abs(delta).toFixed(1)}%
-                    </span>
-                  )}
-                </div>
-              </div>
-            );
-          })}
+      {/* Per-category delta table (vs first selected month) */}
+      {categories.length > 0 && selectedMonths.length >= 2 && (
+        <div className="space-y-1">
+          <p className="label-mono mb-2">
+            Category Changes vs {monthKeyToFullLabel(baseMonth)}
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border/50">
+                  <th className="text-left py-1.5 font-medium text-muted-foreground">Category</th>
+                  {selectedMonths.map((mk) => (
+                    <th key={mk} className="text-right py-1.5 font-medium text-muted-foreground px-2">
+                      {monthKeyToFullLabel(mk)}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {categories.map((t) => {
+                  const baseVal = categoryMonthData[t]?.[baseMonth] ?? 0;
+                  return (
+                    <tr key={t} className="border-b border-border/30 last:border-0">
+                      <td className="py-1.5">
+                        <span className="inline-flex items-center gap-1.5">
+                          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: getColor(t) }} />
+                          {getLabel(t)}
+                        </span>
+                      </td>
+                      {selectedMonths.map((mk, i) => {
+                        const val = categoryMonthData[t]?.[mk] ?? 0;
+                        const delta = i > 0 && baseVal > 0 ? ((val - baseVal) / baseVal) * 100 : null;
+                        return (
+                          <td key={mk} className="text-right py-1.5 tabular-nums px-2">
+                            <span>{formatCur(val)}</span>
+                            {delta !== null && (
+                              <span className={cn(
+                                "ml-1.5",
+                                delta > 0 ? "text-expense" : delta < 0 ? "text-income" : "text-muted-foreground",
+                              )}>
+                                {delta > 0 ? "↑" : delta < 0 ? "↓" : "—"}{Math.abs(delta).toFixed(0)}%
+                              </span>
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>

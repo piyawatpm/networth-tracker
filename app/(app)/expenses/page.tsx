@@ -144,8 +144,6 @@ export default function ExpensesPage() {
   // Comparison tab
   const currentMonth = getCurrentMonthKey();
   const lastMonth = getLastMonthKey();
-  const [compMonthA, setCompMonthA] = useState(lastMonth);
-  const [compMonthB, setCompMonthB] = useState(currentMonth);
 
   // Delete confirmation
   const [deleteTarget, setDeleteTarget] = useState<ExpenseEntry | null>(null);
@@ -737,10 +735,7 @@ export default function ExpensesPage() {
             <div className="finance-card p-6">
               <ComparisonView
                 entries={entries}
-                monthA={compMonthA}
-                monthB={compMonthB}
-                onMonthAChange={setCompMonthA}
-                onMonthBChange={setCompMonthB}
+                initialMonths={[lastMonth, currentMonth]}
                 getLabel={getLabel}
                 getColor={getColor}
               />
