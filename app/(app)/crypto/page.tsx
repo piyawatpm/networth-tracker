@@ -17,6 +17,45 @@ import { useTheme } from "next-themes";
 import { getEchartsBaseOption, ECHARTS_COLORS } from "@/lib/utils/echarts";
 import { Upload, FileText, X, Bitcoin } from "lucide-react";
 
+function CryptoDonut({ chartData, isDark, format }: {
+  chartData: { token: string; value: number; fill: string }[];
+  isDark: boolean;
+  format: (amount: number, from?: "AUD" | "USD" | "THB", compact?: boolean) => string;
+}) {
+  const option = useMemo(() => {
+    const base = getEchartsBaseOption(isDark);
+    return {
+      ...base,
+      series: [{
+        type: "pie",
+        radius: ["46%", "76%"],
+        center: ["50%", "50%"],
+        data: chartData.map((d) => ({
+          name: d.token,
+          value: d.value,
+          itemStyle: { color: d.fill },
+        })),
+        label: { show: false },
+        emphasis: { scale: true, scaleSize: 6 },
+        itemStyle: {
+          borderColor: isDark ? "#1a1a1a" : "#f4f3ed",
+          borderWidth: 2,
+          borderRadius: 4,
+        },
+        padAngle: 2,
+      }],
+      tooltip: {
+        ...base.tooltip,
+        trigger: "item" as const,
+        formatter: (params: { name: string; value: number; percent: number }) =>
+          `<span style="font-weight:600">${params.name}</span><br/>${format(params.value, "USD")} (${params.percent}%)`,
+      },
+    };
+  }, [chartData, isDark, format]);
+
+  return <ReactECharts option={option} style={{ height: 260, width: "100%" }} notMerge />;
+}
+
 export default function CryptoPage() {
   const [csvText, setCsvText] = useLocalStorage<string>("crypto_csv_text", "");
   const { format, convert, symbol } = useCurrency();
@@ -240,41 +279,7 @@ export default function CryptoPage() {
           <div className="finance-card p-6">
             <p className="label-mono mb-4">ALLOCATION</p>
             {chartData.length > 0 && (
-              <ReactECharts
-                option={{
-                  ...getEchartsBaseOption(isDark),
-                  series: [
-                    {
-                      type: "pie",
-                      radius: ["46%", "76%"],
-                      center: ["50%", "50%"],
-                      data: chartData.map((d) => ({
-                        name: d.token,
-                        value: d.value,
-                        itemStyle: { color: d.fill },
-                      })),
-                      label: { show: false },
-                      emphasis: {
-                        scale: true,
-                        scaleSize: 6,
-                      },
-                      itemStyle: {
-                        borderColor: isDark ? "#1a1a1a" : "#f4f3ed",
-                        borderWidth: 2,
-                        borderRadius: 4,
-                      },
-                    },
-                  ],
-                  tooltip: {
-                    ...getEchartsBaseOption(isDark).tooltip,
-                    trigger: "item",
-                    formatter: (params: { name: string; value: number; percent: number }) =>
-                      `<span style="font-weight:600">${params.name}</span><br/>${format(params.value, "USD")} (${params.percent}%)`,
-                  },
-                }}
-                style={{ height: 260, width: "100%" }}
-                notMerge
-              />
+              <CryptoDonut chartData={chartData} isDark={isDark} format={format} />
             )}
             {/* Legend */}
             <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1.5">

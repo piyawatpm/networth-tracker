@@ -152,6 +152,29 @@ export default function IncomePage() {
       .sort((a, b) => b.value - a.value);
   }, [thisMonthEntries, convert]);
 
+  const isDark = theme === "dark";
+  const pieOption = useMemo(() => {
+    const base = getEchartsBaseOption(isDark);
+    return {
+      ...base,
+      series: [{
+        type: "pie",
+        radius: ["55%", "85%"],
+        center: ["50%", "50%"],
+        data: breakdownByType.map((d) => ({
+          name: d.label,
+          value: d.value,
+          itemStyle: { color: d.color },
+        })),
+        label: { show: false },
+        emphasis: { scale: true, scaleSize: 5 },
+        padAngle: 2,
+        itemStyle: { borderWidth: 0 },
+      }],
+      tooltip: { ...base.tooltip, trigger: "item" as const },
+    };
+  }, [breakdownByType, isDark]);
+
   // ---- Filter pills --------------------------------------------------------
 
   const typesPresent = useMemo(() => {
@@ -251,26 +274,9 @@ export default function IncomePage() {
             <div className="grid md:grid-cols-[280px_1fr] gap-8 items-center">
               {/* Donut */}
               <ReactECharts
-                option={{
-                  ...getEchartsBaseOption(theme === "dark"),
-                  series: [{
-                    type: "pie",
-                    radius: ["55%", "85%"],
-                    center: ["50%", "50%"],
-                    data: breakdownByType.map((d, i) => ({
-                      name: d.label,
-                      value: d.value,
-                      itemStyle: { color: d.color },
-                    })),
-                    label: { show: false },
-                    emphasis: { scale: true, scaleSize: 5 },
-                  }],
-                  tooltip: {
-                    trigger: "item",
-                    ...getEchartsBaseOption(theme === "dark").tooltip,
-                  },
-                }}
+                option={pieOption}
                 style={{ height: "200px" }}
+                notMerge
               />
 
               {/* Progress bars */}
