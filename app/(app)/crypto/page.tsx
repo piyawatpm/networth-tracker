@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo, useCallback, useRef } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect } from "react";
+import { useTheme } from "next-themes";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 import { useCurrency } from "@/components/providers/currency-provider";
 import {
@@ -9,48 +10,64 @@ import {
   getTotalCryptoCostUsd,
   getCashValueUsd,
 } from "@/lib/utils/crypto-csv";
+import {
+  fetchCryptoPrices,
+  getCachedCryptoPrices,
+  isCryptoPricesCacheStale,
+  applyLivePrices,
+} from "@/lib/utils/crypto-prices";
 import { cn } from "@/lib/utils";
 import { BlurFade } from "@/components/ui/blur-fade";
 import { NumberTicker } from "@/components/ui/number-ticker";
 import ReactECharts from "echarts-for-react";
-import { ECHARTS_COLORS } from "@/lib/utils/echarts";
+import { ECHARTS_COLORS, getPieBaseOption } from "@/lib/utils/echarts";
 import { Upload, FileText, X, Bitcoin } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogClose,
+  DialogDescription,
+} from "@/components/ui/dialog";
 
-function CryptoDonut({ chartData }: {
+function CryptoDonut({
+  chartData,
+  isDark,
+}: {
   chartData: { token: string; value: number; fill: string }[];
+  isDark: boolean;
 }) {
-  const option = {
-    backgroundColor: "transparent",
-    tooltip: {
-      trigger: "item" as const,
-      formatter: "{b}: {d}%",
-      backgroundColor: "#f4f3ed",
-      borderColor: "#c9c3a8",
-      borderWidth: 1,
-      padding: [8, 12],
-      textStyle: { color: "#2c251e", fontSize: 12 },
-      extraCssText: "border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);",
-    },
-    series: [{
-      type: "pie" as const,
-      radius: ["46%", "76%"],
-      center: ["50%", "50%"],
-      padAngle: 2,
-      data: chartData.map((d) => ({
-        name: d.token,
-        value: d.value,
-        itemStyle: { color: d.fill },
-      })),
-      label: { show: false },
-      emphasis: {
-        itemStyle: {
-          shadowBlur: 10,
-          shadowOffsetX: 0,
-          shadowColor: "rgba(0, 0, 0, 0.3)",
+  const base = getPieBaseOption(isDark);
+  const option = useMemo(
+    () => ({
+      ...base,
+      series: [
+        {
+          type: "pie" as const,
+          radius: ["46%", "76%"],
+          center: ["50%", "50%"],
+          padAngle: 2,
+          data: chartData.map((d) => ({
+            name: d.token,
+            value: d.value,
+            itemStyle: { color: d.fill },
+          })),
+          label: { show: false },
+          emphasis: {
+            itemStyle: {
+              shadowBlur: 10,
+              shadowOffsetX: 0,
+              shadowColor: "rgba(0, 0, 0, 0.3)",
+            },
+          },
         },
-      },
-    }],
-  };
+      ],
+    }),
+    [base, chartData],
+  );
 
   return <ReactECharts option={option} style={{ height: 260, width: "100%" }} />;
 }
@@ -63,20 +80,61 @@ export default function CryptoPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const replaceInputRef = useRef<HTMLInputElement>(null);
 
+  const { resolvedTheme } = useTheme();
+  const isDark = resolvedTheme === "dark";
+
+  // Timestamps
+  const [csvUploadedAt, setCsvUploadedAt] = useLocalStorage<number | null>(
+    "crypto_csv_uploaded_at",
+    null,
+  );
+
+  // Clear confirmation dialog
+  const [showClearDialog, setShowClearDialog] = useState(false);
+
+  // Live prices
+  const [livePrices, setLivePrices] = useState<Record<string, number>>({});
+
   const holdings = useMemo(
     () => (csvText ? parseAndComputeHoldings(csvText) : []),
-    [csvText]
+    [csvText],
+  );
+
+  // Fetch live prices on mount (if stale) and after CSV upload
+  useEffect(() => {
+    if (holdings.length === 0) return;
+    const tokens = holdings.map((h) => h.token);
+
+    // Use cache if fresh
+    const cached = getCachedCryptoPrices();
+    if (cached && !isCryptoPricesCacheStale()) {
+      setLivePrices(cached.prices);
+      return;
+    }
+
+    // Fetch fresh prices
+    fetchCryptoPrices(tokens).then((prices) => {
+      if (Object.keys(prices).length > 0) {
+        setLivePrices(prices);
+      }
+    });
+  }, [holdings]);
+
+  // Apply live prices to holdings
+  const pricedHoldings = useMemo(
+    () => applyLivePrices(holdings, livePrices),
+    [holdings, livePrices],
   );
 
   const totalValueUsd = useMemo(
-    () => getTotalCryptoValueUsd(holdings),
-    [holdings]
+    () => getTotalCryptoValueUsd(pricedHoldings),
+    [pricedHoldings],
   );
   const totalCostUsd = useMemo(
-    () => getTotalCryptoCostUsd(holdings),
-    [holdings]
+    () => getTotalCryptoCostUsd(pricedHoldings),
+    [pricedHoldings],
   );
-  const cashUsd = useMemo(() => getCashValueUsd(holdings), [holdings]);
+  const cashUsd = useMemo(() => getCashValueUsd(pricedHoldings), [pricedHoldings]);
   const pnlUsd = totalValueUsd - totalCostUsd;
 
   const totalValueConverted = convert(totalValueUsd, "USD");
@@ -87,14 +145,14 @@ export default function CryptoPage() {
   // Chart data: exclude tiny holdings (< 1% of total)
   const chartData = useMemo(() => {
     if (totalValueUsd === 0) return [];
-    return holdings
+    return pricedHoldings
       .filter((h) => h.currentValueUsd / totalValueUsd >= 0.01)
       .map((h, i) => ({
         token: h.token,
         value: h.currentValueUsd,
         fill: ECHARTS_COLORS[i % ECHARTS_COLORS.length],
       }));
-  }, [holdings, totalValueUsd]);
+  }, [pricedHoldings, totalValueUsd]);
 
   const handleFile = useCallback(
     (file: File) => {
@@ -104,9 +162,17 @@ export default function CryptoPage() {
         const text = e.target?.result as string;
         if (text && text.trim().length > 0) {
           setCsvText(text);
+          setCsvUploadedAt(Date.now());
           const h = parseAndComputeHoldings(text);
           if (h.length > 0) {
             setUploadStatus(`Loaded ${h.length} holdings`);
+            // Re-fetch prices for new portfolio
+            const tokens = h.map((holding) => holding.token);
+            fetchCryptoPrices(tokens).then((prices) => {
+              if (Object.keys(prices).length > 0) {
+                setLivePrices(prices);
+              }
+            });
           } else {
             setUploadStatus("Could not parse holdings. Check CSV format.");
           }
@@ -119,7 +185,7 @@ export default function CryptoPage() {
       };
       reader.readAsText(file);
     },
-    [setCsvText]
+    [setCsvText, setCsvUploadedAt],
   );
 
   const onDrop = useCallback(
@@ -129,7 +195,7 @@ export default function CryptoPage() {
       const file = e.dataTransfer.files[0];
       if (file) handleFile(file);
     },
-    [handleFile]
+    [handleFile],
   );
 
   const onDragOver = useCallback((e: React.DragEvent) => {
@@ -148,13 +214,15 @@ export default function CryptoPage() {
       if (file) handleFile(file);
       if (e.target) e.target.value = "";
     },
-    [handleFile]
+    [handleFile],
   );
 
   const clearCsv = useCallback(() => {
     setCsvText("");
+    setCsvUploadedAt(null);
     setUploadStatus(null);
-  }, [setCsvText]);
+    setShowClearDialog(false);
+  }, [setCsvText, setCsvUploadedAt]);
 
   const hasData = csvText.length > 0 && holdings.length > 0;
 
@@ -185,7 +253,7 @@ export default function CryptoPage() {
               "finance-card flex flex-col items-center justify-center gap-4 p-12 md:p-20 cursor-pointer border-2 border-dashed transition-colors",
               isDragOver
                 ? "border-accent bg-accent/5"
-                : "border-border/60 hover:border-muted-foreground/30"
+                : "border-border/60 hover:border-muted-foreground/30",
             )}
           >
             <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-secondary">
@@ -227,6 +295,17 @@ export default function CryptoPage() {
               {symbol}
               <NumberTicker value={totalValueConverted} decimalPlaces={2} />
             </div>
+            {csvUploadedAt && (
+              <p className="text-xs text-muted-foreground mt-2">
+                CSV: {new Date(csvUploadedAt).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" })}
+                {getCachedCryptoPrices()?.fetchedAt && (
+                  <>
+                    {" · Prices: "}
+                    {new Date(getCachedCryptoPrices()!.fetchedAt).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" })}
+                  </>
+                )}
+              </p>
+            )}
           </div>
           <button
             onClick={() => replaceInputRef.current?.click()}
@@ -276,7 +355,7 @@ export default function CryptoPage() {
           <div className="finance-card p-6">
             <p className="label-mono mb-4">ALLOCATION</p>
             {chartData.length > 0 && (
-              <CryptoDonut chartData={chartData} />
+              <CryptoDonut chartData={chartData} isDark={isDark} />
             )}
             {/* Legend */}
             <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1.5">
@@ -301,7 +380,7 @@ export default function CryptoPage() {
             <div className="flex items-center justify-between px-6 pt-5 pb-3">
               <p className="label-mono">HOLDINGS</p>
               <button
-                onClick={clearCsv}
+                onClick={() => setShowClearDialog(true)}
                 className="flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
               >
                 <X className="h-3 w-3" />
@@ -333,20 +412,19 @@ export default function CryptoPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {holdings.map((h, i) => {
+                  {pricedHoldings.map((h, i) => {
                     const rowPnl = h.currentValueUsd - h.totalCostUsd;
                     const pctOfPort =
                       totalValueUsd > 0
                         ? (h.currentValueUsd / totalValueUsd) * 100
                         : 0;
-                    const isCash = h.token === "CASH";
 
                     return (
                       <tr
                         key={h.token}
                         className={cn(
                           "border-b border-border/40 transition-colors hover:bg-secondary/40",
-                          i === holdings.length - 1 && "border-b-0"
+                          i === pricedHoldings.length - 1 && "border-b-0",
                         )}
                       >
                         <td className="px-6 py-3">
@@ -382,16 +460,10 @@ export default function CryptoPage() {
                         <td
                           className={cn(
                             "px-4 py-3 text-right tabular-nums font-mono text-xs",
-                            isCash
-                              ? "text-muted-foreground/40"
-                              : rowPnl >= 0
-                                ? "text-income"
-                                : "text-expense"
+                            rowPnl >= 0 ? "text-income" : "text-expense",
                           )}
                         >
-                          {isCash
-                            ? "--"
-                            : `${rowPnl >= 0 ? "+" : "-"}${format(Math.abs(rowPnl), "USD")}`}
+                          {`${rowPnl >= 0 ? "+" : "-"}${format(Math.abs(rowPnl), "USD")}`}
                         </td>
                         <td className="px-6 py-3 text-right tabular-nums font-mono text-xs text-muted-foreground">
                           {pctOfPort.toFixed(1)}%
@@ -405,6 +477,30 @@ export default function CryptoPage() {
           </div>
         </BlurFade>
       </div>
+
+      {/* Clear confirmation dialog */}
+      <Dialog
+        open={showClearDialog}
+        onOpenChange={(open) => !open && setShowClearDialog(false)}
+      >
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Clear Crypto Data</DialogTitle>
+            <DialogDescription>
+              This will remove all crypto holdings data. You can re-import a CSV
+              anytime.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline" />}>
+              Cancel
+            </DialogClose>
+            <Button variant="destructive" onClick={clearCsv}>
+              Clear
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
