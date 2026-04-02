@@ -8,6 +8,7 @@ import { CURRENCY_SYMBOLS } from "@/lib/utils/types";
 import {
   EXPENSE_TYPE_LABELS,
   EXPENSE_TYPE_COLORS,
+  CHART_COLORS,
 } from "@/lib/utils/constants";
 import {
   getCurrentMonthKey,
@@ -30,8 +31,6 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import ReactECharts from "echarts-for-react";
-import { useTheme } from "next-themes";
-import { getPieBaseOption } from "@/lib/utils/echarts";
 import { Plus, Pencil, Trash2, Receipt } from "lucide-react";
 import { ExpenseDialog } from "@/components/expenses/expense-dialog";
 
@@ -58,8 +57,6 @@ export default function ExpensesPage() {
     []
   );
   const { currency, format, convert, symbol } = useCurrency();
-  const { resolvedTheme } = useTheme();
-  const isDark = resolvedTheme === "dark";
 
   // Filters
   const [typeFilter, setTypeFilter] = useState<ExpenseType | "all">("all");
@@ -109,41 +106,39 @@ export default function ExpensesPage() {
   }, [thisMonthEntries, convert]);
 
   // ECharts pie option
-  const pieOption = useMemo(() => {
-    const base = getPieBaseOption(isDark);
-    return {
-      ...base,
-      tooltip: {
-        ...base.tooltip,
-        formatter: (params: { name: string; value: number; percent: number }) => {
-          const label =
-            EXPENSE_TYPE_LABELS[params.name as ExpenseType] ?? params.name;
-          return `<div style="display:flex;align-items:center;justify-content:space-between;gap:16px">
-            <span style="color:${isDark ? "#888" : "#968360"}">${label}</span>
-            <span style="font-family:var(--font-geist-mono),ui-monospace,monospace;font-weight:500">${format(params.value)} (${params.percent.toFixed(1)}%)</span>
-          </div>`;
+  const pieOption = {
+    backgroundColor: "transparent",
+    color: CHART_COLORS,
+    tooltip: {
+      trigger: "item" as const,
+      formatter: "{b}: {c} ({d}%)",
+      backgroundColor: "#f4f3ed",
+      borderColor: "#c9c3a8",
+      borderWidth: 1,
+      padding: [8, 12],
+      textStyle: { color: "#2c251e", fontSize: 12 },
+      extraCssText: "border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);",
+    },
+    series: [{
+      type: "pie" as const,
+      radius: ["60%", "85%"],
+      center: ["50%", "50%"],
+      padAngle: 2,
+      data: breakdownByType.map((item) => ({
+        name: EXPENSE_TYPE_LABELS[item.type] ?? item.type,
+        value: item.value,
+        itemStyle: { color: item.color },
+      })),
+      label: { show: false },
+      emphasis: {
+        itemStyle: {
+          shadowBlur: 10,
+          shadowOffsetX: 0,
+          shadowColor: "rgba(0, 0, 0, 0.3)",
         },
       },
-      series: [
-        {
-          type: "pie",
-          radius: ["60%", "85%"],
-          padAngle: 2,
-          itemStyle: { borderWidth: 0 },
-          label: { show: false },
-          emphasis: {
-            scale: true,
-            scaleSize: 4,
-          },
-          data: breakdownByType.map((item) => ({
-            name: item.type,
-            value: item.value,
-            itemStyle: { color: item.color },
-          })),
-        },
-      ],
-    };
-  }, [breakdownByType, isDark, format]);
+    }],
+  };
 
   // Filtered + sorted entries for the table
   const filteredEntries = useMemo(() => {

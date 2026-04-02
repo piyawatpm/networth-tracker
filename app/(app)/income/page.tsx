@@ -5,7 +5,7 @@ import ReactECharts from "echarts-for-react";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 import { useCurrency } from "@/components/providers/currency-provider";
 import type { IncomeEntry, IncomeType } from "@/lib/utils/types";
-import { INCOME_TYPE_LABELS, INCOME_TYPE_COLORS } from "@/lib/utils/constants";
+import { INCOME_TYPE_LABELS, INCOME_TYPE_COLORS, CHART_COLORS } from "@/lib/utils/constants";
 import {
   getCurrentMonthKey,
   getLastMonthKey,
@@ -147,30 +147,37 @@ export default function IncomePage() {
   }, [thisMonthEntries, convert]);
 
   const pieOption = {
+    backgroundColor: "transparent",
+    color: CHART_COLORS,
     tooltip: {
       trigger: "item" as const,
       formatter: "{b}: {c} ({d}%)",
+      backgroundColor: "#f4f3ed",
+      borderColor: "#c9c3a8",
+      borderWidth: 1,
+      padding: [8, 12],
+      textStyle: { color: "#2c251e", fontSize: 12 },
+      extraCssText: "border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);",
     },
-    series: [
-      {
-        type: "pie" as const,
-        radius: ["55%", "85%"],
-        center: ["50%", "50%"],
-        data: breakdownByType.map((d) => ({
-          name: d.label,
-          value: d.value,
-          itemStyle: { color: d.color },
-        })),
-        label: { show: false },
+    series: [{
+      type: "pie" as const,
+      radius: ["55%", "85%"],
+      center: ["50%", "50%"],
+      padAngle: 2,
+      data: breakdownByType.map((d) => ({
+        name: d.label,
+        value: d.value,
+        itemStyle: { color: d.color },
+      })),
+      label: { show: false },
+      emphasis: {
         itemStyle: {
-          emphasis: {
-            shadowBlur: 10,
-            shadowOffsetX: 0,
-            shadowColor: "rgba(0, 0, 0, 0.3)",
-          },
+          shadowBlur: 10,
+          shadowOffsetX: 0,
+          shadowColor: "rgba(0, 0, 0, 0.3)",
         },
       },
-    ],
+    }],
   };
 
   // ---- Filter pills --------------------------------------------------------
