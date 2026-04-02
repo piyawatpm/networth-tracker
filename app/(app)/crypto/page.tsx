@@ -133,10 +133,32 @@ export default function CryptoPage() {
     [csvText],
   );
 
+  // Trend chart range (declared early so filteredHistory can reference it)
+  const [trendRange, setTrendRange] = useState<"1W" | "1M" | "3M" | "All">("All");
+
   const portfolioHistory = useMemo(
     () => (csvText ? computePortfolioHistory(csvText) : []),
     [csvText],
   );
+
+  const filteredHistory = useMemo(() => {
+    if (trendRange === "All" || portfolioHistory.length === 0) return portfolioHistory;
+    const now = new Date();
+    let cutoff: Date;
+    switch (trendRange) {
+      case "1W":
+        cutoff = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        break;
+      case "1M":
+        cutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        break;
+      case "3M":
+        cutoff = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+        break;
+    }
+    const cutoffStr = cutoff!.toISOString().split("T")[0];
+    return portfolioHistory.filter((s) => s.date >= cutoffStr);
+  }, [portfolioHistory, trendRange]);
 
   // Apply stablecoin tags: merge user-tagged stablecoins into CASH
   const taggedHoldings = useMemo(() => {
@@ -509,11 +531,12 @@ export default function CryptoPage() {
           <MetricCell label="Total Cost" value={format(filteredCostUsd, "USD")} />
           <MetricCell
             label="P&L"
-            value={format(Math.abs(filteredPnlUsd), "USD")}
+            value={`${format(Math.abs(filteredPnlUsd), "USD")} (${filteredCostUsd > 0 ? ((filteredPnlUsd / filteredCostUsd) * 100).toFixed(1) : "0.0"}%)`}
             prefix={filteredPnlUsd >= 0 ? "+" : "-"}
             className={filteredPnlUsd >= 0 ? "text-income" : "text-expense"}
           />
           <MetricCell label="Cash" value={format(filteredCashUsd, "USD")} />
+          <MetricCell label="Holdings" value={String(pricedHoldings.length)} />
         </div>
       </BlurFade>
 
@@ -537,48 +560,72 @@ export default function CryptoPage() {
       {portfolioHistory.length > 1 && (
         <BlurFade delay={0.09}>
           <div className="finance-card p-6">
-            <p className="label-mono mb-4">VALUE TREND</p>
-            <ReactECharts
-              option={{
-                ...getCartesianBaseOption(isDark),
-                xAxis: {
-                  ...getCartesianBaseOption(isDark).xAxis,
-                  type: "category" as const,
-                  data: portfolioHistory.map((s) => {
-                    const d = new Date(s.date + "T00:00:00");
-                    return d.toLocaleDateString("en-AU", { day: "numeric", month: "short" });
-                  }),
-                },
-                yAxis: {
-                  ...getCartesianBaseOption(isDark).yAxis,
-                  type: "value" as const,
-                  axisLabel: {
-                    ...getCartesianBaseOption(isDark).yAxis.axisLabel,
-                    formatter: (v: number) => `$${v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0)}`,
+            <div className="flex items-center justify-between mb-4">
+              <p className="label-mono">VALUE TREND</p>
+              <div className="flex items-center gap-0.5 rounded-lg bg-secondary p-0.5">
+                {(["1W", "1M", "3M", "All"] as const).map((range) => (
+                  <button
+                    key={range}
+                    onClick={() => setTrendRange(range)}
+                    className={cn(
+                      "px-2.5 py-1 text-[11px] font-medium rounded-md transition-colors",
+                      trendRange === range
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    {range}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {filteredHistory.length > 1 ? (
+              <ReactECharts
+                option={{
+                  ...getCartesianBaseOption(isDark),
+                  xAxis: {
+                    ...getCartesianBaseOption(isDark).xAxis,
+                    type: "category" as const,
+                    data: filteredHistory.map((s) => {
+                      const d = new Date(s.date + "T00:00:00");
+                      return d.toLocaleDateString("en-AU", { day: "numeric", month: "short" });
+                    }),
                   },
-                },
-                series: [
-                  {
-                    name: "Value",
-                    type: "line" as const,
-                    data: portfolioHistory.map((s) => Math.round(s.totalValueUsd * 100) / 100),
-                    smooth: true,
-                    showSymbol: false,
-                    lineStyle: { width: 2, color: ECHARTS_COLORS[0] },
-                    areaStyle: { color: ECHARTS_COLORS[0], opacity: 0.08 },
+                  yAxis: {
+                    ...getCartesianBaseOption(isDark).yAxis,
+                    type: "value" as const,
+                    axisLabel: {
+                      ...getCartesianBaseOption(isDark).yAxis.axisLabel,
+                      formatter: (v: number) => `$${v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0)}`,
+                    },
                   },
-                  {
-                    name: "Cost",
-                    type: "line" as const,
-                    data: portfolioHistory.map((s) => Math.round(s.totalCostUsd * 100) / 100),
-                    smooth: true,
-                    showSymbol: false,
-                    lineStyle: { width: 1.5, color: ECHARTS_COLORS[3], type: "dashed" as const },
-                  },
-                ],
-              }}
-              style={{ height: 240, width: "100%" }}
-            />
+                  series: [
+                    {
+                      name: "Value",
+                      type: "line" as const,
+                      data: filteredHistory.map((s) => Math.round(s.totalValueUsd * 100) / 100),
+                      smooth: true,
+                      showSymbol: false,
+                      lineStyle: { width: 2, color: ECHARTS_COLORS[0] },
+                      areaStyle: { color: ECHARTS_COLORS[0], opacity: 0.08 },
+                    },
+                    {
+                      name: "Cost",
+                      type: "line" as const,
+                      data: filteredHistory.map((s) => Math.round(s.totalCostUsd * 100) / 100),
+                      smooth: true,
+                      showSymbol: false,
+                      lineStyle: { width: 1.5, color: ECHARTS_COLORS[3], type: "dashed" as const },
+                    },
+                  ],
+                }}
+                style={{ height: 240, width: "100%" }}
+              />
+            ) : (
+              <p className="text-sm text-muted-foreground text-center py-12">
+                No data in this range.
+              </p>
+            )}
           </div>
         </BlurFade>
       )}
@@ -769,6 +816,11 @@ export default function CryptoPage() {
                           )}
                         >
                           {`${rowPnl >= 0 ? "+" : "-"}${format(Math.abs(rowPnl), "USD")}`}
+                          {h.totalCostUsd > 0 && (
+                            <span className="ml-1 text-[10px] opacity-70">
+                              {rowPnl >= 0 ? "+" : ""}{((rowPnl / h.totalCostUsd) * 100).toFixed(1)}%
+                            </span>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-right text-xs text-muted-foreground">
                           {editingExchange === h.token ? (
