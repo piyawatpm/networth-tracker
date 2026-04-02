@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -43,13 +44,15 @@ function ThemeToggle() {
 }
 
 function CurrencyToggle() {
-  const { currency, cycleCurrency, enabledCurrencies, rates, ratesFetchedAt, ratesLoaded } = useCurrency();
+  const { currency, setCurrency, cycleCurrency, enabledCurrencies, rates, ratesFetchedAt, ratesLoaded } = useCurrency();
+  const [open, setOpen] = useState(false);
+  const usePopover = enabledCurrencies.length > 3;
 
   // Build FX pairs from enabled currencies vs USD
   const fxPairs = rates
     ? enabledCurrencies
         .filter((c) => c !== "USD")
-        .slice(0, 5)
+        .slice(0, 8)
         .map((c) => ({
           label: `${c}/USD`,
           value: (1 / (rates[c] ?? 1)).toFixed(4),
@@ -66,10 +69,23 @@ function CurrencyToggle() {
       })
     : null;
 
+  function handleClick() {
+    if (usePopover) {
+      setOpen((v) => !v);
+    } else {
+      cycleCurrency();
+    }
+  }
+
+  function selectCurrency(c: string) {
+    setCurrency(c);
+    setOpen(false);
+  }
+
   return (
-    <div className="relative group">
+    <div className={cn("relative", !usePopover && "group")}>
       <button
-        onClick={cycleCurrency}
+        onClick={handleClick}
         className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-secondary text-secondary-foreground text-sm font-mono font-medium transition-colors hover:bg-secondary/80 cursor-pointer"
       >
         <span className="text-xs opacity-60">FX</span>
@@ -80,38 +96,81 @@ function CurrencyToggle() {
         )}
       </button>
 
-      {/* Hover dropdown */}
-      <div className="absolute right-0 top-full mt-2 w-56 rounded-lg bg-popover p-3 shadow-lg ring-1 ring-border/50 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 z-50">
-        <p className="label-mono mb-2.5">Live Exchange Rates</p>
-        <div className="space-y-2">
-          {fxPairs.map((pair) => (
-            <div
-              key={pair.label}
-              className="flex items-center justify-between"
-            >
-              <span className="text-muted-foreground font-mono text-xs">
-                {pair.label}
-              </span>
-              <span className="font-mono tabular-nums text-sm">{pair.value}</span>
+      {/* Popover for > 3 currencies */}
+      {usePopover && open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-full mt-2 w-64 rounded-lg bg-popover p-3 shadow-lg ring-1 ring-border/50 z-50 animate-in fade-in-0 zoom-in-95 duration-100">
+            <p className="label-mono mb-2">Display Currency</p>
+            <div className="flex flex-wrap gap-1.5 mb-3">
+              {enabledCurrencies.map((c) => (
+                <button
+                  key={c}
+                  onClick={() => selectCurrency(c)}
+                  className={cn(
+                    "flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-mono font-medium transition-colors",
+                    currency === c
+                      ? "bg-foreground text-background"
+                      : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
+                  )}
+                >
+                  {getCurrencySymbol(c)} {c}
+                </button>
+              ))}
             </div>
-          ))}
-        </div>
-        {lastUpdated && (
-          <div className="pt-2 mt-2.5 border-t border-border/50">
-            <p className="text-[10px] text-muted-foreground/60">
-              Source: open.er-api.com
-            </p>
-            <p className="text-[10px] text-muted-foreground/60">
-              Updated: {lastUpdated} (cached 24h)
-            </p>
+
+            {fxPairs.length > 0 && (
+              <>
+                <p className="label-mono mb-2">Live Rates</p>
+                <div className="space-y-1.5">
+                  {fxPairs.map((pair) => (
+                    <div key={pair.label} className="flex items-center justify-between">
+                      <span className="text-muted-foreground font-mono text-xs">{pair.label}</span>
+                      <span className="font-mono tabular-nums text-xs">{pair.value}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {lastUpdated && (
+              <div className="pt-2 mt-2 border-t border-border/50">
+                <p className="text-[10px] text-muted-foreground/60">
+                  Source: open.er-api.com · Updated: {lastUpdated}
+                </p>
+              </div>
+            )}
           </div>
-        )}
-        {!ratesLoaded && (
-          <p className="text-[10px] text-muted-foreground/40 mt-2">
-            Fetching rates...
-          </p>
-        )}
-      </div>
+        </>
+      )}
+
+      {/* Hover dropdown for ≤ 3 currencies */}
+      {!usePopover && (
+        <div className="absolute right-0 top-full mt-2 w-56 rounded-lg bg-popover p-3 shadow-lg ring-1 ring-border/50 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 z-50 pointer-events-none">
+          {fxPairs.length > 0 && (
+            <>
+              <p className="label-mono mb-2.5">Live Exchange Rates</p>
+              <div className="space-y-2">
+                {fxPairs.map((pair) => (
+                  <div key={pair.label} className="flex items-center justify-between">
+                    <span className="text-muted-foreground font-mono text-xs">{pair.label}</span>
+                    <span className="font-mono tabular-nums text-sm">{pair.value}</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+          {lastUpdated && (
+            <div className="pt-2 mt-2.5 border-t border-border/50">
+              <p className="text-[10px] text-muted-foreground/60">Source: open.er-api.com</p>
+              <p className="text-[10px] text-muted-foreground/60">Updated: {lastUpdated} (cached 24h)</p>
+            </div>
+          )}
+          {!ratesLoaded && (
+            <p className="text-[10px] text-muted-foreground/40 mt-2">Fetching rates...</p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
