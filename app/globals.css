@@ -179,7 +179,7 @@
     @apply text-base text-muted-foreground leading-relaxed max-w-[65ch];
   }
   .finance-card {
-    @apply bg-card rounded-xl border border-border/50 transition-all duration-200;
+    @apply bg-card rounded-xl border border-border/50 transition-colors duration-200;
   }
   .finance-card:hover {
     @apply border-border;

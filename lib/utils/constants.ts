@@ -53,21 +53,21 @@ export const STABLECOINS = new Set([
   "PYUSD",
 ]);
 
-// Chart color palette — warm, desaturated tones
+// Chart color palette — hex values (canvas-compatible, NOT oklch)
 export const CHART_COLORS = [
-  "oklch(0.58 0.09 65)",   // amber
-  "oklch(0.55 0.16 155)",  // sage
-  "oklch(0.58 0.16 25)",   // coral
-  "oklch(0.52 0.08 35)",   // sienna
-  "oklch(0.52 0.10 110)",  // olive
-  "oklch(0.60 0.06 200)",  // steel
-  "oklch(0.55 0.12 340)",  // mauve
-  "oklch(0.62 0.08 90)",   // sand
-  "oklch(0.48 0.10 145)",  // forest
-  "oklch(0.58 0.12 10)",   // rust
-  "oklch(0.50 0.06 260)",  // slate
-  "oklch(0.62 0.10 50)",   // gold
-  "oklch(0.45 0.08 180)",  // teal
+  "#b8860b",  // amber
+  "#2e8b57",  // sage
+  "#cd5c5c",  // coral
+  "#8b5e3c",  // sienna
+  "#6b8e23",  // olive
+  "#708090",  // steel
+  "#9e5e8e",  // mauve
+  "#c4a35a",  // sand
+  "#2e7d5b",  // forest
+  "#c05040",  // rust
+  "#5f6b80",  // slate
+  "#c4943a",  // gold
+  "#2e7d7b",  // teal
 ];
 
 export const INCOME_TYPE_COLORS: Record<IncomeType, string> = {

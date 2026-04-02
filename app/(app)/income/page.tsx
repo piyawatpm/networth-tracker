@@ -1,15 +1,11 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { useTheme } from "next-themes";
 import ReactECharts from "echarts-for-react";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 import { useCurrency } from "@/components/providers/currency-provider";
 import type { IncomeEntry, IncomeType } from "@/lib/utils/types";
-import {
-  INCOME_TYPE_LABELS,
-  INCOME_TYPE_COLORS,
-} from "@/lib/utils/constants";
+import { INCOME_TYPE_LABELS, INCOME_TYPE_COLORS } from "@/lib/utils/constants";
 import {
   getCurrentMonthKey,
   getLastMonthKey,
@@ -17,7 +13,6 @@ import {
   formatDateString,
 } from "@/lib/utils/timezone";
 import { cn } from "@/lib/utils";
-import { getPieBaseOption } from "@/lib/utils/echarts";
 import { BlurFade } from "@/components/ui/blur-fade";
 import { NumberTicker } from "@/components/ui/number-ticker";
 import {
@@ -40,7 +35,7 @@ import { IncomeDialog } from "@/components/income/income-dialog";
 
 function sumConverted(
   entries: IncomeEntry[],
-  convert: (amount: number, from: IncomeEntry["currency"]) => number
+  convert: (amount: number, from: IncomeEntry["currency"]) => number,
 ) {
   return entries.reduce((sum, e) => sum + convert(e.amount, e.currency), 0);
 }
@@ -87,11 +82,10 @@ function DeleteConfirm({
 export default function IncomePage() {
   const [entries, setEntries] = useLocalStorage<IncomeEntry[]>(
     "income_entries",
-    []
+    [],
   );
   const { currency, format, convert, symbol } = useCurrency();
   const [typeFilter, setTypeFilter] = useState<IncomeType | "all">("all");
-  const { resolvedTheme } = useTheme();
 
   // ---- Derived data --------------------------------------------------------
 
@@ -101,37 +95,37 @@ export default function IncomePage() {
 
   const thisMonthEntries = useMemo(
     () => entries.filter((e) => (e.date ?? "").startsWith(currentMonth)),
-    [entries, currentMonth]
+    [entries, currentMonth],
   );
 
   const lastMonthEntries = useMemo(
     () => entries.filter((e) => (e.date ?? "").startsWith(lastMonth)),
-    [entries, lastMonth]
+    [entries, lastMonth],
   );
 
   const ytdEntries = useMemo(
     () => entries.filter((e) => (e.date ?? "").startsWith(currentYear)),
-    [entries, currentYear]
+    [entries, currentYear],
   );
 
   const thisMonthTotal = useMemo(
     () => sumConverted(thisMonthEntries, convert),
-    [thisMonthEntries, convert]
+    [thisMonthEntries, convert],
   );
 
   const lastMonthTotal = useMemo(
     () => sumConverted(lastMonthEntries, convert),
-    [lastMonthEntries, convert]
+    [lastMonthEntries, convert],
   );
 
   const ytdTotal = useMemo(
     () => sumConverted(ytdEntries, convert),
-    [ytdEntries, convert]
+    [ytdEntries, convert],
   );
 
   const allTimeTotal = useMemo(
     () => sumConverted(entries, convert),
-    [entries, convert]
+    [entries, convert],
   );
 
   // ---- Breakdown by type (current month) -----------------------------------
@@ -152,12 +146,14 @@ export default function IncomePage() {
       .sort((a, b) => b.value - a.value);
   }, [thisMonthEntries, convert]);
 
-  const isDark = resolvedTheme === "dark";
-  const pieOption = useMemo(() => {
-    return {
-      ...getPieBaseOption(isDark),
-      series: [{
-        type: "pie",
+  const pieOption = {
+    tooltip: {
+      trigger: "item" as const,
+      formatter: "{b}: {c} ({d}%)",
+    },
+    series: [
+      {
+        type: "pie" as const,
         radius: ["55%", "85%"],
         center: ["50%", "50%"],
         data: breakdownByType.map((d) => ({
@@ -166,12 +162,16 @@ export default function IncomePage() {
           itemStyle: { color: d.color },
         })),
         label: { show: false },
-        emphasis: { scale: true, scaleSize: 5 },
-        padAngle: 2,
-        itemStyle: { borderWidth: 0 },
-      }],
-    };
-  }, [breakdownByType, isDark]);
+        itemStyle: {
+          emphasis: {
+            shadowBlur: 10,
+            shadowOffsetX: 0,
+            shadowColor: "rgba(0, 0, 0, 0.3)",
+          },
+        },
+      },
+    ],
+  };
 
   // ---- Filter pills --------------------------------------------------------
 
@@ -186,7 +186,13 @@ export default function IncomePage() {
       typeFilter === "all"
         ? entries
         : entries.filter((e) => e.type === typeFilter);
-    return [...filtered].sort((a, b) => ((b.date ?? "") > (a.date ?? "") ? 1 : (b.date ?? "") < (a.date ?? "") ? -1 : 0));
+    return [...filtered].sort((a, b) =>
+      (b.date ?? "") > (a.date ?? "")
+        ? 1
+        : (b.date ?? "") < (a.date ?? "")
+          ? -1
+          : 0,
+    );
   }, [entries, typeFilter]);
 
   // ---- Handlers ------------------------------------------------------------
@@ -196,14 +202,13 @@ export default function IncomePage() {
   }
 
   function handleEdit(updated: IncomeEntry) {
-    setEntries((prev) =>
-      prev.map((e) => (e.id === updated.id ? updated : e))
-    );
+    setEntries((prev) => prev.map((e) => (e.id === updated.id ? updated : e)));
   }
 
   function handleDelete(id: string) {
     setEntries((prev) => prev.filter((e) => e.id !== id));
   }
+  console.log("pieOption", pieOption);
 
   // ---- Render --------------------------------------------------------------
 
@@ -258,65 +263,95 @@ export default function IncomePage() {
       </BlurFade>
 
       {/* ================================================================= */}
+      {/* TEST: Hardcoded chart — does this blink on hover?                   */}
+      {/* ================================================================= */}
+      <div className="finance-card p-6">
+        <p className="label-mono mb-4">TEST: Hardcoded Data (delete later)</p>
+        <ReactECharts
+          option={{
+            tooltip: { trigger: "item", formatter: "{b}: {c} ({d}%)" },
+            series: [
+              {
+                type: "pie",
+                radius: "55%",
+                center: ["50%", "50%"],
+                data: [
+                  { value: 335, name: "Salary" },
+                  { value: 310, name: "Freelance" },
+                  { value: 234, name: "Uber" },
+                ],
+                itemStyle: {
+                  emphasis: {
+                    shadowBlur: 10,
+                    shadowOffsetX: 0,
+                    shadowColor: "rgba(0, 0, 0, 0.5)",
+                  },
+                },
+              },
+            ],
+          }}
+          style={{ height: 300 }}
+        />
+      </div>
+
+      {/* ================================================================= */}
       {/* This Month Breakdown                                               */}
       {/* ================================================================= */}
-      <BlurFade delay={0.1}>
-        <div className="finance-card p-6">
-          <p className="label-mono mb-4">This Month Breakdown</p>
+      {/* <BlurFade delay={0.1}> */}
+      <div className="finance-card p-6">
+        <p className="label-mono mb-4">This Month Breakdown</p>
 
-          {breakdownByType.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-8 text-center">
-              No income recorded this month.
-            </p>
-          ) : (
-            <div className="grid md:grid-cols-[280px_1fr] gap-8 items-center">
-              {/* Donut */}
-              <ReactECharts
-                option={pieOption}
-                style={{ height: "200px" }}
-               
-              />
+        {breakdownByType.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-8 text-center">
+            No income recorded this month.
+          </p>
+        ) : (
+          <div className="grid md:grid-cols-[280px_1fr] gap-8 items-center">
+            {/* Donut */}
+            <ReactECharts
+              option={pieOption}
+              style={{ height: "200px" }}
+              // shouldSetOption={() => false}
+            />
 
-              {/* Progress bars */}
-              <div className="space-y-3 min-w-0">
-                {breakdownByType.map((item) => {
-                  const pct =
-                    thisMonthTotal > 0
-                      ? (item.value / thisMonthTotal) * 100
-                      : 0;
-                  return (
-                    <div key={item.type} className="space-y-1">
-                      <div className="flex items-center justify-between gap-3 text-sm">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span
-                            className="size-2.5 rounded-full shrink-0"
-                            style={{ backgroundColor: item.color }}
-                          />
-                          <span className="truncate font-medium">
-                            {item.label}
-                          </span>
-                        </div>
-                        <span className="tabular-nums text-income font-medium shrink-0">
-                          {format(item.value)}
+            {/* Progress bars */}
+            <div className="space-y-3 min-w-0">
+              {breakdownByType.map((item) => {
+                const pct =
+                  thisMonthTotal > 0 ? (item.value / thisMonthTotal) * 100 : 0;
+                return (
+                  <div key={item.type} className="space-y-1">
+                    <div className="flex items-center justify-between gap-3 text-sm">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span
+                          className="size-2.5 rounded-full shrink-0"
+                          style={{ backgroundColor: item.color }}
+                        />
+                        <span className="truncate font-medium">
+                          {item.label}
                         </span>
                       </div>
-                      <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
-                        <div
-                          className="h-full rounded-full transition-all duration-500"
-                          style={{
-                            width: `${pct}%`,
-                            backgroundColor: item.color,
-                          }}
-                        />
-                      </div>
+                      <span className="tabular-nums text-income font-medium shrink-0">
+                        {format(item.value)}
+                      </span>
                     </div>
-                  );
-                })}
-              </div>
+                    <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+                      <div
+                        className="h-full rounded-full transition-all duration-500"
+                        style={{
+                          width: `${pct}%`,
+                          backgroundColor: item.color,
+                        }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-          )}
-        </div>
-      </BlurFade>
+          </div>
+        )}
+      </div>
+      {/* </BlurFade> */}
 
       {/* ================================================================= */}
       {/* Records Table                                                      */}
@@ -334,7 +369,7 @@ export default function IncomePage() {
                   "px-3 py-1 rounded-full text-xs font-medium transition-colors",
                   typeFilter === "all"
                     ? "bg-foreground text-background"
-                    : "bg-muted text-muted-foreground hover:bg-muted/80"
+                    : "bg-muted text-muted-foreground hover:bg-muted/80",
                 )}
               >
                 All
@@ -347,7 +382,7 @@ export default function IncomePage() {
                     "px-3 py-1 rounded-full text-xs font-medium transition-colors",
                     typeFilter === t
                       ? "bg-foreground text-background"
-                      : "bg-muted text-muted-foreground hover:bg-muted/80"
+                      : "bg-muted text-muted-foreground hover:bg-muted/80",
                   )}
                 >
                   {INCOME_TYPE_LABELS[t]}
