@@ -53,7 +53,7 @@ function CryptoDonut({ chartData, isDark, format }: {
     };
   }, [chartData, isDark, format]);
 
-  return <ReactECharts option={option} style={{ height: 260, width: "100%" }} notMerge lazyUpdate />;
+  return <ReactECharts option={option} style={{ height: 260, width: "100%" }} />;
 }
 
 export default function CryptoPage() {

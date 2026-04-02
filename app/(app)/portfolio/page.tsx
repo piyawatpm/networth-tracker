@@ -512,8 +512,6 @@ export default function PortfolioPage() {
             <ReactECharts
               option={trendChartOption}
               style={{ height: 192, width: "100%" }}
-              notMerge
-              lazyUpdate
             />
           ) : (
             <div className="flex h-48 items-center justify-center">
@@ -580,8 +578,6 @@ export default function PortfolioPage() {
                     <ReactECharts
                       option={allocationChartOption}
                       style={{ height: 144, width: 144 }}
-                      notMerge
-                      lazyUpdate
                     />
                   </div>
                   <div className="flex-1 space-y-1.5">

@@ -91,7 +91,7 @@ export default function IncomePage() {
   );
   const { currency, format, convert, symbol } = useCurrency();
   const [typeFilter, setTypeFilter] = useState<IncomeType | "all">("all");
-  const { theme } = useTheme();
+  const { resolvedTheme } = useTheme();
 
   // ---- Derived data --------------------------------------------------------
 
@@ -152,7 +152,7 @@ export default function IncomePage() {
       .sort((a, b) => b.value - a.value);
   }, [thisMonthEntries, convert]);
 
-  const isDark = theme === "dark";
+  const isDark = resolvedTheme === "dark";
   const pieOption = useMemo(() => {
     const base = getEchartsBaseOption(isDark);
     return {
@@ -276,7 +276,7 @@ export default function IncomePage() {
               <ReactECharts
                 option={pieOption}
                 style={{ height: "200px" }}
-                notMerge lazyUpdate
+               
               />
 
               {/* Progress bars */}
