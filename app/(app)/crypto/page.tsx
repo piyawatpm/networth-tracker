@@ -654,7 +654,7 @@ export default function CryptoPage() {
           <div className="finance-card p-6">
             <p className="label-mono mb-4">ALLOCATION</p>
             {chartData.length > 0 ? (
-              <CryptoDonut chartData={chartData} chartRef={donutRef} />
+              <CryptoDonut chartData={chartData} isDark={isDark} chartRef={donutRef} />
             ) : allChartTokens.length > 0 ? (
               <div className="flex items-center justify-center h-[260px] text-sm text-muted-foreground">
                 All tokens hidden
