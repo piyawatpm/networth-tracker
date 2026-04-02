@@ -17,6 +17,7 @@ import {
   applyLivePrices,
 } from "@/lib/utils/crypto-prices";
 import { cn } from "@/lib/utils";
+import type { CryptoHolding } from "@/lib/utils/types";
 import { BlurFade } from "@/components/ui/blur-fade";
 import { NumberTicker } from "@/components/ui/number-ticker";
 import ReactECharts from "echarts-for-react";
@@ -94,6 +95,30 @@ export default function CryptoPage() {
 
   // Live prices
   const [livePrices, setLivePrices] = useState<Record<string, number>>({});
+
+  // Exchange overrides (manual assignments persisted across CSV re-imports)
+  const [exchangeOverrides, setExchangeOverrides] = useLocalStorage<Record<string, string>>(
+    "crypto_exchange_overrides",
+    {},
+  );
+  const [editingExchange, setEditingExchange] = useState<string | null>(null);
+  const [editExchangeValue, setEditExchangeValue] = useState("");
+
+  const getExchange = useCallback(
+    (holding: CryptoHolding) => exchangeOverrides[holding.token] ?? holding.exchange ?? "",
+    [exchangeOverrides],
+  );
+
+  const saveExchange = useCallback(
+    (token: string, value: string) => {
+      setExchangeOverrides((prev) => ({
+        ...prev,
+        [token]: value.trim(),
+      }));
+      setEditingExchange(null);
+    },
+    [setExchangeOverrides],
+  );
 
   const holdings = useMemo(
     () => (csvText ? parseAndComputeHoldings(csvText) : []),
@@ -406,6 +431,9 @@ export default function CryptoPage() {
                     <th className="px-4 pb-2 text-right font-mono text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
                       P&L
                     </th>
+                    <th className="px-4 pb-2 text-right font-mono text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+                      Exchange
+                    </th>
                     <th className="px-6 pb-2 text-right font-mono text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
                       % Port
                     </th>
@@ -464,6 +492,31 @@ export default function CryptoPage() {
                           )}
                         >
                           {`${rowPnl >= 0 ? "+" : "-"}${format(Math.abs(rowPnl), "USD")}`}
+                        </td>
+                        <td className="px-4 py-3 text-right text-xs text-muted-foreground">
+                          {editingExchange === h.token ? (
+                            <input
+                              autoFocus
+                              className="w-20 bg-transparent border-b border-border text-right text-xs outline-none"
+                              value={editExchangeValue}
+                              onChange={(e) => setEditExchangeValue(e.target.value)}
+                              onBlur={() => saveExchange(h.token, editExchangeValue)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") saveExchange(h.token, editExchangeValue);
+                                if (e.key === "Escape") setEditingExchange(null);
+                              }}
+                            />
+                          ) : (
+                            <button
+                              onClick={() => {
+                                setEditingExchange(h.token);
+                                setEditExchangeValue(getExchange(h));
+                              }}
+                              className="hover:text-foreground transition-colors cursor-pointer"
+                            >
+                              {getExchange(h) || "\u2014"}
+                            </button>
+                          )}
                         </td>
                         <td className="px-6 py-3 text-right tabular-nums font-mono text-xs text-muted-foreground">
                           {pctOfPort.toFixed(1)}%
