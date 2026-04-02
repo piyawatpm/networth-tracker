@@ -745,102 +745,94 @@ export default function DashboardPage() {
       </div>
 
       {/* FINANCIAL HEALTH INDICATORS */}
-      {isVisible("health-indicators") && (
-        <BlurFade delay={D * 2.5}>
-          <div className="finance-card p-5">
-            <p className="label-mono mb-4">Financial Health Indicators</p>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-              {/* Debt-to-Asset */}
-              <div className="space-y-1.5">
-                <p className="text-[11px] text-muted-foreground">Debt / Assets</p>
-                <p className={cn("text-lg font-semibold tabular-nums", debtToAssetRatio <= 30 ? "text-income" : debtToAssetRatio <= 60 ? "text-foreground" : "text-expense")}>
-                  {debtToAssetRatio.toFixed(1)}%
-                </p>
-                <p className="text-[10px] text-muted-foreground/60">
-                  {debtToAssetRatio <= 30 ? "Healthy" : debtToAssetRatio <= 60 ? "Moderate" : "High"} — lower is better
-                </p>
-              </div>
+      {isVisible("health-indicators") && (() => {
+        // Gauge helper: renders a semi-circle arc gauge
+        const Gauge = ({ value, max, thresholds, invert, suffix = "%" }: {
+          value: number; max: number;
+          thresholds: [number, number]; // [green→yellow, yellow→red]
+          invert?: boolean; // true = lower is better
+          suffix?: string;
+        }) => {
+          const pct = Math.min(1, Math.max(0, value / max));
+          const angle = pct * 180;
+          const r = 36;
+          const cx = 44;
+          const cy = 42;
+          // Determine color
+          let color: string;
+          if (invert) {
+            color = value <= thresholds[0] ? "oklch(0.723 0.219 149.579)" : value <= thresholds[1] ? "#d4a033" : "oklch(0.637 0.237 25.331)";
+          } else {
+            color = value >= thresholds[1] ? "oklch(0.723 0.219 149.579)" : value >= thresholds[0] ? "#d4a033" : "oklch(0.637 0.237 25.331)";
+          }
+          // Arc path
+          const endAngle = (180 - angle) * (Math.PI / 180);
+          const ex = cx + r * Math.cos(endAngle);
+          const ey = cy - r * Math.sin(endAngle);
+          const largeArc = angle > 180 ? 1 : 0;
+          const arcPath = `M ${cx - r} ${cy} A ${r} ${r} 0 ${largeArc} 1 ${ex.toFixed(1)} ${ey.toFixed(1)}`;
+          const fullPath = `M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy}`;
+          return (
+            <svg viewBox="0 0 88 50" className="w-full max-w-[88px]">
+              <path d={fullPath} fill="none" stroke="currentColor" className="text-border" strokeWidth="6" strokeLinecap="round" />
+              <path d={arcPath} fill="none" stroke={color} strokeWidth="6" strokeLinecap="round" />
+              <text x={cx} y={cy - 4} textAnchor="middle" fill={color} fontSize="14" fontWeight="700" fontFamily="var(--font-geist-mono), monospace">
+                {typeof value === "number" && value >= 1000 ? `${(value / 1000).toFixed(1)}k` : value < 10 ? value.toFixed(1) : Math.round(value)}
+              </text>
+              <text x={cx} y={cy + 8} textAnchor="middle" fill="currentColor" className="text-muted-foreground" fontSize="8">
+                {suffix}
+              </text>
+            </svg>
+          );
+        };
 
-              {/* Debt-to-Income */}
-              <div className="space-y-1.5">
-                <p className="text-[11px] text-muted-foreground">Debt / Income</p>
-                <p className={cn("text-lg font-semibold tabular-nums", debtToIncomeRatio <= 35 ? "text-income" : debtToIncomeRatio <= 50 ? "text-foreground" : "text-expense")}>
-                  {debtToIncomeRatio.toFixed(1)}%
-                </p>
-                <p className="text-[10px] text-muted-foreground/60">
-                  {debtToIncomeRatio <= 35 ? "Healthy" : debtToIncomeRatio <= 50 ? "Caution" : "Overleveraged"} — target &lt;35%
-                </p>
-              </div>
+        const indicators = [
+          { label: "Debt / Assets", value: debtToAssetRatio, max: 100, thresholds: [30, 60] as [number, number], invert: true, suffix: "%", status: debtToAssetRatio <= 30 ? "Healthy" : debtToAssetRatio <= 60 ? "Moderate" : "High" },
+          { label: "Debt / Income", value: debtToIncomeRatio, max: 100, thresholds: [35, 50] as [number, number], invert: true, suffix: "%", status: debtToIncomeRatio <= 35 ? "Healthy" : debtToIncomeRatio <= 50 ? "Caution" : "High" },
+          { label: "Savings Rate", value: savingsRate, max: 100, thresholds: [10, 20] as [number, number], invert: false, suffix: "%", status: savingsRate >= 20 ? "Excellent" : savingsRate >= 10 ? "Good" : "Low" },
+          { label: "Emergency Fund", value: emergencyFundMonths, max: 12, thresholds: [3, 6] as [number, number], invert: false, suffix: "months", status: emergencyFundMonths >= 6 ? "Strong" : emergencyFundMonths >= 3 ? "Adequate" : "Build up" },
+          { label: "Wealth / Income", value: wealthToIncomeRatio, max: 12, thresholds: [1, 5] as [number, number], invert: false, suffix: "x annual", status: wealthToIncomeRatio >= 5 ? "Strong" : wealthToIncomeRatio >= 1 ? "Growing" : "Early" },
+          { label: "Invest / Net Worth", value: Math.min(investmentToNetWorthRatio, 100), max: 100, thresholds: [40, 70] as [number, number], invert: false, suffix: "%", status: investmentToNetWorthRatio >= 70 ? "Great" : investmentToNetWorthRatio >= 40 ? "Good" : "Grow" },
+          { label: "FI Ratio", value: Math.min(fiRatio, 100), max: 100, thresholds: [25, 100] as [number, number], invert: false, suffix: "%", status: fiRatio >= 100 ? "Free!" : fiRatio >= 25 ? "On track" : "Building" },
+          { label: "Net Cash Flow", value: Math.max(0, savingsRate), max: 100, thresholds: [0, 15] as [number, number], invert: false, suffix: format(netCashFlow).replace(/[A-Z$\s]/g, "").slice(0, 8), status: netCashFlow >= 0 ? "Surplus" : "Deficit" },
+        ];
 
-              {/* Savings Rate */}
-              <div className="space-y-1.5">
-                <p className="text-[11px] text-muted-foreground">Savings Rate</p>
-                <p className={cn("text-lg font-semibold tabular-nums", savingsRate >= 20 ? "text-income" : savingsRate >= 10 ? "text-foreground" : "text-expense")}>
-                  {savingsRate.toFixed(1)}%
-                </p>
-                <p className="text-[10px] text-muted-foreground/60">
-                  {savingsRate >= 20 ? "Excellent" : savingsRate >= 10 ? "Good" : "Low"} — target 15-20%+
-                </p>
-              </div>
-
-              {/* Emergency Fund */}
-              <div className="space-y-1.5">
-                <p className="text-[11px] text-muted-foreground">Emergency Fund</p>
-                <p className={cn("text-lg font-semibold tabular-nums", emergencyFundMonths >= 6 ? "text-income" : emergencyFundMonths >= 3 ? "text-foreground" : "text-expense")}>
-                  {emergencyFundMonths.toFixed(1)} mo
-                </p>
-                <p className="text-[10px] text-muted-foreground/60">
-                  {emergencyFundMonths >= 6 ? "Strong" : emergencyFundMonths >= 3 ? "Adequate" : "Build up"} — target 3-6 months
-                </p>
-              </div>
-
-              {/* Wealth-to-Income */}
-              <div className="space-y-1.5">
-                <p className="text-[11px] text-muted-foreground">Wealth / Income</p>
-                <p className={cn("text-lg font-semibold tabular-nums", wealthToIncomeRatio >= 5 ? "text-income" : wealthToIncomeRatio >= 1 ? "text-foreground" : "text-expense")}>
-                  {wealthToIncomeRatio.toFixed(1)}x
-                </p>
-                <p className="text-[10px] text-muted-foreground/60">
-                  {wealthToIncomeRatio >= 5 ? "Strong" : wealthToIncomeRatio >= 1 ? "Growing" : "Early stage"} — target 10-12x at retirement
-                </p>
-              </div>
-
-              {/* Investment to Net Worth */}
-              <div className="space-y-1.5">
-                <p className="text-[11px] text-muted-foreground">Investment / Net Worth</p>
-                <p className={cn("text-lg font-semibold tabular-nums", investmentToNetWorthRatio >= 70 ? "text-income" : investmentToNetWorthRatio >= 40 ? "text-foreground" : "text-expense")}>
-                  {investmentToNetWorthRatio.toFixed(1)}%
-                </p>
-                <p className="text-[10px] text-muted-foreground/60">
-                  {investmentToNetWorthRatio >= 70 ? "Great" : investmentToNetWorthRatio >= 40 ? "Good" : "Grow investments"} — higher = money works for you
-                </p>
-              </div>
-
-              {/* Financial Independence */}
-              <div className="space-y-1.5">
-                <p className="text-[11px] text-muted-foreground">FI Ratio (Passive / Expenses)</p>
-                <p className={cn("text-lg font-semibold tabular-nums", fiRatio >= 100 ? "text-income" : fiRatio >= 25 ? "text-foreground" : "text-expense")}>
-                  {fiRatio.toFixed(1)}%
-                </p>
-                <p className="text-[10px] text-muted-foreground/60">
-                  {fiRatio >= 100 ? "Financially Independent!" : fiRatio >= 25 ? "On track" : "Building"} — 100% = freedom
-                </p>
-              </div>
-
-              {/* Net Cash Flow */}
-              <div className="space-y-1.5">
-                <p className="text-[11px] text-muted-foreground">Net Cash Flow</p>
-                <p className={cn("text-lg font-semibold tabular-nums", netCashFlow >= 0 ? "text-income" : "text-expense")}>
-                  {netCashFlow >= 0 ? "+" : ""}{format(netCashFlow)}
-                </p>
-                <p className="text-[10px] text-muted-foreground/60">
-                  {netCashFlow >= 0 ? "Surplus" : "Deficit"} — income minus expenses
-                </p>
+        return (
+          <BlurFade delay={D * 2.5}>
+            <div className="finance-card p-5">
+              <p className="label-mono mb-5">Financial Health Indicators</p>
+              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-4">
+                {indicators.map((ind) => {
+                  const isGood = ind.invert
+                    ? ind.value <= ind.thresholds[0]
+                    : ind.value >= ind.thresholds[1];
+                  const isBad = ind.invert
+                    ? ind.value > ind.thresholds[1]
+                    : ind.value < ind.thresholds[0];
+                  return (
+                    <div key={ind.label} className="flex flex-col items-center text-center">
+                      <Gauge
+                        value={ind.value}
+                        max={ind.max}
+                        thresholds={ind.thresholds}
+                        invert={ind.invert}
+                        suffix={ind.suffix}
+                      />
+                      <p className="text-[10px] font-medium mt-1 leading-tight">{ind.label}</p>
+                      <p className={cn(
+                        "text-[9px] mt-0.5 font-medium",
+                        isGood ? "text-income" : isBad ? "text-expense" : "text-muted-foreground",
+                      )}>
+                        {ind.status}
+                      </p>
+                    </div>
+                  );
+                })}
               </div>
             </div>
-          </div>
-        </BlurFade>
-      )}
+          </BlurFade>
+        );
+      })()}
 
       {/* 6. INCOME VS EXPENSES BAR + ASSET ALLOCATION DONUT */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
