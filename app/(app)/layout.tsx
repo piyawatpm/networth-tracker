@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard,
   TrendingUp,
@@ -14,11 +14,14 @@ import {
   Sun,
   Settings,
   FileSpreadsheet,
+  AlertTriangle,
+  X,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useCurrency } from "@/components/providers/currency-provider";
 import { cn } from "@/lib/utils";
 import { getCurrencySymbol } from "@/lib/utils/types";
+import { generateSampleData } from "@/app/(app)/seed/page";
 
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -175,11 +178,101 @@ function CurrencyToggle() {
   );
 }
 
+function DemoBanner() {
+  const [visible, setVisible] = useState(false);
+  const router = useRouter();
+
+  useEffect(() => {
+    const isDemo = localStorage.getItem("demo_data_active") === "true";
+    if (isDemo) {
+      setVisible(true);
+      return;
+    }
+
+    // First visit detection: check if app has any data
+    const hasIncome = localStorage.getItem("income_entries");
+    const hasExpenses = localStorage.getItem("expense_entries");
+    const hasPortfolio = localStorage.getItem("portfolio_holdings");
+
+    const isEmpty =
+      (!hasIncome || hasIncome === "[]") &&
+      (!hasExpenses || hasExpenses === "[]") &&
+      (!hasPortfolio || hasPortfolio === "[]");
+
+    if (isEmpty) {
+      // Auto-seed demo data
+      const data = generateSampleData();
+      localStorage.setItem("income_entries", JSON.stringify(data.incomeEntries));
+      localStorage.setItem("expense_entries", JSON.stringify(data.expenseEntries));
+      localStorage.setItem("portfolio_holdings", JSON.stringify(data.portfolioHoldings));
+      localStorage.setItem("crypto_csv_text", JSON.stringify(data.cryptoCsvText));
+      localStorage.setItem("debt_records", JSON.stringify(data.debtRecords));
+      localStorage.setItem("debt_transactions", JSON.stringify(data.debtTransactions));
+      localStorage.setItem("networth_snapshots", JSON.stringify(data.networthSnapshots));
+      localStorage.setItem("portfolio_snapshots", JSON.stringify(data.portfolioSnapshots));
+      localStorage.setItem("networth_goals", JSON.stringify(data.networthGoals));
+      localStorage.removeItem("networth_goal");
+      localStorage.setItem("recurring_income_templates", JSON.stringify(data.recurringIncomeTemplates));
+      localStorage.setItem("recurring_expense_templates", JSON.stringify(data.recurringExpenseTemplates));
+      localStorage.setItem("price_update_log", JSON.stringify(data.priceUpdateLog));
+      localStorage.setItem("enabled_currencies", JSON.stringify(["AUD", "USD", "THB", "EUR"]));
+      localStorage.setItem("demo_data_active", "true");
+      setVisible(true);
+      router.refresh();
+    }
+  }, [router]);
+
+  function handleClear() {
+    localStorage.clear();
+    localStorage.removeItem("demo_data_active");
+    setVisible(false);
+    router.refresh();
+  }
+
+  function handleDismiss() {
+    setVisible(false);
+  }
+
+  if (!visible) return null;
+
+  return (
+    <div className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-2">
+      <div className="mx-auto max-w-7xl flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-sm">
+          <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
+          <span className="text-amber-800 dark:text-amber-200">
+            <strong>Demo Mode</strong> — You&apos;re viewing sample data. Go to{" "}
+            <button onClick={handleClear} className="underline font-medium hover:no-underline">
+              Settings
+            </button>{" "}
+            to clear and start fresh, or dismiss this banner to explore.
+          </span>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={handleClear}
+            className="text-xs font-medium text-amber-700 dark:text-amber-300 bg-amber-500/20 hover:bg-amber-500/30 px-3 py-1 rounded-full transition-colors"
+          >
+            Clear All Data
+          </button>
+          <button
+            onClick={handleDismiss}
+            className="text-amber-600 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-200 transition-colors"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
 
   return (
     <div className="flex min-h-screen flex-col">
+      <DemoBanner />
       {/* Desktop top nav */}
       <header className="sticky top-0 z-50 border-b border-border/60 bg-background/80 backdrop-blur-md">
         <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 lg:px-8">
