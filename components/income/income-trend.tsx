@@ -5,16 +5,17 @@ import ReactECharts from "echarts-for-react";
 import { useTheme } from "next-themes";
 import { useCurrency } from "@/components/providers/currency-provider";
 import type { IncomeEntry } from "@/lib/utils/types";
-import { INCOME_TYPE_LABELS, INCOME_TYPE_COLORS } from "@/lib/utils/constants";
 import { getLastNMonthKeys, monthKeyToLabel, getMonthKey } from "@/lib/utils/timezone";
 import { getCartesianBaseOption, formatAxisValue } from "@/lib/utils/echarts";
 import { cn } from "@/lib/utils";
 
 interface IncomeTrendProps {
   entries: IncomeEntry[];
+  getLabel: (type: string) => string;
+  getColor: (type: string) => string;
 }
 
-export function IncomeTrend({ entries }: IncomeTrendProps) {
+export function IncomeTrend({ entries, getLabel, getColor }: IncomeTrendProps) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
   const { convert } = useCurrency();
@@ -54,12 +55,12 @@ export function IncomeTrend({ entries }: IncomeTrendProps) {
     const hasOther = sorted.length > 5;
 
     const series = top5.map((t) => ({
-      name: INCOME_TYPE_LABELS[t as keyof typeof INCOME_TYPE_LABELS] ?? t,
+      name: getLabel(t),
       type: "line" as const,
       stack: "total",
       areaStyle: { opacity: 0.3 },
       lineStyle: { width: 1.5 },
-      itemStyle: { color: INCOME_TYPE_COLORS[t as keyof typeof INCOME_TYPE_COLORS] ?? "#708090" },
+      itemStyle: { color: getColor(t) },
       data: monthKeys.map((mk) =>
         entries
           .filter((e) => getMonthKey(e.date) === mk && e.type === t)

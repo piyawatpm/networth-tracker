@@ -58,6 +58,12 @@ export interface IncomeEntry {
   createdAt: number;
 }
 
+export interface CustomIncomeCategory {
+  id: string;
+  label: string;
+  color: string;
+}
+
 export interface RecurringIncome {
   id: string;
   type: IncomeType;

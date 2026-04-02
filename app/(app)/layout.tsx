@@ -11,6 +11,7 @@ import {
   Handshake,
   Moon,
   Sun,
+  Settings,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useCurrency } from "@/components/providers/currency-provider";
@@ -23,7 +24,7 @@ const NAV_ITEMS = [
   { href: "/expenses", label: "Expenses", icon: Receipt },
   { href: "/crypto", label: "Crypto", icon: Bitcoin },
   { href: "/portfolio", label: "Portfolio", icon: Briefcase },
-  { href: "/debts", label: "Debts", icon: Handshake },
+  { href: "/liabilities", label: "Liabilities", icon: Handshake },
 ];
 
 function ThemeToggle() {
@@ -147,6 +148,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </nav>
           </div>
           <div className="flex items-center gap-1.5">
+            <Link
+              href="/settings"
+              className="flex items-center justify-center h-8 w-8 rounded-full bg-secondary text-secondary-foreground transition-colors hover:bg-secondary/80"
+            >
+              <Settings className="h-3.5 w-3.5" />
+            </Link>
             <ThemeToggle />
             <CurrencyToggle />
           </div>

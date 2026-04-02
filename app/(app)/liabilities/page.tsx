@@ -22,10 +22,10 @@ import {
 import type { DebtRecord, DebtTransaction } from "@/lib/utils/types";
 import { CURRENCY_SYMBOLS } from "@/lib/utils/types";
 import {
-  DebtDialog,
+  LiabilityDialog,
   PaymentDialog,
   DeleteConfirmDialog,
-} from "@/components/debts/debt-dialogs";
+} from "@/components/liabilities/liability-dialogs";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -64,7 +64,7 @@ function getProgressPercent(
 // Page
 // ---------------------------------------------------------------------------
 
-export default function DebtsPage() {
+export default function LiabilitiesPage() {
   const [debts, setDebts] = useLocalStorage<DebtRecord[]>("debt_records", []);
   const [transactions, setTransactions] = useLocalStorage<DebtTransaction[]>(
     "debt_transactions",
@@ -165,7 +165,7 @@ export default function DebtsPage() {
         <div className="space-y-4">
           <div className="flex items-center gap-3">
             <Handshake className="h-6 w-6 text-muted-foreground" />
-            <h1 className="text-2xl font-semibold tracking-tight">Debts</h1>
+            <h1 className="text-2xl font-semibold tracking-tight">Liabilities</h1>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -214,12 +214,12 @@ export default function DebtsPage() {
 
       {/* Add Debt Button */}
       <BlurFade delay={0.05}>
-        <DebtDialog
+        <LiabilityDialog
           onSave={handleSaveDebt}
           trigger={
             <Button className="gap-1.5">
               <Plus className="h-4 w-4" />
-              Add Debt
+              Add Entry
             </Button>
           }
         />
@@ -231,7 +231,7 @@ export default function DebtsPage() {
           <div className="finance-card p-12 text-center">
             <Handshake className="mx-auto h-10 w-10 text-muted-foreground/40 mb-3" />
             <p className="text-muted-foreground text-sm">
-              No debts recorded yet. Add one to get started.
+              No liabilities recorded yet. Add one to get started.
             </p>
           </div>
         </BlurFade>
@@ -361,7 +361,7 @@ export default function DebtsPage() {
                     )}
 
                     <div className="ml-auto flex items-center gap-1">
-                      <DebtDialog
+                      <LiabilityDialog
                         debt={debt}
                         onSave={handleSaveDebt}
                         trigger={
@@ -376,8 +376,8 @@ export default function DebtsPage() {
                       />
 
                       <DeleteConfirmDialog
-                        title="Delete Debt"
-                        description={`Are you sure you want to delete the debt with ${debt.person}? This will also remove all associated payment records. This action cannot be undone.`}
+                        title="Delete Entry"
+                        description={`Are you sure you want to delete the record with ${debt.person}? This will also remove all associated payment records. This action cannot be undone.`}
                         onConfirm={() => handleDeleteDebt(debt.id)}
                         trigger={
                           <Button

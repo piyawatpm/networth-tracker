@@ -6,9 +6,9 @@ import ReactECharts from "echarts-for-react";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 import { useCurrency } from "@/components/providers/currency-provider";
 import { useRecurringIncome } from "@/hooks/use-recurring-income";
+import { useIncomeCategories } from "@/hooks/use-income-categories";
 import type { IncomeEntry, IncomeType, ExpenseEntry } from "@/lib/utils/types";
 import { normalizeIncomeEntry, CURRENCY_SYMBOLS } from "@/lib/utils/types";
-import { INCOME_TYPE_LABELS, INCOME_TYPE_COLORS } from "@/lib/utils/constants";
 import {
   getCurrentMonthKey,
   getLastMonthKey,
@@ -44,6 +44,7 @@ import {
   Search,
   RefreshCw,
   TrendingUp,
+  Tags,
   ChevronLeft,
   ChevronRight,
   ArrowUpDown,
@@ -52,6 +53,7 @@ import {
 // Feature components
 import { IncomeDialog } from "@/components/income/income-dialog";
 import { RecurringIncomeDialog } from "@/components/income/recurring-dialog";
+import { ManageIncomeCategoriesDialog } from "@/components/income/manage-categories-dialog";
 import {
   DateRangeFilter,
   getPresetRange,
@@ -107,10 +109,24 @@ export default function IncomePage() {
     toggleTemplate,
   } = useRecurringIncome(entries, setEntries);
 
+  // Dynamic income categories
+  const {
+    allTypes: categoryTypes,
+    allLabels: categoryLabels,
+    customCategories,
+    addCategory,
+    removeCategory,
+    getLabel,
+    getColor,
+  } = useIncomeCategories();
+
+  // Category ids in use
+  const usedCategoryIds = useMemo(() => new Set(entries.map((e) => e.type)), [entries]);
+
   // ---- State ----------------------------------------------------------------
 
   // Records tab
-  const [typeFilter, setTypeFilter] = useState<IncomeType | "all">("all");
+  const [typeFilter, setTypeFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [sortField, setSortField] = useState<"date" | "amount">("date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -166,20 +182,20 @@ export default function IncomePage() {
   const dateFilteredTotal = sumConverted(dateFilteredEntries, convert);
 
   const breakdownByType = useMemo(() => {
-    const map: Partial<Record<IncomeType, number>> = {};
+    const map: Record<string, number> = {};
     for (const e of dateFilteredEntries) {
       map[e.type] = (map[e.type] ?? 0) + convert(e.amount, e.currency);
     }
     return Object.entries(map)
-      .filter(([, v]) => (v as number) > 0)
+      .filter(([, v]) => v > 0)
       .map(([t, value]) => ({
-        type: t as IncomeType,
-        label: INCOME_TYPE_LABELS[t as IncomeType],
-        value: value as number,
-        color: INCOME_TYPE_COLORS[t as IncomeType],
+        type: t,
+        label: getLabel(t),
+        value,
+        color: getColor(t),
       }))
       .sort((a, b) => b.value - a.value);
-  }, [dateFilteredEntries, convert]);
+  }, [dateFilteredEntries, convert, getLabel, getColor]);
 
   // Expenses for savings ratio
   const dateFilteredExpenses = useMemo(() => {
@@ -217,7 +233,7 @@ export default function IncomePage() {
 
   // Records tab filters
   const typesPresent = useMemo(() => {
-    const set = new Set<IncomeType>();
+    const set = new Set<string>();
     entries.forEach((e) => set.add(e.type));
     return Array.from(set);
   }, [entries]);
@@ -360,6 +376,18 @@ export default function IncomePage() {
                 onChange={handleDateRangeChange}
               />
               <div className="flex gap-2 shrink-0">
+                <ManageIncomeCategoriesDialog
+                  customCategories={customCategories}
+                  onAdd={addCategory}
+                  onRemove={removeCategory}
+                  usedCategoryIds={usedCategoryIds}
+                  trigger={
+                    <Button variant="ghost" size="sm">
+                      <Tags className="h-3.5 w-3.5 mr-1" />
+                      Categories
+                    </Button>
+                  }
+                />
                 <RecurringIncomeDialog
                   templates={templates}
                   onAdd={addTemplate}
@@ -508,7 +536,7 @@ export default function IncomePage() {
                       : "bg-secondary text-secondary-foreground hover:bg-secondary/80",
                   )}
                 >
-                  {INCOME_TYPE_LABELS[t]}
+                  {getLabel(t)}
                 </button>
               ))}
             </div>
@@ -592,10 +620,10 @@ export default function IncomePage() {
                               <span
                                 className="inline-block h-2 w-2 rounded-full"
                                 style={{
-                                  backgroundColor: INCOME_TYPE_COLORS[entry.type],
+                                  backgroundColor: getColor(entry.type),
                                 }}
                               />
-                              {INCOME_TYPE_LABELS[entry.type]}
+                              {getLabel(entry.type)}
                             </span>
                           </td>
                           <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">
@@ -687,7 +715,7 @@ export default function IncomePage() {
           {/* -------------------------------------------------------------- */}
           <TabsContent value="trends" className="space-y-6 pt-4">
             <div className="finance-card p-6">
-              <IncomeTrend entries={entries} />
+              <IncomeTrend entries={entries} getLabel={getLabel} getColor={getColor} />
             </div>
 
             <div className="finance-card p-6">
@@ -701,6 +729,8 @@ export default function IncomePage() {
                 monthB={compMonthB}
                 onMonthAChange={setCompMonthA}
                 onMonthBChange={setCompMonthB}
+                getLabel={getLabel}
+                getColor={getColor}
               />
             </div>
           </TabsContent>

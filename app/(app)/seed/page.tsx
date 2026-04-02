@@ -232,7 +232,7 @@ export default function SeedPage() {
 
     setStatus(
       `Seeded: ${data.incomeEntries.length} income, ${data.expenseEntries.length} expenses, ` +
-      `${data.portfolioHoldings.length} holdings, ${data.debtRecords.length} debts, ` +
+      `${data.portfolioHoldings.length} holdings, ${data.debtRecords.length} liabilities, ` +
       `${data.debtTransactions.length} payments, crypto CSV loaded`
     );
   }
@@ -276,7 +276,7 @@ export default function SeedPage() {
           <li>4 months of expenses (rent, food, transport, subscriptions, health)</li>
           <li>8 portfolio holdings (AU ETFs, US stocks, super fund, bond)</li>
           <li>Crypto portfolio via CSV (BTC, ETH, SOL, OKB, stablecoins)</li>
-          <li>3 debts with payment history (car loan, friend, sister)</li>
+          <li>3 liabilities with payment history (car loan, friend, sister)</li>
           <li>Net worth trend snapshots (Jan-Apr 2026)</li>
         </ul>
       </div>

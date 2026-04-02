@@ -608,7 +608,7 @@ export default function DashboardPage() {
                 <p className={cn("text-3xl font-semibold tracking-tighter tabular-nums", debtToAssetRatio <= 30 ? "text-income" : debtToAssetRatio <= 60 ? "text-foreground" : "text-expense")}>
                   {debtToAssetRatio.toFixed(0)}%
                 </p>
-                <p className="label-mono mt-1">Debt / Assets</p>
+                <p className="label-mono mt-1">Liability / Assets</p>
               </div>
             </div>
           </div>

@@ -33,16 +33,16 @@ import type {
 } from "@/lib/utils/types";
 
 // ---------------------------------------------------------------------------
-// DebtDialog
+// LiabilityDialog
 // ---------------------------------------------------------------------------
 
-interface DebtDialogProps {
+interface LiabilityDialogProps {
   debt?: DebtRecord;
   onSave: (d: DebtRecord) => void;
   trigger: React.ReactNode;
 }
 
-export function DebtDialog({ debt, onSave, trigger }: DebtDialogProps) {
+export function LiabilityDialog({ debt, onSave, trigger }: LiabilityDialogProps) {
   const [open, setOpen] = useState(false);
   const [person, setPerson] = useState(debt?.person ?? "");
   const [direction, setDirection] = useState<DebtDirection>(
@@ -94,11 +94,11 @@ export function DebtDialog({ debt, onSave, trigger }: DebtDialogProps) {
       <DialogTrigger render={trigger as React.JSX.Element} />
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{debt ? "Edit Debt" : "Add Debt"}</DialogTitle>
+          <DialogTitle>{debt ? "Edit Entry" : "Add Entry"}</DialogTitle>
           <DialogDescription>
             {debt
-              ? "Update the details of this debt record."
-              : "Record a new debt between you and someone else."}
+              ? "Update the details of this record."
+              : "Record a new liability between you and someone else."}
           </DialogDescription>
         </DialogHeader>
 
@@ -194,7 +194,7 @@ export function DebtDialog({ debt, onSave, trigger }: DebtDialogProps) {
             Cancel
           </DialogClose>
           <Button onClick={handleSave}>
-            {debt ? "Save Changes" : "Add Debt"}
+            {debt ? "Save Changes" : "Add Entry"}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -5,7 +5,6 @@ import ReactECharts from "echarts-for-react";
 import { useTheme } from "next-themes";
 import { useCurrency } from "@/components/providers/currency-provider";
 import type { IncomeEntry } from "@/lib/utils/types";
-import { INCOME_TYPE_LABELS, INCOME_TYPE_COLORS } from "@/lib/utils/constants";
 import {
   Select,
   SelectContent,
@@ -27,6 +26,8 @@ interface IncomeComparisonViewProps {
   monthB: string;
   onMonthAChange: (v: string) => void;
   onMonthBChange: (v: string) => void;
+  getLabel: (type: string) => string;
+  getColor: (type: string) => string;
 }
 
 export function IncomeComparisonView({
@@ -35,6 +36,8 @@ export function IncomeComparisonView({
   monthB,
   onMonthAChange,
   onMonthBChange,
+  getLabel,
+  getColor,
 }: IncomeComparisonViewProps) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
@@ -69,7 +72,7 @@ export function IncomeComparisonView({
 
   const chartOption = useMemo(() => {
     const base = getCartesianBaseOption(isDark);
-    const categories = categoryData.map((d) => INCOME_TYPE_LABELS[d.type as keyof typeof INCOME_TYPE_LABELS] ?? d.type);
+    const categories = categoryData.map((d) => getLabel(d.type));
 
     return {
       ...base,
@@ -161,8 +164,8 @@ export function IncomeComparisonView({
         <div className="space-y-1.5">
           {categoryData.map((d) => {
             const delta = d.a > 0 ? ((d.b - d.a) / d.a) * 100 : 0;
-            const color = INCOME_TYPE_COLORS[d.type as keyof typeof INCOME_TYPE_COLORS] ?? "#708090";
-            const label = INCOME_TYPE_LABELS[d.type as keyof typeof INCOME_TYPE_LABELS] ?? d.type;
+            const color = getColor(d.type);
+            const label = getLabel(d.type);
             return (
               <div key={d.type} className="flex items-center justify-between text-xs">
                 <div className="flex items-center gap-2">
