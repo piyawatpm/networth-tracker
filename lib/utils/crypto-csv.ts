@@ -1,5 +1,5 @@
 import type { CryptoTransaction, CryptoHolding } from "./types";
-import { STABLECOINS } from "./constants";
+import { STABLECOINS, YIELD_PREFIXES, KNOWN_EXCHANGES } from "./constants";
 
 // ---------------------------------------------------------------------------
 // Detect CSV format
@@ -80,6 +80,7 @@ function parsePortfolioOverview(csvText: string): CryptoHolding[] {
       amount,
       totalCostUsd: Math.max(0, costBasis),
       currentValueUsd: currentValue,
+      exchange: undefined,
     });
   }
 
@@ -90,13 +91,18 @@ function parsePortfolioOverview(csvText: string): CryptoHolding[] {
 
 function isStablecoin(name: string): boolean {
   const upper = name.toUpperCase();
+  const lower = name.toLowerCase();
+
+  // Yield-bearing tokens are NOT stablecoins even if they contain stablecoin names
+  if (YIELD_PREFIXES.some((p) => lower.startsWith(p))) return false;
+
   if (STABLECOINS.has(upper)) return true;
+
   // Check common stablecoin names
   const stablecoinNames = [
     "tether", "usdt", "usdc", "busd", "dai", "tusd", "fdusd", "pyusd",
     "world liberty financial usd",
   ];
-  const lower = name.toLowerCase();
   return stablecoinNames.some((s) => lower.includes(s) || upper === s);
 }
 
@@ -214,18 +220,31 @@ function cleanNumber(s: string): number | null {
   return isNaN(num) ? null : num;
 }
 
+function extractExchange(notes: string): string | undefined {
+  if (!notes) return undefined;
+  const lower = notes.toLowerCase().trim();
+  for (const [keyword, label] of Object.entries(KNOWN_EXCHANGES)) {
+    if (lower.includes(keyword)) return label;
+  }
+  return undefined;
+}
+
 export function computeHoldings(transactions: CryptoTransaction[]): CryptoHolding[] {
-  const holdingsMap = new Map<string, { amount: number; totalCostUsd: number }>();
+  const holdingsMap = new Map<string, { amount: number; totalCostUsd: number; exchanges: Set<string> }>();
 
   for (const tx of transactions) {
     // Group stablecoins as CASH
     const token = STABLECOINS.has(tx.token) || isStablecoin(tx.token) ? "CASH" : tx.token;
 
     if (!holdingsMap.has(token)) {
-      holdingsMap.set(token, { amount: 0, totalCostUsd: 0 });
+      holdingsMap.set(token, { amount: 0, totalCostUsd: 0, exchanges: new Set() });
     }
 
     const h = holdingsMap.get(token)!;
+
+    // Extract exchange from notes
+    const exchange = extractExchange(tx.notes);
+    if (exchange) h.exchanges.add(exchange);
 
     switch (tx.type) {
       case "buy":
@@ -250,6 +269,7 @@ export function computeHoldings(transactions: CryptoTransaction[]): CryptoHoldin
       amount: data.amount,
       totalCostUsd: Math.max(0, data.totalCostUsd),
       currentValueUsd: estimatedValue,
+      exchange: data.exchanges.size > 0 ? Array.from(data.exchanges).join(", ") : undefined,
     });
   }
 
