@@ -16,11 +16,6 @@ import { useTheme } from "next-themes";
 import { useCurrency } from "@/components/providers/currency-provider";
 import { cn } from "@/lib/utils";
 import { CURRENCY_SYMBOLS } from "@/lib/utils/types";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
 
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -45,7 +40,7 @@ function ThemeToggle() {
 }
 
 function CurrencyToggle() {
-  const { currency, cycleCurrency, rates, ratesFetchedAt } = useCurrency();
+  const { currency, cycleCurrency, rates, ratesFetchedAt, ratesLoaded } = useCurrency();
 
   const fxPairs = rates
     ? [
@@ -66,41 +61,52 @@ function CurrencyToggle() {
     : null;
 
   return (
-    <Popover>
-      <PopoverTrigger
-        render={
-          <button
-            onClick={cycleCurrency}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-secondary text-secondary-foreground text-sm font-mono font-medium transition-colors hover:bg-secondary/80 cursor-pointer"
-          />
-        }
+    <div className="relative group">
+      <button
+        onClick={cycleCurrency}
+        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-secondary text-secondary-foreground text-sm font-mono font-medium transition-colors hover:bg-secondary/80 cursor-pointer"
       >
         <span className="text-xs opacity-60">FX</span>
         <span>{CURRENCY_SYMBOLS[currency]}</span>
         <span className="text-xs">{currency}</span>
-      </PopoverTrigger>
-      <PopoverContent align="end" className="w-52 p-3">
+        {ratesLoaded && (
+          <span className="h-1.5 w-1.5 rounded-full bg-income" />
+        )}
+      </button>
+
+      {/* Hover dropdown */}
+      <div className="absolute right-0 top-full mt-2 w-56 rounded-lg bg-popover p-3 shadow-lg ring-1 ring-border/50 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 z-50">
+        <p className="label-mono mb-2.5">Live Exchange Rates</p>
         <div className="space-y-2">
-          <p className="label-mono mb-2">Exchange Rates</p>
           {fxPairs.map((pair) => (
             <div
               key={pair.label}
-              className="flex items-center justify-between text-sm"
+              className="flex items-center justify-between"
             >
               <span className="text-muted-foreground font-mono text-xs">
                 {pair.label}
               </span>
-              <span className="font-mono tabular-nums">{pair.value}</span>
+              <span className="font-mono tabular-nums text-sm">{pair.value}</span>
             </div>
           ))}
-          {lastUpdated && (
-            <p className="text-[10px] text-muted-foreground/60 pt-1 border-t border-border mt-2">
-              Updated {lastUpdated}
-            </p>
-          )}
         </div>
-      </PopoverContent>
-    </Popover>
+        {lastUpdated && (
+          <div className="pt-2 mt-2.5 border-t border-border/50">
+            <p className="text-[10px] text-muted-foreground/60">
+              Source: open.er-api.com
+            </p>
+            <p className="text-[10px] text-muted-foreground/60">
+              Updated: {lastUpdated} (cached 24h)
+            </p>
+          </div>
+        )}
+        {!ratesLoaded && (
+          <p className="text-[10px] text-muted-foreground/40 mt-2">
+            Fetching rates...
+          </p>
+        )}
+      </div>
+    </div>
   );
 }
 
