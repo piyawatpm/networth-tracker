@@ -446,9 +446,12 @@ export default function ExpensesPage() {
                   <div className="flex flex-col justify-center gap-2.5">
                     {breakdownByType.map((item) => {
                       const isHidden = hiddenCategories.has(item.type);
+                      const visibleTotal = breakdownByType
+                        .filter((d) => !hiddenCategories.has(d.type))
+                        .reduce((s, d) => s + d.value, 0);
                       const pct =
-                        dateFilteredTotal > 0
-                          ? (item.value / dateFilteredTotal) * 100
+                        !isHidden && visibleTotal > 0
+                          ? (item.value / visibleTotal) * 100
                           : 0;
                       const incomeRatio =
                         dateFilteredIncome > 0
@@ -479,23 +482,29 @@ export default function ExpensesPage() {
                               </span>
                             </div>
                             <span className="font-mono text-xs tabular-nums text-muted-foreground">
-                              {format(item.value)} ({pct.toFixed(1)}%)
-                              {incomeRatio !== null && (
-                                <span className="ml-1.5 text-muted-foreground/60">
-                                  · {incomeRatio.toFixed(1)}% of income
-                                </span>
+                              {isHidden ? "—" : (
+                                <>
+                                  {format(item.value)} ({pct.toFixed(1)}%)
+                                  {incomeRatio !== null && (
+                                    <span className="ml-1.5 text-muted-foreground/60">
+                                      · {incomeRatio.toFixed(1)}% of income
+                                    </span>
+                                  )}
+                                </>
                               )}
                             </span>
                           </div>
-                          <div className="h-1.5 w-full rounded-full bg-muted">
-                            <div
-                              className="h-full rounded-full transition-all duration-500"
-                              style={{
-                                width: isHidden ? "0%" : `${pct}%`,
-                                backgroundColor: item.color,
-                              }}
-                            />
-                          </div>
+                          {!isHidden && (
+                            <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                              <div
+                                className="h-full rounded-full transition-all duration-500"
+                                style={{
+                                  width: `${pct}%`,
+                                  backgroundColor: item.color,
+                                }}
+                              />
+                            </div>
+                          )}
                         </div>
                       );
                     })}

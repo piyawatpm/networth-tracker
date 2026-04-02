@@ -237,6 +237,71 @@ export default function DashboardPage() {
   const incomeChange = prevIncomeTotal > 0 ? ((periodIncomeTotal - prevIncomeTotal) / prevIncomeTotal) * 100 : 0;
   const expenseChange = prevExpenseTotal > 0 ? ((periodExpenseTotal - prevExpenseTotal) / prevExpenseTotal) * 100 : 0;
 
+  // ---- Financial Health Indicators ----------------------------------------
+
+  // Annualized income (extrapolate from period)
+  const annualizedIncome = useMemo(() => {
+    if (period === "Y") return periodIncomeTotal;
+    if (period === "M") return periodIncomeTotal * 12;
+    return periodIncomeTotal * 52; // W
+  }, [periodIncomeTotal, period]);
+
+  const monthlyIncome = annualizedIncome / 12;
+  const monthlyExpenses = useMemo(() => {
+    if (period === "Y") return periodExpenseTotal / 12;
+    if (period === "M") return periodExpenseTotal;
+    return periodExpenseTotal * (52 / 12); // W
+  }, [periodExpenseTotal, period]);
+
+  // Debt-to-Income Ratio: monthly debt payments / monthly income
+  // Use iOwe as proxy for total debt obligation (simplified)
+  const debtToIncomeRatio = monthlyIncome > 0 ? (iOwe / (annualizedIncome)) * 100 : 0;
+
+  // Emergency Fund Ratio: liquid assets / monthly expenses
+  // Liquid = cash in portfolio (type "bond" or "other") + crypto stablecoins
+  const liquidAssets = useMemo(() => {
+    const cashLikePortfolio = portfolioHoldings
+      .filter((h) => h.type === "bond" || h.type === "other")
+      .reduce((s, h) => s + convert(h.currentValue, h.currency), 0);
+    // Include crypto stablecoins
+    const stablecoinValue = cryptoHoldings
+      .filter((h) => ["USDC", "USDT", "DAI", "BUSD", "FDUSD", "PYUSD", "TUSD", "USD1"].includes(h.token.toUpperCase()))
+      .reduce((s, h) => s + convert(h.currentValueUsd, "USD"), 0);
+    return cashLikePortfolio + stablecoinValue;
+  }, [portfolioHoldings, cryptoHoldings, convert]);
+
+  const emergencyFundMonths = monthlyExpenses > 0 ? liquidAssets / monthlyExpenses : 0;
+
+  // Wealth-to-Income Ratio: net worth / annual income
+  const wealthToIncomeRatio = annualizedIncome > 0 ? netWorth / annualizedIncome : 0;
+
+  // Financial Independence Ratio: passive income / total expenses
+  // Passive = dividends + interest + crypto_yield + rental
+  const passiveIncome = useMemo(() => {
+    const passiveTypes = ["dividend", "crypto_yield", "interest", "rental"];
+    return periodIncome
+      .filter((e) => passiveTypes.includes(e.type))
+      .reduce((s, e) => s + convert(e.amount, e.currency), 0);
+  }, [periodIncome, convert]);
+
+  const passiveAnnualized = useMemo(() => {
+    if (period === "Y") return passiveIncome;
+    if (period === "M") return passiveIncome * 12;
+    return passiveIncome * 52;
+  }, [passiveIncome, period]);
+
+  const annualizedExpenses = useMemo(() => {
+    if (period === "Y") return periodExpenseTotal;
+    if (period === "M") return periodExpenseTotal * 12;
+    return periodExpenseTotal * 52;
+  }, [periodExpenseTotal, period]);
+
+  const fiRatio = annualizedExpenses > 0 ? (passiveAnnualized / annualizedExpenses) * 100 : 0;
+
+  // Investment Assets to Net Worth Ratio
+  const investmentAssets = portfolioTotal + cryptoTotal;
+  const investmentToNetWorthRatio = netWorth > 0 ? (investmentAssets / netWorth) * 100 : 0;
+
   // ---- Asset allocation ---------------------------------------------------
 
   const allocationData = useMemo(() => {
@@ -678,6 +743,104 @@ export default function DashboardPage() {
           </div>
         </BlurFade>
       </div>
+
+      {/* FINANCIAL HEALTH INDICATORS */}
+      {isVisible("health-indicators") && (
+        <BlurFade delay={D * 2.5}>
+          <div className="finance-card p-5">
+            <p className="label-mono mb-4">Financial Health Indicators</p>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              {/* Debt-to-Asset */}
+              <div className="space-y-1.5">
+                <p className="text-[11px] text-muted-foreground">Debt / Assets</p>
+                <p className={cn("text-lg font-semibold tabular-nums", debtToAssetRatio <= 30 ? "text-income" : debtToAssetRatio <= 60 ? "text-foreground" : "text-expense")}>
+                  {debtToAssetRatio.toFixed(1)}%
+                </p>
+                <p className="text-[10px] text-muted-foreground/60">
+                  {debtToAssetRatio <= 30 ? "Healthy" : debtToAssetRatio <= 60 ? "Moderate" : "High"} — lower is better
+                </p>
+              </div>
+
+              {/* Debt-to-Income */}
+              <div className="space-y-1.5">
+                <p className="text-[11px] text-muted-foreground">Debt / Income</p>
+                <p className={cn("text-lg font-semibold tabular-nums", debtToIncomeRatio <= 35 ? "text-income" : debtToIncomeRatio <= 50 ? "text-foreground" : "text-expense")}>
+                  {debtToIncomeRatio.toFixed(1)}%
+                </p>
+                <p className="text-[10px] text-muted-foreground/60">
+                  {debtToIncomeRatio <= 35 ? "Healthy" : debtToIncomeRatio <= 50 ? "Caution" : "Overleveraged"} — target &lt;35%
+                </p>
+              </div>
+
+              {/* Savings Rate */}
+              <div className="space-y-1.5">
+                <p className="text-[11px] text-muted-foreground">Savings Rate</p>
+                <p className={cn("text-lg font-semibold tabular-nums", savingsRate >= 20 ? "text-income" : savingsRate >= 10 ? "text-foreground" : "text-expense")}>
+                  {savingsRate.toFixed(1)}%
+                </p>
+                <p className="text-[10px] text-muted-foreground/60">
+                  {savingsRate >= 20 ? "Excellent" : savingsRate >= 10 ? "Good" : "Low"} — target 15-20%+
+                </p>
+              </div>
+
+              {/* Emergency Fund */}
+              <div className="space-y-1.5">
+                <p className="text-[11px] text-muted-foreground">Emergency Fund</p>
+                <p className={cn("text-lg font-semibold tabular-nums", emergencyFundMonths >= 6 ? "text-income" : emergencyFundMonths >= 3 ? "text-foreground" : "text-expense")}>
+                  {emergencyFundMonths.toFixed(1)} mo
+                </p>
+                <p className="text-[10px] text-muted-foreground/60">
+                  {emergencyFundMonths >= 6 ? "Strong" : emergencyFundMonths >= 3 ? "Adequate" : "Build up"} — target 3-6 months
+                </p>
+              </div>
+
+              {/* Wealth-to-Income */}
+              <div className="space-y-1.5">
+                <p className="text-[11px] text-muted-foreground">Wealth / Income</p>
+                <p className={cn("text-lg font-semibold tabular-nums", wealthToIncomeRatio >= 5 ? "text-income" : wealthToIncomeRatio >= 1 ? "text-foreground" : "text-expense")}>
+                  {wealthToIncomeRatio.toFixed(1)}x
+                </p>
+                <p className="text-[10px] text-muted-foreground/60">
+                  {wealthToIncomeRatio >= 5 ? "Strong" : wealthToIncomeRatio >= 1 ? "Growing" : "Early stage"} — target 10-12x at retirement
+                </p>
+              </div>
+
+              {/* Investment to Net Worth */}
+              <div className="space-y-1.5">
+                <p className="text-[11px] text-muted-foreground">Investment / Net Worth</p>
+                <p className={cn("text-lg font-semibold tabular-nums", investmentToNetWorthRatio >= 70 ? "text-income" : investmentToNetWorthRatio >= 40 ? "text-foreground" : "text-expense")}>
+                  {investmentToNetWorthRatio.toFixed(1)}%
+                </p>
+                <p className="text-[10px] text-muted-foreground/60">
+                  {investmentToNetWorthRatio >= 70 ? "Great" : investmentToNetWorthRatio >= 40 ? "Good" : "Grow investments"} — higher = money works for you
+                </p>
+              </div>
+
+              {/* Financial Independence */}
+              <div className="space-y-1.5">
+                <p className="text-[11px] text-muted-foreground">FI Ratio (Passive / Expenses)</p>
+                <p className={cn("text-lg font-semibold tabular-nums", fiRatio >= 100 ? "text-income" : fiRatio >= 25 ? "text-foreground" : "text-expense")}>
+                  {fiRatio.toFixed(1)}%
+                </p>
+                <p className="text-[10px] text-muted-foreground/60">
+                  {fiRatio >= 100 ? "Financially Independent!" : fiRatio >= 25 ? "On track" : "Building"} — 100% = freedom
+                </p>
+              </div>
+
+              {/* Net Cash Flow */}
+              <div className="space-y-1.5">
+                <p className="text-[11px] text-muted-foreground">Net Cash Flow</p>
+                <p className={cn("text-lg font-semibold tabular-nums", netCashFlow >= 0 ? "text-income" : "text-expense")}>
+                  {netCashFlow >= 0 ? "+" : ""}{format(netCashFlow)}
+                </p>
+                <p className="text-[10px] text-muted-foreground/60">
+                  {netCashFlow >= 0 ? "Surplus" : "Deficit"} — income minus expenses
+                </p>
+              </div>
+            </div>
+          </div>
+        </BlurFade>
+      )}
 
       {/* 6. INCOME VS EXPENSES BAR + ASSET ALLOCATION DONUT */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
