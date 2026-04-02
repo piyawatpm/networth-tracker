@@ -36,6 +36,10 @@ export type ExpenseType =
   | "gifts"
   | "other";
 
+export type PaymentMethod = "cash" | "debit_card" | "credit_card" | "bank_transfer" | "other";
+
+export type RecurringFrequency = "weekly" | "fortnightly" | "monthly" | "yearly";
+
 export type HoldingType = "stock" | "etf" | "fund" | "bond" | "other";
 export type AccountType = "normal" | "super";
 export type DebtDirection = "i_owe" | "owed_to_me";
@@ -61,6 +65,26 @@ export interface ExpenseEntry {
   date: string; // YYYY-MM-DD
   notes: string;
   images: string[]; // base64 data URLs
+  createdAt: number;
+  paymentMethod: PaymentMethod;
+  isRecurring?: boolean;
+  recurringId?: string;
+}
+
+export interface RecurringExpense {
+  id: string;
+  type: ExpenseType;
+  description: string;
+  amount: number;
+  currency: Currency;
+  vendor: string;
+  paymentMethod: PaymentMethod;
+  notes: string;
+  frequency: RecurringFrequency;
+  startDate: string; // YYYY-MM-DD
+  endDate?: string; // YYYY-MM-DD
+  lastGeneratedDate?: string; // YYYY-MM-DD
+  active: boolean;
   createdAt: number;
 }
 
@@ -125,4 +149,23 @@ export interface CryptoTransaction {
 export interface CachedRates {
   rates: Record<string, number>;
   fetchedAt: number; // unix timestamp ms
+}
+
+/** Normalize old ExpenseEntry records that lack new fields */
+export function normalizeExpenseEntry(e: Record<string, unknown>): ExpenseEntry {
+  return {
+    id: e.id as string,
+    type: (e.type as ExpenseType) ?? "other",
+    description: (e.description as string) ?? "",
+    amount: (e.amount as number) ?? 0,
+    currency: (e.currency as Currency) ?? "AUD",
+    vendor: (e.vendor as string) ?? "",
+    date: (e.date as string) ?? "",
+    notes: (e.notes as string) ?? "",
+    images: (e.images as string[]) ?? [],
+    createdAt: (e.createdAt as number) ?? Date.now(),
+    paymentMethod: (e.paymentMethod as PaymentMethod) ?? "other",
+    isRecurring: (e.isRecurring as boolean) ?? false,
+    recurringId: e.recurringId as string | undefined,
+  };
 }

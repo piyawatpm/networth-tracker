@@ -1,4 +1,4 @@
-import type { IncomeType, ExpenseType, HoldingType, Currency } from "./types";
+import type { IncomeType, ExpenseType, HoldingType, Currency, PaymentMethod, RecurringFrequency } from "./types";
 
 export const INCOME_TYPE_LABELS: Record<IncomeType, string> = {
   salary: "Salary",
@@ -100,4 +100,27 @@ export const EXPENSE_TYPE_COLORS: Record<ExpenseType, string> = {
   travel: CHART_COLORS[10],
   gifts: CHART_COLORS[11],
   other: CHART_COLORS[12],
+};
+
+export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
+  cash: "Cash",
+  debit_card: "Debit Card",
+  credit_card: "Credit Card",
+  bank_transfer: "Bank Transfer",
+  other: "Other",
+};
+
+export const PAYMENT_METHOD_COLORS: Record<PaymentMethod, string> = {
+  cash: "#2e8b57",
+  debit_card: "#4d7cc7",
+  credit_card: "#c9503f",
+  bank_transfer: "#d4a033",
+  other: "#708090",
+};
+
+export const FREQUENCY_LABELS: Record<RecurringFrequency, string> = {
+  weekly: "Weekly",
+  fortnightly: "Fortnightly",
+  monthly: "Monthly",
+  yearly: "Yearly",
 };
