@@ -209,20 +209,11 @@ export default function IncomePage() {
     const base = getPieBaseOption(isDark);
     return {
       ...base,
-      legend: {
-        show: true,
-        bottom: 0,
-        left: "center",
-        textStyle: { color: isDark ? "#888" : "#968360", fontSize: 10 },
-        icon: "circle",
-        itemWidth: 8,
-        itemHeight: 8,
-        itemGap: 12,
-      },
+      legend: { show: false },
       series: [{
         type: "pie" as const,
         radius: ["60%", "85%"],
-        center: ["50%", "45%"],
+        center: ["50%", "50%"],
         padAngle: 2,
         data: breakdownByType.map((item) => ({
           name: item.label,
