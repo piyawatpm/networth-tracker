@@ -38,9 +38,11 @@ import {
 function CryptoDonut({
   chartData,
   isDark,
+  chartRef,
 }: {
   chartData: { token: string; value: number; fill: string }[];
   isDark: boolean;
+  chartRef: React.RefObject<ReactECharts | null>;
 }) {
   const base = getPieBaseOption(isDark);
   const option = useMemo(
@@ -69,10 +71,10 @@ function CryptoDonut({
         },
       ],
     }),
-    [base, chartData, isDark],
+    [base, chartData],
   );
 
-  return <ReactECharts option={option} style={{ height: 260, width: "100%" }} />;
+  return <ReactECharts ref={chartRef} option={option} style={{ height: 260, width: "100%" }} />;
 }
 
 export default function CryptoPage() {
@@ -97,6 +99,15 @@ export default function CryptoPage() {
 
   // Live prices
   const [livePrices, setLivePrices] = useState<Record<string, number>>({});
+
+  // Chart ref for highlight/downplay
+  const donutRef = useRef<ReactECharts>(null);
+  const highlightSlice = useCallback((name: string) => {
+    donutRef.current?.getEchartsInstance()?.dispatchAction({ type: "highlight", name });
+  }, []);
+  const downplayAll = useCallback(() => {
+    donutRef.current?.getEchartsInstance()?.dispatchAction({ type: "downplay" });
+  }, []);
 
   // Exchange overrides (manual assignments persisted across CSV re-imports)
   const [exchangeOverrides, setExchangeOverrides] = useLocalStorage<Record<string, string>>(
@@ -643,16 +654,21 @@ export default function CryptoPage() {
           <div className="finance-card p-6">
             <p className="label-mono mb-4">ALLOCATION</p>
             {chartData.length > 0 ? (
-              <CryptoDonut chartData={chartData} isDark={isDark} />
+              <CryptoDonut chartData={chartData} chartRef={donutRef} />
             ) : allChartTokens.length > 0 ? (
               <div className="flex items-center justify-center h-[260px] text-sm text-muted-foreground">
                 All tokens hidden
               </div>
             ) : null}
-            {/* Clickable legend */}
-            <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1.5">
+            {/* Interactive legend with progress bars */}
+            <div className="mt-4 space-y-1">
               {allChartTokens.map((d) => {
                 const isSelected = selectedTokens[d.token] !== false;
+                const visibleTotal = allChartTokens
+                  .filter((t) => selectedTokens[t.token] !== false)
+                  .reduce((s, t) => s + t.value, 0);
+                const pct = isSelected && visibleTotal > 0
+                  ? (d.value / visibleTotal) * 100 : 0;
                 return (
                   <button
                     key={d.token}
@@ -662,18 +678,33 @@ export default function CryptoPage() {
                         [d.token]: !isSelected,
                       }))
                     }
+                    onMouseEnter={() => isSelected && highlightSlice(d.token)}
+                    onMouseLeave={downplayAll}
                     className={cn(
-                      "flex items-center gap-1.5 transition-opacity cursor-pointer",
-                      !isSelected && "opacity-30",
+                      "flex flex-col w-full text-left rounded-lg px-2 py-1.5 transition-all",
+                      isSelected ? "hover:bg-secondary/50" : "opacity-40 hover:opacity-60",
                     )}
                   >
-                    <span
-                      className="inline-block h-2 w-2 shrink-0 rounded-full"
-                      style={{ backgroundColor: d.fill }}
-                    />
-                    <span className="text-xs text-muted-foreground">
-                      {d.token}
-                    </span>
+                    <div className="flex items-center justify-between text-sm mb-1">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={cn("inline-block h-2.5 w-2.5 rounded-full transition-transform", !isSelected && "scale-75")}
+                          style={{ backgroundColor: isSelected ? d.fill : "#aaa" }}
+                        />
+                        <span className={cn("text-xs", !isSelected && "line-through text-muted-foreground")}>{d.token}</span>
+                      </div>
+                      <span className="font-mono text-xs tabular-nums text-muted-foreground">
+                        {isSelected ? `${format(d.value, "USD")} (${pct.toFixed(1)}%)` : "—"}
+                      </span>
+                    </div>
+                    {isSelected && (
+                      <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                        <div
+                          className="h-full rounded-full transition-all duration-500"
+                          style={{ width: `${pct}%`, backgroundColor: d.fill }}
+                        />
+                      </div>
+                    )}
                   </button>
                 );
               })}

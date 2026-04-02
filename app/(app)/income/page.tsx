@@ -600,7 +600,7 @@ export default function IncomePage() {
                     <thead>
                       <tr className="border-b border-border/60 text-left">
                         <th
-                          className="px-4 py-3 font-medium text-muted-foreground cursor-pointer select-none"
+                          className="px-4 pb-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground font-medium cursor-pointer select-none"
                           onClick={() => toggleSort("date")}
                         >
                           <span className="inline-flex items-center gap-1">
@@ -610,17 +610,17 @@ export default function IncomePage() {
                             )}
                           </span>
                         </th>
-                        <th className="px-4 py-3 font-medium text-muted-foreground">
+                        <th className="px-4 pb-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
                           Type
                         </th>
-                        <th className="px-4 py-3 font-medium text-muted-foreground hidden md:table-cell">
+                        <th className="px-4 pb-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground font-medium hidden md:table-cell">
                           Source
                         </th>
-                        <th className="px-4 py-3 font-medium text-muted-foreground hidden sm:table-cell">
+                        <th className="px-4 pb-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground font-medium hidden sm:table-cell">
                           Description
                         </th>
                         <th
-                          className="px-4 py-3 font-medium text-muted-foreground text-right cursor-pointer select-none"
+                          className="px-4 pb-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground font-medium text-right cursor-pointer select-none"
                           onClick={() => toggleSort("amount")}
                         >
                           <span className="inline-flex items-center justify-end gap-1">
@@ -630,7 +630,7 @@ export default function IncomePage() {
                             )}
                           </span>
                         </th>
-                        <th className="px-4 py-3 font-medium text-muted-foreground text-right">
+                        <th className="px-4 pb-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground font-medium text-right">
                           Actions
                         </th>
                       </tr>

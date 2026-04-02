@@ -649,25 +649,25 @@ export default function ExpensesPage() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-border/60 text-left">
-                        <th className="px-4 py-3 font-medium text-muted-foreground">
+                        <th className="px-4 pb-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
                           Date
                         </th>
-                        <th className="px-4 py-3 font-medium text-muted-foreground">
+                        <th className="px-4 pb-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
                           Type
                         </th>
-                        <th className="px-4 py-3 font-medium text-muted-foreground hidden sm:table-cell">
+                        <th className="px-4 pb-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground font-medium hidden sm:table-cell">
                           Description
                         </th>
-                        <th className="px-4 py-3 font-medium text-muted-foreground hidden md:table-cell">
+                        <th className="px-4 pb-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground font-medium hidden md:table-cell">
                           Vendor
                         </th>
-                        <th className="px-4 py-3 font-medium text-muted-foreground text-right">
+                        <th className="px-4 pb-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground font-medium text-right">
                           Amount
                         </th>
-                        <th className="px-4 py-3 font-medium text-muted-foreground hidden lg:table-cell">
+                        <th className="px-4 pb-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground font-medium hidden lg:table-cell">
                           Method
                         </th>
-                        <th className="px-4 py-3 font-medium text-muted-foreground text-right">
+                        <th className="px-4 pb-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground font-medium text-right">
                           Actions
                         </th>
                       </tr>
