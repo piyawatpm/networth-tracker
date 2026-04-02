@@ -208,7 +208,6 @@ export default function IncomePage() {
   function handleDelete(id: string) {
     setEntries((prev) => prev.filter((e) => e.id !== id));
   }
-  console.log("pieOption", pieOption);
 
   // ---- Render --------------------------------------------------------------
 
@@ -261,38 +260,6 @@ export default function IncomePage() {
           </div>
         </div>
       </BlurFade>
-
-      {/* ================================================================= */}
-      {/* TEST: Hardcoded chart — does this blink on hover?                   */}
-      {/* ================================================================= */}
-      <div className="finance-card p-6">
-        <p className="label-mono mb-4">TEST: Hardcoded Data (delete later)</p>
-        <ReactECharts
-          option={{
-            tooltip: { trigger: "item", formatter: "{b}: {c} ({d}%)" },
-            series: [
-              {
-                type: "pie",
-                radius: "55%",
-                center: ["50%", "50%"],
-                data: [
-                  { value: 335, name: "Salary" },
-                  { value: 310, name: "Freelance" },
-                  { value: 234, name: "Uber" },
-                ],
-                itemStyle: {
-                  emphasis: {
-                    shadowBlur: 10,
-                    shadowOffsetX: 0,
-                    shadowColor: "rgba(0, 0, 0, 0.5)",
-                  },
-                },
-              },
-            ],
-          }}
-          style={{ height: 300 }}
-        />
-      </div>
 
       {/* ================================================================= */}
       {/* This Month Breakdown                                               */}
