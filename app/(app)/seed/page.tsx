@@ -259,8 +259,14 @@ export function generateSampleData() {
     { date: "2026-04-02", value: 10200, valueWithSuper: 63400 },
   ];
 
-  // ---- NET WORTH GOAL -----------------------------------------------------
-  const networthGoal = { amount: 100000, currency: "AUD", setAt: now };
+  // ---- NET WORTH GOALS (multiple, 1 achieved) ----------------------------
+  const networthGoals = [
+    { id: id(), name: "First 50K", amount: 50000, currency: "AUD", setAt: now - 180 * 86400000, achievedAt: now - 60 * 86400000 },
+    { id: id(), name: "Emergency Fund", amount: 20000, currency: "AUD", setAt: now - 120 * 86400000, achievedAt: now - 30 * 86400000 },
+    { id: id(), name: "100K Club", amount: 100000, currency: "AUD", setAt: now, achievedAt: null },
+    { id: id(), name: "House Deposit", amount: 200000, currency: "AUD", setAt: now, achievedAt: null },
+    { id: id(), name: "Quarter Million", amount: 250000, currency: "AUD", setAt: now, achievedAt: null },
+  ];
 
   // ---- PRICE UPDATE LOG ---------------------------------------------------
   const priceUpdateLog = [
@@ -279,7 +285,7 @@ export function generateSampleData() {
     debtTransactions,
     networthSnapshots,
     portfolioSnapshots,
-    networthGoal,
+    networthGoals,
     recurringIncomeTemplates,
     recurringExpenseTemplates,
     priceUpdateLog,
@@ -304,7 +310,8 @@ export default function SeedPage() {
     localStorage.setItem("debt_transactions", JSON.stringify(data.debtTransactions));
     localStorage.setItem("networth_snapshots", JSON.stringify(data.networthSnapshots));
     localStorage.setItem("portfolio_snapshots", JSON.stringify(data.portfolioSnapshots));
-    localStorage.setItem("networth_goal", JSON.stringify(data.networthGoal));
+    localStorage.setItem("networth_goals", JSON.stringify(data.networthGoals));
+    localStorage.removeItem("networth_goal"); // clean old single goal
     localStorage.setItem("recurring_income_templates", JSON.stringify(data.recurringIncomeTemplates));
     localStorage.setItem("recurring_expense_templates", JSON.stringify(data.recurringExpenseTemplates));
     localStorage.setItem("price_update_log", JSON.stringify(data.priceUpdateLog));

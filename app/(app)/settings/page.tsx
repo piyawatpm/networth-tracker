@@ -43,6 +43,7 @@ const ALL_STORAGE_KEYS = [
   "fx_rates_cache",
   "networth_snapshots",
   "networth_goal",
+  "networth_goals",
   "portfolio_snapshots",
   "price_cache",
   "price_update_log",
@@ -172,7 +173,8 @@ export default function SettingsPage() {
     localStorage.setItem("debt_transactions", JSON.stringify(data.debtTransactions));
     localStorage.setItem("networth_snapshots", JSON.stringify(data.networthSnapshots));
     localStorage.setItem("portfolio_snapshots", JSON.stringify(data.portfolioSnapshots));
-    localStorage.setItem("networth_goal", JSON.stringify(data.networthGoal));
+    localStorage.setItem("networth_goals", JSON.stringify(data.networthGoals));
+    localStorage.removeItem("networth_goal");
     localStorage.setItem("recurring_income_templates", JSON.stringify(data.recurringIncomeTemplates));
     localStorage.setItem("recurring_expense_templates", JSON.stringify(data.recurringExpenseTemplates));
     localStorage.setItem("price_update_log", JSON.stringify(data.priceUpdateLog));
