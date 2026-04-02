@@ -22,8 +22,7 @@ import { BlurFade } from "@/components/ui/blur-fade";
 import { NumberTicker } from "@/components/ui/number-ticker";
 import { Input } from "@/components/ui/input";
 import ReactECharts from "echarts-for-react";
-import { useTheme } from "next-themes";
-import { getCartesianBaseOption, getPieBaseOption, ECHARTS_COLORS, formatAxisValue } from "@/lib/utils/echarts";
+import { ECHARTS_COLORS, formatAxisValue } from "@/lib/utils/echarts";
 import { Plus, Pencil, Trash2, Briefcase, ExternalLink, RefreshCw, Check, Zap, Hand, History } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -63,8 +62,6 @@ export default function PortfolioPage() {
     []
   );
   const { format, convert, currency, symbol } = useCurrency();
-  const { resolvedTheme } = useTheme();
-  const isDark = resolvedTheme === "dark";
 
   const [includeSuper, setIncludeSuper] = useState(true);
   const [typeFilter, setTypeFilter] = useState<HoldingType | "all">("all");
@@ -280,97 +277,50 @@ export default function PortfolioPage() {
       .sort((a, b) => b.value - a.value);
   }, [filteredHoldings, convert]);
 
+  // Shared chart style constants
+  const PC = { text: "#968360", border: "#c9c3a8", fg: "#2c251e", tooltipBg: "#f4f3ed" };
+  const chartTooltip = {
+    backgroundColor: PC.tooltipBg, borderColor: PC.border, borderWidth: 1,
+    padding: [8, 12], textStyle: { color: PC.fg, fontSize: 12 },
+    extraCssText: "border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);",
+  };
+
   // ECharts: Value Trend area chart option
-  const trendChartOption = useMemo(() => {
-    const base = getCartesianBaseOption(isDark);
-    return {
-      ...base,
-      grid: { top: 12, right: 12, bottom: 32, left: 56, containLabel: false },
-      xAxis: {
-        ...base.xAxis,
-        type: "category" as const,
-        data: trendData.map((d) => d.date),
-        boundaryGap: false,
-      },
-      yAxis: {
-        ...base.yAxis,
-        type: "value" as const,
-        axisLabel: {
-          ...base.yAxis.axisLabel,
-          formatter: formatAxisValue,
-        },
-      },
-      tooltip: {
-        ...base.tooltip,
-        trigger: "axis" as const,
-        formatter: (params: { name: string; value: number }[]) => {
-          const p = Array.isArray(params) ? params[0] : params;
-          return `<div style="font-size:12px"><span style="color:${isDark ? "#888" : "#968360"}">${p.name}</span><br/><b style="font-family:var(--font-geist-mono),monospace">${format(p.value)}</b></div>`;
-        },
-      },
-      series: [
-        {
-          type: "line" as const,
-          data: trendData.map((d) => d.value),
-          smooth: true,
-          symbol: "circle",
-          symbolSize: 4,
-          showSymbol: false,
-          emphasis: { focus: "series" as const, itemStyle: { borderWidth: 2 } },
-          lineStyle: { width: 2, color: ECHARTS_COLORS[0] },
-          itemStyle: { color: ECHARTS_COLORS[0] },
-          areaStyle: {
-            opacity: 0.15,
-            color: {
-              type: "linear" as const,
-              x: 0,
-              y: 0,
-              x2: 0,
-              y2: 1,
-              colorStops: [
-                { offset: 0, color: ECHARTS_COLORS[0] },
-                { offset: 1, color: "transparent" },
-              ],
-            },
-          },
-        },
-      ],
-    };
-  }, [trendData, isDark, format]);
+  const trendChartOption = {
+    backgroundColor: "transparent",
+    grid: { top: 12, right: 12, bottom: 32, left: 56, containLabel: false },
+    xAxis: {
+      type: "category" as const, data: trendData.map((d) => d.date), boundaryGap: false,
+      axisLine: { show: false }, axisTick: { show: false },
+      axisLabel: { color: PC.text, fontSize: 11 }, splitLine: { show: false },
+    },
+    yAxis: {
+      type: "value" as const,
+      axisLine: { show: false }, axisTick: { show: false },
+      axisLabel: { color: PC.text, fontSize: 11, formatter: formatAxisValue },
+      splitLine: { lineStyle: { color: PC.border, type: "dashed" as const, opacity: 0.5 } },
+    },
+    tooltip: { ...chartTooltip, trigger: "axis" as const, formatter: "{b}: {c}" },
+    series: [{
+      type: "line" as const, data: trendData.map((d) => d.value),
+      smooth: true, showSymbol: false,
+      lineStyle: { width: 2, color: ECHARTS_COLORS[0] },
+      itemStyle: { color: ECHARTS_COLORS[0] },
+      areaStyle: { opacity: 0.15, color: { type: "linear" as const, x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: ECHARTS_COLORS[0] }, { offset: 1, color: "transparent" }] } },
+    }],
+  };
 
   // ECharts: Allocation donut option
-  const allocationChartOption = useMemo(() => {
-    const base = getPieBaseOption(isDark);
-    return {
-      ...base,
-      tooltip: {
-        ...base.tooltip,
-        formatter: (params: { name: string; value: number; percent: number; color: string }) => {
-          return `<div style="font-size:12px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${params.color};margin-right:6px"></span>${params.name}<br/><b style="font-family:var(--font-geist-mono),monospace">${format(params.value)}</b> <span style="color:${isDark ? "#888" : "#968360"}">${params.percent.toFixed(1)}%</span></div>`;
-        },
-      },
-      series: [
-        {
-          type: "pie" as const,
-          radius: ["55%", "85%"],
-          center: ["50%", "50%"],
-          avoidLabelOverlap: false,
-          padAngle: 2,
-          itemStyle: { borderRadius: 4 },
-          label: { show: false },
-          emphasis: {
-            scale: true,
-            scaleSize: 4,
-          },
-          data: allocationData.map((d) => ({
-            name: d.name,
-            value: d.value,
-            itemStyle: { color: d.fill },
-          })),
-        },
-      ],
-    };
-  }, [allocationData, isDark, format]);
+  const allocationChartOption = {
+    backgroundColor: "transparent",
+    tooltip: { ...chartTooltip, trigger: "item" as const, formatter: "{b}: {c} ({d}%)" },
+    series: [{
+      type: "pie" as const, radius: ["55%", "85%"], center: ["50%", "50%"], padAngle: 2,
+      data: allocationData.map((d) => ({ name: d.name, value: d.value, itemStyle: { color: d.fill } })),
+      label: { show: false },
+      emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: "rgba(0,0,0,0.3)" } },
+    }],
+  };
 
   // Broker breakdown
   const brokerBreakdown = useMemo(() => {

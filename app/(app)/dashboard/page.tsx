@@ -8,12 +8,11 @@ import {
   TrendingDown,
 } from "lucide-react";
 import ReactECharts from "echarts-for-react";
-import { useTheme } from "next-themes";
 
 import { cn } from "@/lib/utils";
 import { BlurFade } from "@/components/ui/blur-fade";
 import { NumberTicker } from "@/components/ui/number-ticker";
-import { getCartesianBaseOption, getPieBaseOption, ECHARTS_COLORS, formatAxisValue } from "@/lib/utils/echarts";
+import { ECHARTS_COLORS, formatAxisValue } from "@/lib/utils/echarts";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 import { useCurrency } from "@/components/providers/currency-provider";
 import { GoalSection } from "@/components/dashboard/goal-section";
@@ -141,8 +140,6 @@ export default function DashboardPage() {
 
   const { convert, format, symbol } = useCurrency();
   const [period, setPeriod] = useState<Period>("M");
-  const { resolvedTheme } = useTheme();
-  const isDark = resolvedTheme === "dark";
 
   // ---- Derived data -------------------------------------------------------
 
@@ -315,251 +312,158 @@ export default function DashboardPage() {
 
   // ---- ECharts base -------------------------------------------------------
 
-  const base = useMemo(() => getCartesianBaseOption(isDark), [isDark]);
-  const pieBase = useMemo(() => getPieBaseOption(isDark), [isDark]);
-
-  // CSS variable colors need to be resolved at render time for ECharts
-  // We use computed style to get actual hex values
-  const [chartColors, setChartColors] = useState({ accent: "#c95f3f", income: "#22c55e", expense: "#ef4444" });
-  useEffect(() => {
-    const root = document.documentElement;
-    const computed = getComputedStyle(root);
-    const accent = computed.getPropertyValue("--accent").trim();
-    const income = computed.getPropertyValue("--income").trim();
-    const expense = computed.getPropertyValue("--expense").trim();
-    setChartColors({
-      accent: accent || (isDark ? "#e09770" : "#c95f3f"),
-      income: income || "#22c55e",
-      expense: expense || "#ef4444",
-    });
-  }, [isDark]);
+  // Hardcoded hex colors for ECharts (canvas can't use oklch/CSS vars)
+  const CC = {
+    accent: "#c95f3f",
+    income: "#2e8b57",
+    expense: "#cd5c5c",
+    text: "#968360",
+    border: "#c9c3a8",
+    fg: "#2c251e",
+    tooltipBg: "#f4f3ed",
+  };
 
   // ---- ECharts options ----------------------------------------------------
 
   // 1. Net Worth Trend (Area)
-  const nwTrendOption = useMemo(() => {
-    return {
-      ...base,
-      grid: { top: 12, right: 8, bottom: 28, left: 50, containLabel: false },
-      xAxis: {
-        ...base.xAxis,
-        type: "category" as const,
-        data: nwTrendData.map((d) => d.date),
-        boundaryGap: false,
-      },
-      yAxis: {
-        ...base.yAxis,
-        type: "value" as const,
-        axisLabel: {
-          ...base.yAxis.axisLabel,
-          formatter: (v: number) => formatAxisValue(v),
+  const nwTrendOption = {
+    backgroundColor: "transparent",
+    grid: { top: 12, right: 8, bottom: 28, left: 50, containLabel: false },
+    xAxis: {
+      type: "category" as const,
+      data: nwTrendData.map((d) => d.date),
+      boundaryGap: false,
+      axisLine: { show: false }, axisTick: { show: false },
+      axisLabel: { color: CC.text, fontSize: 11 },
+      splitLine: { show: false },
+    },
+    yAxis: {
+      type: "value" as const,
+      axisLine: { show: false }, axisTick: { show: false },
+      axisLabel: { color: CC.text, fontSize: 11, formatter: (v: number) => formatAxisValue(v) },
+      splitLine: { lineStyle: { color: CC.border, type: "dashed" as const, opacity: 0.5 } },
+    },
+    tooltip: {
+      trigger: "axis" as const,
+      backgroundColor: CC.tooltipBg, borderColor: CC.border, borderWidth: 1,
+      padding: [8, 12], textStyle: { color: CC.fg, fontSize: 12 },
+      extraCssText: "border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);",
+      formatter: "{b}: {c}",
+    },
+    series: [{
+      type: "line" as const,
+      data: nwTrendData.map((d) => d.value),
+      smooth: true, showSymbol: false,
+      lineStyle: { color: CC.accent, width: 2 },
+      itemStyle: { color: CC.accent },
+      areaStyle: {
+        color: { type: "linear" as const, x: 0, y: 0, x2: 0, y2: 1,
+          colorStops: [
+            { offset: 0, color: CC.accent + "33" },
+            { offset: 1, color: CC.accent + "00" },
+          ],
         },
       },
-      tooltip: {
-        ...base.tooltip,
-        trigger: "axis" as const,
-        formatter: (params: { data: number; axisValue: string }[]) => {
-          const p = Array.isArray(params) ? params[0] : params;
-          return `<span style="font-weight:600">${p.axisValue}</span><br/><span style="font-family:ui-monospace,monospace">${format(p.data)}</span>`;
-        },
-      },
-      series: [
-        {
-          type: "line" as const,
-          data: nwTrendData.map((d) => d.value),
-          smooth: true,
-          showSymbol: false,
-          lineStyle: { color: chartColors.accent, width: 2 },
-          itemStyle: { color: chartColors.accent },
-          areaStyle: {
-            color: {
-              type: "linear" as const,
-              x: 0, y: 0, x2: 0, y2: 1,
-              colorStops: [
-                { offset: 0, color: chartColors.accent + "33" },
-                { offset: 1, color: chartColors.accent + "00" },
-              ],
-            },
-          },
-        },
-      ],
-    };
-  }, [base, nwTrendData, chartColors.accent, format]);
+    }],
+  };
 
   // 2. Daily Cash Flow (Bar - 14 days)
-  const dailyCashFlowOption = useMemo(() => {
-    return {
-      ...base,
-      grid: { top: 12, right: 8, bottom: 28, left: 44, containLabel: false },
-      xAxis: {
-        ...base.xAxis,
-        type: "category" as const,
-        data: dailyCashFlow.map((d) => d.date),
-        axisLabel: {
-          ...base.xAxis.axisLabel,
-          interval: 1,
-        },
-      },
-      yAxis: {
-        ...base.yAxis,
-        type: "value" as const,
-        axisLabel: {
-          ...base.yAxis.axisLabel,
-          formatter: (v: number) => formatAxisValue(v),
-        },
-      },
-      tooltip: {
-        ...base.tooltip,
-        trigger: "axis" as const,
-        formatter: (params: { seriesName: string; value: number; color: string }[]) => {
-          if (!Array.isArray(params)) return "";
-          const header = `<div style="margin-bottom:4px;font-weight:600">${params[0].value !== undefined ? dailyCashFlow[0]?.date : ""}</div>`;
-          const rows = params.map(
-            (p) =>
-              `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><span style="display:flex;align-items:center;gap:6px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color}"></span>${p.seriesName}</span><span style="font-family:ui-monospace,monospace;font-weight:500">${format(p.value)}</span></div>`
-          );
-          return header + rows.join("");
-        },
-      },
-      series: [
-        {
-          name: "Income",
-          type: "bar" as const,
-          data: dailyCashFlow.map((d) => d.income),
-          itemStyle: { color: chartColors.income, borderRadius: [3, 3, 0, 0] },
-          barGap: "10%",
-        },
-        {
-          name: "Expenses",
-          type: "bar" as const,
-          data: dailyCashFlow.map((d) => d.expenses),
-          itemStyle: { color: chartColors.expense, borderRadius: [3, 3, 0, 0] },
-        },
-      ],
-    };
-  }, [base, dailyCashFlow, chartColors, format]);
+  const dailyCashFlowOption = {
+    backgroundColor: "transparent",
+    grid: { top: 12, right: 8, bottom: 28, left: 44, containLabel: false },
+    xAxis: {
+      type: "category" as const,
+      data: dailyCashFlow.map((d) => d.date),
+      axisLine: { show: false }, axisTick: { show: false },
+      axisLabel: { color: CC.text, fontSize: 11, interval: 1 },
+      splitLine: { show: false },
+    },
+    yAxis: {
+      type: "value" as const,
+      axisLine: { show: false }, axisTick: { show: false },
+      axisLabel: { color: CC.text, fontSize: 11, formatter: (v: number) => formatAxisValue(v) },
+      splitLine: { lineStyle: { color: CC.border, type: "dashed" as const, opacity: 0.5 } },
+    },
+    tooltip: {
+      trigger: "axis" as const,
+      backgroundColor: CC.tooltipBg, borderColor: CC.border, borderWidth: 1,
+      padding: [8, 12], textStyle: { color: CC.fg, fontSize: 12 },
+      extraCssText: "border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);",
+    },
+    series: [
+      { name: "Income", type: "bar" as const, data: dailyCashFlow.map((d) => d.income), itemStyle: { color: CC.income, borderRadius: [3, 3, 0, 0] }, barGap: "10%" },
+      { name: "Expenses", type: "bar" as const, data: dailyCashFlow.map((d) => d.expenses), itemStyle: { color: CC.expense, borderRadius: [3, 3, 0, 0] } },
+    ],
+  };
 
   // 3. Income vs Expenses (Bar - 6 months)
-  const incExpBarOption = useMemo(() => {
-    return {
-      ...base,
-      grid: { top: 12, right: 8, bottom: 28, left: 48, containLabel: false },
-      xAxis: {
-        ...base.xAxis,
-        type: "category" as const,
-        data: barData.map((d) => d.month),
-      },
-      yAxis: {
-        ...base.yAxis,
-        type: "value" as const,
-        axisLabel: {
-          ...base.yAxis.axisLabel,
-          formatter: (v: number) => formatAxisValue(v),
-        },
-      },
-      tooltip: {
-        ...base.tooltip,
-        trigger: "axis" as const,
-        formatter: (params: { seriesName: string; value: number; color: string }[]) => {
-          if (!Array.isArray(params)) return "";
-          const rows = params.map(
-            (p) =>
-              `<div style="display:flex;align-items:center;justify-content:space-between;gap:16px"><span style="display:flex;align-items:center;gap:6px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color}"></span>${p.seriesName}</span><span style="font-family:ui-monospace,monospace;font-weight:500">${format(p.value)}</span></div>`
-          );
-          return rows.join("");
-        },
-      },
-      series: [
-        {
-          name: "Income",
-          type: "bar" as const,
-          data: barData.map((d) => d.income),
-          itemStyle: { color: chartColors.income, borderRadius: [6, 6, 0, 0] },
-          barGap: "15%",
-        },
-        {
-          name: "Expenses",
-          type: "bar" as const,
-          data: barData.map((d) => d.expenses),
-          itemStyle: { color: chartColors.expense, borderRadius: [6, 6, 0, 0] },
-        },
-      ],
-    };
-  }, [base, barData, chartColors, format]);
+  const incExpBarOption = {
+    backgroundColor: "transparent",
+    grid: { top: 12, right: 8, bottom: 28, left: 48, containLabel: false },
+    xAxis: {
+      type: "category" as const, data: barData.map((d) => d.month),
+      axisLine: { show: false }, axisTick: { show: false },
+      axisLabel: { color: CC.text, fontSize: 11 },
+      splitLine: { show: false },
+    },
+    yAxis: {
+      type: "value" as const,
+      axisLine: { show: false }, axisTick: { show: false },
+      axisLabel: { color: CC.text, fontSize: 11, formatter: (v: number) => formatAxisValue(v) },
+      splitLine: { lineStyle: { color: CC.border, type: "dashed" as const, opacity: 0.5 } },
+    },
+    tooltip: {
+      trigger: "axis" as const,
+      backgroundColor: CC.tooltipBg, borderColor: CC.border, borderWidth: 1,
+      padding: [8, 12], textStyle: { color: CC.fg, fontSize: 12 },
+      extraCssText: "border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);",
+    },
+    series: [
+      { name: "Income", type: "bar" as const, data: barData.map((d) => d.income), itemStyle: { color: CC.income, borderRadius: [6, 6, 0, 0] }, barGap: "15%" },
+      { name: "Expenses", type: "bar" as const, data: barData.map((d) => d.expenses), itemStyle: { color: CC.expense, borderRadius: [6, 6, 0, 0] } },
+    ],
+  };
+
+  // Shared pie tooltip
+  const pieTooltip = {
+    trigger: "item" as const,
+    formatter: "{b}: {c} ({d}%)",
+    backgroundColor: CC.tooltipBg, borderColor: CC.border, borderWidth: 1,
+    padding: [8, 12], textStyle: { color: CC.fg, fontSize: 12 },
+    extraCssText: "border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);",
+  };
+  const pieEmphasis = { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: "rgba(0,0,0,0.3)" } };
 
   // 4. Asset Allocation (Pie/Donut)
-  const allocationPieOption = useMemo(() => {
-    return {
-      ...pieBase,
-      series: [{
-        type: "pie" as const,
-        radius: ["55%", "90%"],
-        center: ["50%", "50%"],
-        data: allocationData.map((d) => ({
-          name: d.name,
-          value: d.value,
-          itemStyle: { color: d.color },
-        })),
-        label: { show: false },
-        emphasis: { scale: true, scaleSize: 6 },
-        padAngle: 2,
-      }],
-      tooltip: {
-        ...pieBase.tooltip,
-        formatter: (params: { name: string; value: number; percent: number }) =>
-          `<span style="font-weight:600">${params.name}</span><br/>${format(params.value)} (${params.percent}%)`,
-      },
-    };
-  }, [pieBase, allocationData, format]);
+  const allocationPieOption = {
+    backgroundColor: "transparent",
+    tooltip: pieTooltip,
+    series: [{
+      type: "pie" as const, radius: ["55%", "90%"], center: ["50%", "50%"], padAngle: 2,
+      data: allocationData.map((d) => ({ name: d.name, value: d.value, itemStyle: { color: d.color } })),
+      label: { show: false }, emphasis: pieEmphasis,
+    }],
+  };
 
-  const incomePieOption = useMemo(() => {
-    return {
-      ...pieBase,
-      series: [{
-        type: "pie" as const,
-        radius: ["50%", "90%"],
-        center: ["50%", "50%"],
-        data: incomeByType.map((d) => ({
-          name: d.name,
-          value: d.value,
-          itemStyle: { color: d.color },
-        })),
-        label: { show: false },
-        emphasis: { scale: true, scaleSize: 6 },
-        padAngle: 2,
-      }],
-      tooltip: {
-        ...pieBase.tooltip,
-        formatter: (params: { name: string; value: number; percent: number }) =>
-          `<span style="font-weight:600">${params.name}</span><br/>${format(params.value)} (${params.percent}%)`,
-      },
-    };
-  }, [pieBase, incomeByType, format]);
+  const incomePieOption = {
+    backgroundColor: "transparent",
+    tooltip: pieTooltip,
+    series: [{
+      type: "pie" as const, radius: ["50%", "90%"], center: ["50%", "50%"], padAngle: 2,
+      data: incomeByType.map((d) => ({ name: d.name, value: d.value, itemStyle: { color: d.color } })),
+      label: { show: false }, emphasis: pieEmphasis,
+    }],
+  };
 
-  const expensePieOption = useMemo(() => {
-    return {
-      ...pieBase,
-      series: [
-        {
-          type: "pie" as const,
-          radius: ["50%", "90%"],
-          center: ["50%", "50%"],
-          data: expenseByType.map((d) => ({
-            name: d.name,
-            value: d.value,
-            itemStyle: { color: d.color },
-          })),
-          label: { show: false },
-          emphasis: { scale: true, scaleSize: 6 },
-          padAngle: 2,
-        }],
-      tooltip: {
-        ...pieBase.tooltip,
-        formatter: (params: { name: string; value: number; percent: number }) =>
-          `<span style="font-weight:600">${params.name}</span><br/>${format(params.value)} (${params.percent}%)`,
-      },
-    };
-  }, [pieBase, expenseByType, format]);
+  const expensePieOption = {
+    backgroundColor: "transparent",
+    tooltip: pieTooltip,
+    series: [{
+      type: "pie" as const, radius: ["50%", "90%"], center: ["50%", "50%"], padAngle: 2,
+      data: expenseByType.map((d) => ({ name: d.name, value: d.value, itemStyle: { color: d.color } })),
+      label: { show: false }, emphasis: pieEmphasis,
+    }],
+  };
 
   // ---- Render -------------------------------------------------------------
 
