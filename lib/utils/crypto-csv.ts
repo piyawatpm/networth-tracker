@@ -276,6 +276,82 @@ export function computeHoldings(transactions: CryptoTransaction[]): CryptoHoldin
   return holdings.sort((a, b) => b.currentValueUsd - a.currentValueUsd);
 }
 
+// ---------------------------------------------------------------------------
+// Compute portfolio value history from transaction CSV
+// ---------------------------------------------------------------------------
+
+export interface PortfolioSnapshot {
+  date: string; // YYYY-MM-DD
+  totalValueUsd: number;
+  totalCostUsd: number;
+}
+
+export function computePortfolioHistory(csvText: string): PortfolioSnapshot[] {
+  // Try to detect and parse as transactions
+  const format = detectFormat(csvText);
+  if (format !== "transactions") return [];
+
+  const transactions = parseCryptoCSV(csvText);
+  if (transactions.length === 0) return [];
+
+  // Sort transactions by date ascending
+  const sorted = [...transactions].sort((a, b) => a.date.localeCompare(b.date));
+
+  // Track cumulative holdings: token → { amount, costUsd, lastPriceUsd }
+  const state = new Map<string, { amount: number; costUsd: number; lastPriceUsd: number }>();
+  const snapshots: PortfolioSnapshot[] = [];
+
+  for (const tx of sorted) {
+    const token = tx.token;
+    if (!state.has(token)) {
+      state.set(token, { amount: 0, costUsd: 0, lastPriceUsd: tx.priceUsd ?? 0 });
+    }
+    const s = state.get(token)!;
+
+    // Update price if available
+    if (tx.priceUsd != null) s.lastPriceUsd = tx.priceUsd;
+
+    switch (tx.type) {
+      case "buy":
+      case "transferIn":
+        s.amount += tx.amount;
+        if (tx.totalValueUsd) s.costUsd += tx.totalValueUsd;
+        break;
+      case "sell":
+      case "transferOut":
+        s.amount -= tx.amount;
+        if (tx.totalValueUsd) s.costUsd -= tx.totalValueUsd;
+        break;
+    }
+
+    // Compute total portfolio value at this point
+    let totalValue = 0;
+    let totalCost = 0;
+    for (const [tk, holding] of state) {
+      if (Math.abs(holding.amount) < 0.0001) continue;
+      // Stablecoins valued at $1 per unit
+      const isStable = tk.toUpperCase() === "USDC" || tk.toUpperCase() === "USDT" ||
+        tk.toUpperCase() === "BUSD" || tk.toUpperCase() === "DAI" ||
+        tk.toUpperCase() === "USD1" || tk.toUpperCase() === "TUSD";
+      const price = isStable ? 1 : holding.lastPriceUsd;
+      totalValue += holding.amount * price;
+      totalCost += Math.max(0, holding.costUsd);
+    }
+
+    // Extract date (YYYY-MM-DD from "YYYY-MM-DD HH:MM:SS")
+    const dateOnly = tx.date.split(" ")[0];
+
+    // Only add snapshot if date changed (avoid duplicates per date, keep last)
+    if (snapshots.length > 0 && snapshots[snapshots.length - 1].date === dateOnly) {
+      snapshots[snapshots.length - 1] = { date: dateOnly, totalValueUsd: totalValue, totalCostUsd: totalCost };
+    } else {
+      snapshots.push({ date: dateOnly, totalValueUsd: totalValue, totalCostUsd: totalCost });
+    }
+  }
+
+  return snapshots;
+}
+
 export function getTotalCryptoValueUsd(holdings: CryptoHolding[]): number {
   return holdings.reduce((sum, h) => sum + h.currentValueUsd, 0);
 }

@@ -9,6 +9,7 @@ import {
   getTotalCryptoValueUsd,
   getTotalCryptoCostUsd,
   getCashValueUsd,
+  computePortfolioHistory,
 } from "@/lib/utils/crypto-csv";
 import {
   fetchCryptoPrices,
@@ -21,8 +22,8 @@ import type { CryptoHolding } from "@/lib/utils/types";
 import { BlurFade } from "@/components/ui/blur-fade";
 import { NumberTicker } from "@/components/ui/number-ticker";
 import ReactECharts from "echarts-for-react";
-import { ECHARTS_COLORS, getPieBaseOption } from "@/lib/utils/echarts";
-import { Upload, FileText, X, Bitcoin, ArrowUpDown } from "lucide-react";
+import { ECHARTS_COLORS, getPieBaseOption, getCartesianBaseOption } from "@/lib/utils/echarts";
+import { Upload, FileText, X, Bitcoin, ArrowUpDown, Tags } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -104,6 +105,13 @@ export default function CryptoPage() {
   const [editingExchange, setEditingExchange] = useState<string | null>(null);
   const [editExchangeValue, setEditExchangeValue] = useState("");
 
+  // Stablecoin tag overrides
+  const [stablecoinTags, setStablecoinTags] = useLocalStorage<Record<string, boolean>>(
+    "crypto_stablecoin_tags",
+    {},
+  );
+  const [showTagDialog, setShowTagDialog] = useState(false);
+
   const getExchange = useCallback(
     (holding: CryptoHolding) => exchangeOverrides[holding.token] ?? holding.exchange ?? "",
     [exchangeOverrides],
@@ -125,10 +133,55 @@ export default function CryptoPage() {
     [csvText],
   );
 
+  const portfolioHistory = useMemo(
+    () => (csvText ? computePortfolioHistory(csvText) : []),
+    [csvText],
+  );
+
+  // Apply stablecoin tags: merge user-tagged stablecoins into CASH
+  const taggedHoldings = useMemo(() => {
+    const stableTokens = Object.entries(stablecoinTags)
+      .filter(([, isStable]) => isStable)
+      .map(([token]) => token);
+
+    if (stableTokens.length === 0) return holdings;
+
+    const cashHolding: CryptoHolding = {
+      token: "CASH",
+      amount: 0,
+      totalCostUsd: 0,
+      currentValueUsd: 0,
+      exchange: undefined,
+    };
+    const result: CryptoHolding[] = [];
+
+    for (const h of holdings) {
+      if (h.token === "CASH" || stableTokens.includes(h.token)) {
+        cashHolding.amount += h.amount;
+        cashHolding.totalCostUsd += h.totalCostUsd;
+        cashHolding.currentValueUsd += h.currentValueUsd;
+        // Merge exchanges
+        if (h.exchange) {
+          cashHolding.exchange = cashHolding.exchange
+            ? `${cashHolding.exchange}, ${h.exchange}`
+            : h.exchange;
+        }
+      } else {
+        result.push(h);
+      }
+    }
+
+    if (cashHolding.amount > 0.0001) {
+      result.push(cashHolding);
+    }
+
+    return result.sort((a, b) => b.currentValueUsd - a.currentValueUsd);
+  }, [holdings, stablecoinTags]);
+
   // Fetch live prices on mount (if stale) and after CSV upload
   useEffect(() => {
-    if (holdings.length === 0) return;
-    const tokens = holdings.map((h) => h.token);
+    if (taggedHoldings.length === 0) return;
+    const tokens = taggedHoldings.map((h) => h.token);
 
     // Use cache if fresh
     const cached = getCachedCryptoPrices();
@@ -143,12 +196,12 @@ export default function CryptoPage() {
         setLivePrices(prices);
       }
     });
-  }, [holdings]);
+  }, [taggedHoldings]);
 
   // Apply live prices to holdings
   const pricedHoldings = useMemo(
-    () => applyLivePrices(holdings, livePrices),
-    [holdings, livePrices],
+    () => applyLivePrices(taggedHoldings, livePrices),
+    [taggedHoldings, livePrices],
   );
 
   const totalValueUsd = useMemo(
@@ -230,6 +283,22 @@ export default function CryptoPage() {
         fill: ECHARTS_COLORS[i % ECHARTS_COLORS.length],
       }));
   }, [pricedHoldings, totalValueUsd]);
+
+  // Exchange allocation data
+  const exchangeData = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const h of pricedHoldings) {
+      const ex = getExchange(h) || "Unassigned";
+      map.set(ex, (map.get(ex) ?? 0) + h.currentValueUsd);
+    }
+    return Array.from(map.entries())
+      .map(([name, value], i) => ({
+        name,
+        value,
+        fill: ECHARTS_COLORS[(i + 5) % ECHARTS_COLORS.length],
+      }))
+      .sort((a, b) => b.value - a.value);
+  }, [pricedHoldings, getExchange]);
 
   const sortedHoldings = useMemo(() => {
     const list = [...pricedHoldings];
@@ -464,6 +533,56 @@ export default function CryptoPage() {
         </p>
       )}
 
+      {/* Value Trend */}
+      {portfolioHistory.length > 1 && (
+        <BlurFade delay={0.09}>
+          <div className="finance-card p-6">
+            <p className="label-mono mb-4">VALUE TREND</p>
+            <ReactECharts
+              option={{
+                ...getCartesianBaseOption(isDark),
+                xAxis: {
+                  ...getCartesianBaseOption(isDark).xAxis,
+                  type: "category" as const,
+                  data: portfolioHistory.map((s) => {
+                    const d = new Date(s.date + "T00:00:00");
+                    return d.toLocaleDateString("en-AU", { day: "numeric", month: "short" });
+                  }),
+                },
+                yAxis: {
+                  ...getCartesianBaseOption(isDark).yAxis,
+                  type: "value" as const,
+                  axisLabel: {
+                    ...getCartesianBaseOption(isDark).yAxis.axisLabel,
+                    formatter: (v: number) => `$${v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0)}`,
+                  },
+                },
+                series: [
+                  {
+                    name: "Value",
+                    type: "line" as const,
+                    data: portfolioHistory.map((s) => Math.round(s.totalValueUsd * 100) / 100),
+                    smooth: true,
+                    showSymbol: false,
+                    lineStyle: { width: 2, color: ECHARTS_COLORS[0] },
+                    areaStyle: { color: ECHARTS_COLORS[0], opacity: 0.08 },
+                  },
+                  {
+                    name: "Cost",
+                    type: "line" as const,
+                    data: portfolioHistory.map((s) => Math.round(s.totalCostUsd * 100) / 100),
+                    smooth: true,
+                    showSymbol: false,
+                    lineStyle: { width: 1.5, color: ECHARTS_COLORS[3], type: "dashed" as const },
+                  },
+                ],
+              }}
+              style={{ height: 240, width: "100%" }}
+            />
+          </div>
+        </BlurFade>
+      )}
+
       {/* Chart + Table */}
       <div className="grid gap-8 lg:grid-cols-[320px_1fr]">
         {/* Donut chart */}
@@ -510,13 +629,22 @@ export default function CryptoPage() {
           <div className="finance-card overflow-hidden">
             <div className="flex items-center justify-between px-6 pt-5 pb-3">
               <p className="label-mono">HOLDINGS</p>
-              <button
-                onClick={() => setShowClearDialog(true)}
-                className="flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-              >
-                <X className="h-3 w-3" />
-                Clear
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowTagDialog(true)}
+                  className="flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                >
+                  <Tags className="h-3 w-3" />
+                  Tag
+                </button>
+                <button
+                  onClick={() => setShowClearDialog(true)}
+                  className="flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                >
+                  <X className="h-3 w-3" />
+                  Clear
+                </button>
+              </div>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -680,6 +808,45 @@ export default function CryptoPage() {
         </BlurFade>
       </div>
 
+      {/* Exchange Allocation */}
+      {exchangeData.length > 1 && (
+        <BlurFade delay={0.24}>
+          <div className="finance-card p-6">
+            <p className="label-mono mb-4">BY EXCHANGE</p>
+            <div className="space-y-2.5">
+              {exchangeData.map((item) => {
+                const pct = totalValueUsd > 0 ? (item.value / totalValueUsd) * 100 : 0;
+                return (
+                  <div key={item.name} className="space-y-1">
+                    <div className="flex items-center justify-between text-sm">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="inline-block h-2.5 w-2.5 rounded-full"
+                          style={{ backgroundColor: item.fill }}
+                        />
+                        <span>{item.name}</span>
+                      </div>
+                      <span className="font-mono text-xs tabular-nums text-muted-foreground">
+                        {format(item.value, "USD")} ({pct.toFixed(1)}%)
+                      </span>
+                    </div>
+                    <div className="h-1.5 w-full rounded-full bg-muted">
+                      <div
+                        className="h-full rounded-full transition-all duration-500"
+                        style={{
+                          width: `${pct}%`,
+                          backgroundColor: item.fill,
+                        }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </BlurFade>
+      )}
+
       {/* Clear confirmation dialog */}
       <Dialog
         open={showClearDialog}
@@ -700,6 +867,49 @@ export default function CryptoPage() {
             <Button variant="destructive" onClick={clearCsv}>
               Clear
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Stablecoin tag dialog */}
+      <Dialog
+        open={showTagDialog}
+        onOpenChange={(open) => !open && setShowTagDialog(false)}
+      >
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Tag as Stablecoin</DialogTitle>
+            <DialogDescription>
+              Tokens tagged as stablecoin will be grouped into CASH.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 max-h-60 overflow-y-auto py-2">
+            {holdings
+              .filter((h) => h.token !== "CASH")
+              .map((h) => (
+                <label
+                  key={h.token}
+                  className="flex items-center justify-between px-2 py-1.5 rounded hover:bg-secondary/50 cursor-pointer"
+                >
+                  <span className="text-sm font-medium">{h.token}</span>
+                  <input
+                    type="checkbox"
+                    checked={stablecoinTags[h.token] === true}
+                    onChange={(e) =>
+                      setStablecoinTags((prev) => ({
+                        ...prev,
+                        [h.token]: e.target.checked,
+                      }))
+                    }
+                    className="h-4 w-4 rounded border-border accent-foreground"
+                  />
+                </label>
+              ))}
+          </div>
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline" />}>
+              Done
+            </DialogClose>
           </DialogFooter>
         </DialogContent>
       </Dialog>
