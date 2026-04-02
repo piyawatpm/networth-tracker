@@ -22,29 +22,51 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { ExpenseEntry, ExpenseType, Currency } from "@/lib/utils/types";
-import { EXPENSE_TYPE_LABELS, CURRENCIES } from "@/lib/utils/constants";
+import type {
+  ExpenseEntry,
+  ExpenseType,
+  Currency,
+  PaymentMethod,
+  RecurringFrequency,
+  RecurringExpense,
+} from "@/lib/utils/types";
+import {
+  EXPENSE_TYPE_LABELS,
+  CURRENCIES,
+  PAYMENT_METHOD_LABELS,
+  FREQUENCY_LABELS,
+} from "@/lib/utils/constants";
 import { getSydneyDateString } from "@/lib/utils/timezone";
+import { ImageUpload } from "./image-upload";
 
 interface ExpenseDialogProps {
   entry?: ExpenseEntry;
   onSave: (entry: ExpenseEntry) => void;
+  onCreateRecurring?: (template: RecurringExpense) => void;
   trigger: React.ReactNode;
 }
 
 const EXPENSE_TYPES = Object.keys(EXPENSE_TYPE_LABELS) as ExpenseType[];
+const PAYMENT_METHODS = Object.keys(PAYMENT_METHOD_LABELS) as PaymentMethod[];
+const FREQUENCIES = Object.keys(FREQUENCY_LABELS) as RecurringFrequency[];
 
-export function ExpenseDialog({ entry, onSave, trigger }: ExpenseDialogProps) {
+export function ExpenseDialog({ entry, onSave, onCreateRecurring, trigger }: ExpenseDialogProps) {
   const [open, setOpen] = useState(false);
   const [type, setType] = useState<ExpenseType>(entry?.type ?? "food");
   const [description, setDescription] = useState(entry?.description ?? "");
   const [amount, setAmount] = useState(entry?.amount?.toString() ?? "");
   const [currency, setCurrency] = useState<Currency>(entry?.currency ?? "AUD");
   const [vendor, setVendor] = useState(entry?.vendor ?? "");
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(entry?.paymentMethod ?? "other");
   const [date, setDate] = useState(entry?.date ?? getSydneyDateString());
   const [notes, setNotes] = useState(entry?.notes ?? "");
+  const [images, setImages] = useState<string[]>(entry?.images ?? []);
 
-  // Reset form when dialog opens (for new entries) or when entry changes
+  // Recurring fields (only for new entries)
+  const [makeRecurring, setMakeRecurring] = useState(false);
+  const [frequency, setFrequency] = useState<RecurringFrequency>("monthly");
+
+  // Reset form when dialog opens
   useEffect(() => {
     if (open) {
       setType(entry?.type ?? "food");
@@ -52,8 +74,12 @@ export function ExpenseDialog({ entry, onSave, trigger }: ExpenseDialogProps) {
       setAmount(entry?.amount?.toString() ?? "");
       setCurrency(entry?.currency ?? "AUD");
       setVendor(entry?.vendor ?? "");
+      setPaymentMethod(entry?.paymentMethod ?? "other");
       setDate(entry?.date ?? getSydneyDateString());
       setNotes(entry?.notes ?? "");
+      setImages(entry?.images ?? []);
+      setMakeRecurring(false);
+      setFrequency("monthly");
     }
   }, [open, entry]);
 
@@ -68,13 +94,35 @@ export function ExpenseDialog({ entry, onSave, trigger }: ExpenseDialogProps) {
       amount: parsedAmount,
       currency,
       vendor: vendor.trim(),
+      paymentMethod,
       date,
       notes: notes.trim(),
-      images: entry?.images ?? [],
+      images,
       createdAt: entry?.createdAt ?? Date.now(),
     };
 
     onSave(saved);
+
+    // If "make recurring" is checked and this is a new entry, create a template
+    if (!entry && makeRecurring && onCreateRecurring) {
+      const template: RecurringExpense = {
+        id: crypto.randomUUID(),
+        type,
+        description: description.trim(),
+        amount: parsedAmount,
+        currency,
+        vendor: vendor.trim(),
+        paymentMethod,
+        notes: notes.trim(),
+        frequency,
+        startDate: date,
+        lastGeneratedDate: date,
+        active: true,
+        createdAt: Date.now(),
+      };
+      onCreateRecurring(template);
+    }
+
     setOpen(false);
   }
 
@@ -86,7 +134,7 @@ export function ExpenseDialog({ entry, onSave, trigger }: ExpenseDialogProps) {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger render={trigger as React.ReactElement} />
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{entry ? "Edit Expense" : "Add Expense"}</DialogTitle>
           <DialogDescription>
@@ -174,6 +222,26 @@ export function ExpenseDialog({ entry, onSave, trigger }: ExpenseDialogProps) {
             />
           </div>
 
+          {/* Payment Method */}
+          <div className="grid gap-2">
+            <Label htmlFor="expense-payment-method">Payment Method</Label>
+            <Select
+              value={paymentMethod}
+              onValueChange={(v) => v && setPaymentMethod(v as PaymentMethod)}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PAYMENT_METHODS.map((m) => (
+                  <SelectItem key={m} value={m}>
+                    {PAYMENT_METHOD_LABELS[m]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
           {/* Date */}
           <div className="grid gap-2">
             <Label htmlFor="expense-date">Date</Label>
@@ -185,6 +253,38 @@ export function ExpenseDialog({ entry, onSave, trigger }: ExpenseDialogProps) {
             />
           </div>
 
+          {/* Recurring toggle (new entries only) */}
+          {!entry && onCreateRecurring && (
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={makeRecurring}
+                  onChange={(e) => setMakeRecurring(e.target.checked)}
+                  className="rounded border-border"
+                />
+                <span>Make this recurring</span>
+              </label>
+              {makeRecurring && (
+                <Select
+                  value={frequency}
+                  onValueChange={(v) => v && setFrequency(v as RecurringFrequency)}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {FREQUENCIES.map((f) => (
+                      <SelectItem key={f} value={f}>
+                        {FREQUENCY_LABELS[f]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+          )}
+
           {/* Notes */}
           <div className="grid gap-2">
             <Label htmlFor="expense-notes">Notes (optional)</Label>
@@ -195,6 +295,12 @@ export function ExpenseDialog({ entry, onSave, trigger }: ExpenseDialogProps) {
               placeholder="Any additional details..."
               rows={2}
             />
+          </div>
+
+          {/* Image Upload */}
+          <div className="grid gap-2">
+            <Label>Attachments (optional)</Label>
+            <ImageUpload images={images} onChange={setImages} maxImages={3} />
           </div>
         </div>
 
