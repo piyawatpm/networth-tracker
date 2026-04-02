@@ -54,6 +54,54 @@ export const STABLECOINS = new Set([
   "PYUSD",
 ]);
 
+// Yield-bearing token prefixes — NOT stablecoins even if they contain "usdc"/"usdt"
+export const YIELD_PREFIXES = ["syrup", "aave", "compound", "venus", "morpho"];
+
+// Known exchange keywords for auto-parsing from CSV notes
+export const KNOWN_EXCHANGES: Record<string, string> = {
+  okx: "OKX",
+  bybit: "Bybit",
+  binance: "Binance",
+  coinbase: "Coinbase",
+  kraken: "Kraken",
+  rollbit: "Rollbit",
+  maple: "Maple",
+  kucoin: "KuCoin",
+  gateio: "Gate.io",
+  bitget: "Bitget",
+  mexc: "MEXC",
+};
+
+// Map token symbols to CoinGecko IDs
+export const COINGECKO_IDS: Record<string, string> = {
+  BTC: "bitcoin",
+  ETH: "ethereum",
+  SOL: "solana",
+  OKB: "okb",
+  BNB: "binancecoin",
+  XRP: "ripple",
+  ADA: "cardano",
+  DOGE: "dogecoin",
+  DOT: "polkadot",
+  MATIC: "matic-network",
+  AVAX: "avalanche-2",
+  LINK: "chainlink",
+  UNI: "uniswap",
+  ATOM: "cosmos",
+  ARB: "arbitrum",
+  OP: "optimism",
+  APT: "aptos",
+  SUI: "sui",
+  SEI: "sei-network",
+  TIA: "celestia",
+  NEAR: "near",
+  FTM: "fantom",
+  INJ: "injective-protocol",
+  RENDER: "render-token",
+  FET: "fetch-ai",
+  syrupUSDC: "syrup-usdc",
+};
+
 // Chart color palette — hex values (canvas-compatible, NOT oklch)
 export const CHART_COLORS = [
   "#b8860b",  // amber

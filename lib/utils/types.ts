@@ -194,6 +194,7 @@ export interface CryptoHolding {
   amount: number;
   totalCostUsd: number;
   currentValueUsd: number;
+  exchange?: string;  // auto-parsed from CSV notes or manually set
 }
 
 export interface CryptoTransaction {
