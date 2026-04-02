@@ -167,6 +167,44 @@ export default function CryptoPage() {
   const pnlConverted = convert(pnlUsd, "USD");
   const cashConverted = convert(cashUsd, "USD");
 
+  // Interactive legend — tracks which tokens are visible
+  const [selectedTokens, setSelectedTokens] = useState<Record<string, boolean>>({});
+
+  // Initialize selectedTokens when holdings change
+  useEffect(() => {
+    if (pricedHoldings.length > 0) {
+      setSelectedTokens((prev) => {
+        const next: Record<string, boolean> = {};
+        for (const h of pricedHoldings) {
+          // Keep existing selection, default to true for new tokens
+          next[h.token] = prev[h.token] ?? true;
+        }
+        return next;
+      });
+    }
+  }, [pricedHoldings]);
+
+  // Filtered metrics based on legend selection
+  const filteredHoldings = useMemo(
+    () => pricedHoldings.filter((h) => selectedTokens[h.token] !== false),
+    [pricedHoldings, selectedTokens],
+  );
+  const filteredValueUsd = useMemo(
+    () => getTotalCryptoValueUsd(filteredHoldings),
+    [filteredHoldings],
+  );
+  const filteredCostUsd = useMemo(
+    () => getTotalCryptoCostUsd(filteredHoldings),
+    [filteredHoldings],
+  );
+  const filteredCashUsd = useMemo(
+    () => getCashValueUsd(filteredHoldings),
+    [filteredHoldings],
+  );
+  const filteredPnlUsd = filteredValueUsd - filteredCostUsd;
+
+  const allSelected = pricedHoldings.length === filteredHoldings.length;
+
   // Chart data: exclude tiny holdings (< 1% of total)
   const chartData = useMemo(() => {
     if (totalValueUsd === 0) return [];
@@ -318,7 +356,7 @@ export default function CryptoPage() {
             <p className="label-mono mb-2">CRYPTO PORTFOLIO</p>
             <div className="display-number">
               {symbol}
-              <NumberTicker value={totalValueConverted} decimalPlaces={2} />
+              <NumberTicker value={convert(filteredValueUsd, "USD")} decimalPlaces={2} />
             </div>
             {csvUploadedAt && (
               <p className="text-xs text-muted-foreground mt-2">
@@ -352,26 +390,33 @@ export default function CryptoPage() {
       {/* Metrics tile */}
       <BlurFade delay={0.06}>
         <div className="finance-card flex flex-col divide-y divide-border/60 sm:flex-row sm:divide-x sm:divide-y-0">
-          <MetricCell
-            label="Total Value"
-            value={format(totalValueUsd, "USD")}
-          />
-          <MetricCell
-            label="Total Cost"
-            value={format(totalCostUsd, "USD")}
-          />
+          <MetricCell label="Total Value" value={format(filteredValueUsd, "USD")} />
+          <MetricCell label="Total Cost" value={format(filteredCostUsd, "USD")} />
           <MetricCell
             label="P&L"
-            value={format(Math.abs(pnlUsd), "USD")}
-            prefix={pnlUsd >= 0 ? "+" : "-"}
-            className={pnlUsd >= 0 ? "text-income" : "text-expense"}
+            value={format(Math.abs(filteredPnlUsd), "USD")}
+            prefix={filteredPnlUsd >= 0 ? "+" : "-"}
+            className={filteredPnlUsd >= 0 ? "text-income" : "text-expense"}
           />
-          <MetricCell
-            label="Cash"
-            value={format(cashUsd, "USD")}
-          />
+          <MetricCell label="Cash" value={format(filteredCashUsd, "USD")} />
         </div>
       </BlurFade>
+
+      {!allSelected && (
+        <p className="text-xs text-muted-foreground">
+          Showing {filteredHoldings.length} of {pricedHoldings.length} tokens ·{" "}
+          <button
+            onClick={() => {
+              const all: Record<string, boolean> = {};
+              pricedHoldings.forEach((h) => { all[h.token] = true; });
+              setSelectedTokens(all);
+            }}
+            className="underline hover:text-foreground cursor-pointer"
+          >
+            Show all
+          </button>
+        </p>
+      )}
 
       {/* Chart + Table */}
       <div className="grid gap-8 lg:grid-cols-[320px_1fr]">
@@ -382,19 +427,34 @@ export default function CryptoPage() {
             {chartData.length > 0 && (
               <CryptoDonut chartData={chartData} isDark={isDark} />
             )}
-            {/* Legend */}
+            {/* Clickable legend */}
             <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1.5">
-              {chartData.map((d) => (
-                <div key={d.token} className="flex items-center gap-1.5">
-                  <span
-                    className="inline-block h-2 w-2 shrink-0 rounded-full"
-                    style={{ backgroundColor: d.fill }}
-                  />
-                  <span className="text-xs text-muted-foreground">
-                    {d.token}
-                  </span>
-                </div>
-              ))}
+              {chartData.map((d) => {
+                const isSelected = selectedTokens[d.token] !== false;
+                return (
+                  <button
+                    key={d.token}
+                    onClick={() =>
+                      setSelectedTokens((prev) => ({
+                        ...prev,
+                        [d.token]: !isSelected,
+                      }))
+                    }
+                    className={cn(
+                      "flex items-center gap-1.5 transition-opacity cursor-pointer",
+                      !isSelected && "opacity-30",
+                    )}
+                  >
+                    <span
+                      className="inline-block h-2 w-2 shrink-0 rounded-full"
+                      style={{ backgroundColor: d.fill }}
+                    />
+                    <span className="text-xs text-muted-foreground">
+                      {d.token}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
         </BlurFade>
@@ -453,6 +513,7 @@ export default function CryptoPage() {
                         className={cn(
                           "border-b border-border/40 transition-colors hover:bg-secondary/40",
                           i === pricedHoldings.length - 1 && "border-b-0",
+                          selectedTokens[h.token] === false && "opacity-40",
                         )}
                       >
                         <td className="px-6 py-3">
