@@ -14,7 +14,7 @@ import type {
 
 function id() { return crypto.randomUUID(); }
 
-function generateSampleData() {
+export function generateSampleData() {
   const now = Date.now();
 
   // ---- INCOME (6 months: Nov 2025 - Apr 2026) --------------------------------

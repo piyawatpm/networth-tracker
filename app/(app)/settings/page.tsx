@@ -160,6 +160,27 @@ export default function SettingsPage() {
     refreshStorage();
   }
 
+  // ---- Seed sample data ---------------------------------------------------
+  async function handleSeed() {
+    const { generateSampleData } = await import("@/app/(app)/seed/page");
+    const data = generateSampleData();
+    localStorage.setItem("income_entries", JSON.stringify(data.incomeEntries));
+    localStorage.setItem("expense_entries", JSON.stringify(data.expenseEntries));
+    localStorage.setItem("portfolio_holdings", JSON.stringify(data.portfolioHoldings));
+    localStorage.setItem("crypto_csv_text", JSON.stringify(data.cryptoCsvText));
+    localStorage.setItem("debt_records", JSON.stringify(data.debtRecords));
+    localStorage.setItem("debt_transactions", JSON.stringify(data.debtTransactions));
+    localStorage.setItem("networth_snapshots", JSON.stringify(data.networthSnapshots));
+    localStorage.setItem("portfolio_snapshots", JSON.stringify(data.portfolioSnapshots));
+    localStorage.setItem("networth_goal", JSON.stringify(data.networthGoal));
+    localStorage.setItem("recurring_income_templates", JSON.stringify(data.recurringIncomeTemplates));
+    localStorage.setItem("recurring_expense_templates", JSON.stringify(data.recurringExpenseTemplates));
+    localStorage.setItem("price_update_log", JSON.stringify(data.priceUpdateLog));
+    localStorage.setItem("enabled_currencies", JSON.stringify(["AUD", "USD", "THB", "EUR"]));
+    setStatus({ type: "success", message: "Sample data loaded. Reload the page to see changes." });
+    refreshStorage();
+  }
+
   const lastFxUpdate = ratesFetchedAt
     ? new Date(ratesFetchedAt).toLocaleString("en-AU", {
         timeZone: "Australia/Sydney",
@@ -400,6 +421,25 @@ export default function SettingsPage() {
                 e.target.value = "";
               }}
             />
+          </div>
+
+          {/* Generate sample data */}
+          <div className="flex items-center justify-between pt-2 border-t border-border/50">
+            <div>
+              <p className="text-sm">Load Sample Data</p>
+              <p className="text-xs text-muted-foreground">
+                Populate with 6 months of realistic mock data
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleSeed}
+              className="gap-1.5"
+            >
+              <Database className="h-3.5 w-3.5" />
+              Generate
+            </Button>
           </div>
 
           {/* Clear all data */}
