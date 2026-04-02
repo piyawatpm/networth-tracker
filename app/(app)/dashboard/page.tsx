@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/chart";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 import { useCurrency } from "@/components/providers/currency-provider";
+import { GoalSection } from "@/components/dashboard/goal-section";
 import {
   parseAndComputeHoldings,
   getTotalCryptoValueUsd,
@@ -363,17 +364,17 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-8 pb-12">
-      {/* Sticky period toggle — stays below nav on scroll */}
-      <div className="sticky top-14 z-40 -mx-4 lg:-mx-8 px-4 lg:px-8 py-2 bg-background/80 backdrop-blur-md flex justify-end">
-        <div className="flex items-center rounded-full bg-secondary p-0.5 gap-0.5 shadow-sm">
+      {/* Floating period toggle — bottom right */}
+      <div className="fixed bottom-20 md:bottom-6 right-4 lg:right-8 z-40">
+        <div className="flex items-center rounded-full bg-card/90 backdrop-blur-md p-0.5 gap-0.5 shadow-lg ring-1 ring-border/40">
           {(["W", "M", "Y"] as Period[]).map((p) => (
             <button
               key={p}
               onClick={() => setPeriod(p)}
               className={cn(
-                "px-3.5 py-1 rounded-full text-xs font-semibold transition-colors",
+                "px-3 py-1.5 rounded-full text-xs font-semibold transition-all",
                 period === p
-                  ? "bg-foreground text-background"
+                  ? "bg-foreground text-background shadow-sm"
                   : "text-muted-foreground hover:text-foreground"
               )}
             >
@@ -443,7 +444,11 @@ export default function DashboardPage() {
             )}
           </div>
         </BlurFade>
+
       </div>
+
+      {/* GOAL SECTION */}
+      <GoalSection netWorth={netWorth} symbol={symbol} format={format} />
 
       {/* VITALS ROW */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-5">

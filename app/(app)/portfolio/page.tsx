@@ -1,14 +1,26 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 import { useCurrency } from "@/components/providers/currency-provider";
 import type { PortfolioHolding, HoldingType, AccountType } from "@/lib/utils/types";
 import { HOLDING_TYPE_LABELS, CHART_COLORS } from "@/lib/utils/constants";
 import { getSydneyDateString } from "@/lib/utils/timezone";
+import {
+  getPriceCache,
+  setPriceCache,
+  anyCacheStale,
+  canAutoUpdate,
+  addUpdateLog,
+  getUpdateLog,
+  formatTimeAgo,
+  type PriceCache,
+  type PriceUpdateLog,
+} from "@/lib/utils/prices";
 import { cn } from "@/lib/utils";
 import { BlurFade } from "@/components/ui/blur-fade";
 import { NumberTicker } from "@/components/ui/number-ticker";
+import { Input } from "@/components/ui/input";
 import {
   ChartContainer,
   ChartTooltip,
@@ -25,9 +37,16 @@ import {
   YAxis,
   CartesianGrid,
 } from "recharts";
-import { Plus, Pencil, Trash2, Briefcase, ExternalLink } from "lucide-react";
+import { Plus, Pencil, Trash2, Briefcase, ExternalLink, RefreshCw, Check, Zap, Hand, History } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { HoldingDialog } from "@/components/portfolio/holding-dialog";
 
 const HOLDING_TYPES: HoldingType[] = ["stock", "etf", "fund", "bond", "other"];
@@ -64,6 +83,137 @@ export default function PortfolioPage() {
     "all"
   );
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [editingValueId, setEditingValueId] = useState<string | null>(null);
+  const [editingValue, setEditingValue] = useState("");
+  const [priceCache, setPriceCacheState] = useState<PriceCache>({});
+  const [isFetching, setIsFetching] = useState(false);
+  const [lastFetchStatus, setLastFetchStatus] = useState<string | null>(null);
+  const [updateLog, setUpdateLog] = useState<PriceUpdateLog[]>([]);
+  const [logHoldingId, setLogHoldingId] = useState<string | null>(null);
+
+  // Load price cache and log on mount
+  useEffect(() => {
+    setPriceCacheState(getPriceCache());
+    setUpdateLog(getUpdateLog());
+  }, []);
+
+  // Auto-fetch prices for holdings with tickers
+  const fetchPrices = useCallback(async (force = false) => {
+    const autoHoldings = holdings.filter((h) => h.ticker && canAutoUpdate(h.ticker));
+    if (autoHoldings.length === 0) return;
+
+    const tickers = autoHoldings.map((h) => h.ticker.toUpperCase());
+    if (!force && !anyCacheStale(tickers)) return;
+
+    setIsFetching(true);
+    setLastFetchStatus(null);
+
+    try {
+      const res = await fetch("/api/prices", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          holdings: autoHoldings.map((h) => ({ ticker: h.ticker, country: h.country })),
+        }),
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      const data = await res.json();
+      const cache = getPriceCache();
+      let updatedCount = 0;
+
+      const updatedHoldings = [...holdings];
+
+      for (const result of data.prices ?? []) {
+        if (result.price !== null) {
+          cache[result.ticker.toUpperCase()] = {
+            price: result.price,
+            currency: result.currency,
+            updatedAt: Date.now(),
+          };
+
+          // Update holding currentValue = units * price
+          const holdingIdx = updatedHoldings.findIndex(
+            (h) => h.ticker.toUpperCase() === result.ticker.toUpperCase()
+          );
+          if (holdingIdx >= 0) {
+            const h = updatedHoldings[holdingIdx];
+            const newValue = h.units * result.price;
+            const oldValue = h.currentValue;
+
+            if (Math.abs(newValue - oldValue) > 0.01) {
+              addUpdateLog({
+                holdingId: h.id,
+                holdingName: h.name,
+                oldValue,
+                newValue,
+                source: "auto",
+                timestamp: Date.now(),
+              });
+
+              updatedHoldings[holdingIdx] = { ...h, currentValue: newValue };
+              updatedCount++;
+            }
+          }
+        }
+      }
+
+      setPriceCache(cache);
+      setPriceCacheState({ ...cache });
+
+      if (updatedCount > 0) {
+        setHoldings(updatedHoldings);
+      }
+
+      setUpdateLog(getUpdateLog());
+      const errors = (data.prices ?? []).filter((r: { price: number | null }) => r.price === null).length;
+      setLastFetchStatus(
+        `Updated ${updatedCount} of ${autoHoldings.length} holdings` +
+        (errors > 0 ? ` (${errors} failed)` : "")
+      );
+    } catch (e) {
+      setLastFetchStatus(`Fetch failed: ${e instanceof Error ? e.message : "Unknown error"}`);
+    } finally {
+      setIsFetching(false);
+    }
+  }, [holdings, setHoldings]);
+
+  // Auto-fetch on mount (if stale)
+  useEffect(() => {
+    const autoTickers = holdings
+      .filter((h) => h.ticker && canAutoUpdate(h.ticker))
+      .map((h) => h.ticker.toUpperCase());
+    if (autoTickers.length > 0 && anyCacheStale(autoTickers)) {
+      fetchPrices();
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Inline value edit handlers
+  function startEditValue(h: PortfolioHolding) {
+    setEditingValueId(h.id);
+    setEditingValue(h.currentValue.toString());
+  }
+
+  function saveEditValue(h: PortfolioHolding) {
+    const newVal = parseFloat(editingValue);
+    if (!isNaN(newVal) && newVal >= 0) {
+      addUpdateLog({
+        holdingId: h.id,
+        holdingName: h.name,
+        oldValue: h.currentValue,
+        newValue: newVal,
+        source: "manual",
+        timestamp: Date.now(),
+      });
+
+      setHoldings((prev) =>
+        prev.map((p) => (p.id === h.id ? { ...p, currentValue: newVal } : p))
+      );
+      setUpdateLog(getUpdateLog());
+    }
+    setEditingValueId(null);
+  }
 
   // Filter holdings
   const filteredHoldings = useMemo(() => {
@@ -497,7 +647,23 @@ export default function PortfolioPage() {
       {/* Holdings Cards */}
       <BlurFade delay={DELAY * 6}>
         <div className="space-y-3">
-          <p className="label-mono">Holdings ({filteredHoldings.length})</p>
+          <div className="flex items-center justify-between">
+            <p className="label-mono">Holdings ({filteredHoldings.length})</p>
+            <div className="flex items-center gap-2">
+              {lastFetchStatus && (
+                <span className="text-[10px] text-muted-foreground">{lastFetchStatus}</span>
+              )}
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                onClick={() => fetchPrices(true)}
+                disabled={isFetching}
+                className={cn(isFetching && "animate-spin")}
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          </div>
 
           {filteredHoldings.length === 0 ? (
             <div className="finance-card flex flex-col items-center justify-center gap-3 py-16">
@@ -585,10 +751,45 @@ export default function PortfolioPage() {
                               </p>
                             </div>
                             <div>
-                              <p className="label-mono mb-0.5">Value</p>
-                              <p className="text-sm font-semibold tabular-nums">
-                                {format(h.currentValue, h.currency)}
+                              <p className="label-mono mb-0.5 flex items-center gap-1">
+                                Value
+                                {canAutoUpdate(h.ticker) ? (
+                                  <span title="Auto-updated"><Zap className="h-2.5 w-2.5 text-accent" /></span>
+                                ) : (
+                                  <span title="Manual update"><Hand className="h-2.5 w-2.5 text-muted-foreground/50" /></span>
+                                )}
                               </p>
+                              {editingValueId === h.id ? (
+                                <div className="flex items-center gap-1">
+                                  <Input
+                                    type="number"
+                                    value={editingValue}
+                                    onChange={(e) => setEditingValue(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") saveEditValue(h);
+                                      if (e.key === "Escape") setEditingValueId(null);
+                                    }}
+                                    className="h-6 w-24 text-xs tabular-nums px-1.5"
+                                    autoFocus
+                                  />
+                                  <Button variant="ghost" size="icon-xs" onClick={() => saveEditValue(h)}>
+                                    <Check className="h-3 w-3" />
+                                  </Button>
+                                </div>
+                              ) : (
+                                <p
+                                  className="text-sm font-semibold tabular-nums cursor-pointer hover:text-accent transition-colors"
+                                  onClick={() => startEditValue(h)}
+                                  role="button"
+                                >
+                                  {format(h.currentValue, h.currency)}
+                                </p>
+                              )}
+                              {priceCache[h.ticker?.toUpperCase()] && (
+                                <p className="text-[9px] text-muted-foreground/50 mt-0.5">
+                                  {formatTimeAgo(priceCache[h.ticker.toUpperCase()].updatedAt)}
+                                </p>
+                              )}
                             </div>
                             <div>
                               <p className="label-mono mb-0.5">P&L</p>
@@ -608,6 +809,13 @@ export default function PortfolioPage() {
                             </div>
 
                             <div className="flex items-center gap-0.5">
+                              <Button
+                                variant="ghost"
+                                size="icon-xs"
+                                onClick={() => setLogHoldingId(h.id)}
+                              >
+                                <History className="h-3.5 w-3.5" />
+                              </Button>
                               <HoldingDialog
                                 holding={h}
                                 onSave={handleSave}
@@ -654,6 +862,67 @@ export default function PortfolioPage() {
           )}
         </div>
       </BlurFade>
+
+      {/* Per-holding Update Log Dialog */}
+      <Dialog
+        open={logHoldingId !== null}
+        onOpenChange={(open) => { if (!open) setLogHoldingId(null); }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              Price History — {holdings.find((h) => h.id === logHoldingId)?.name ?? ""}
+            </DialogTitle>
+            <DialogDescription>
+              {holdings.find((h) => h.id === logHoldingId)?.ticker ?? ""} update log
+            </DialogDescription>
+          </DialogHeader>
+          {(() => {
+            const entries = updateLog.filter((e) => e.holdingId === logHoldingId);
+            if (entries.length === 0) {
+              return (
+                <div className="py-8 text-center text-sm text-muted-foreground">
+                  No price updates recorded yet.
+                </div>
+              );
+            }
+            return (
+              <div className="max-h-72 overflow-y-auto -mx-1 px-1">
+                <div className="divide-y divide-border">
+                  {entries.map((entry, i) => (
+                    <div key={i} className="flex items-center justify-between py-2.5 text-sm">
+                      <div className="flex items-center gap-2.5">
+                        {entry.source === "auto" ? (
+                          <span className="flex items-center gap-1 text-[10px] font-mono uppercase tracking-wider text-accent bg-accent/10 px-1.5 py-0.5 rounded">
+                            <Zap className="h-2.5 w-2.5" /> auto
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-[10px] font-mono uppercase tracking-wider text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                            <Hand className="h-2.5 w-2.5" /> manual
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 font-mono tabular-nums text-xs">
+                        <span className="text-muted-foreground">{format(entry.oldValue)}</span>
+                        <span className="text-muted-foreground/40">→</span>
+                        <span className={cn(
+                          "font-medium",
+                          entry.newValue >= entry.oldValue ? "text-income" : "text-expense"
+                        )}>
+                          {format(entry.newValue)}
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-muted-foreground/50 ml-2 shrink-0">
+                        {formatTimeAgo(entry.timestamp)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
