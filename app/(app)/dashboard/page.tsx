@@ -1339,8 +1339,8 @@ export default function DashboardPage() {
           );
         })()}
 
-      {/* EMERGENCY FUND TRACKER */}
-      {isVisible("emergency-fund") &&
+      {/* EMERGENCY FUND SECTION — REMOVED, info available via Emergency Fund gauge indicator */}
+      {false &&
         (() => {
           const recommendedAmount = monthlyExpenses * emergencyFundTarget;
           const currentAmount = liquidAssets;
