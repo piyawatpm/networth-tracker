@@ -163,51 +163,44 @@ export default function LiabilitiesPage() {
       {/* Hero Section */}
       <BlurFade delay={0}>
         <div className="space-y-4">
-          <div className="flex items-center gap-3">
-            <Handshake className="h-6 w-6 text-muted-foreground" />
-            <h1 className="text-2xl font-semibold tracking-tight">Liabilities</h1>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            {/* Owed to Me */}
-            <div className="finance-card p-6">
-              <p className="label-mono mb-2">Owed to Me</p>
-              <NumberTicker
-                value={convertedTotals.owedToMe}
-                className="display-number text-income text-2xl md:text-4xl"
-                prefix={CURRENCY_SYMBOLS[currency]}
-                decimalPlaces={2}
-              />
-            </div>
-
-            {/* I Owe */}
-            <div className="finance-card p-6">
-              <p className="label-mono mb-2">I Owe</p>
-              <NumberTicker
-                value={convertedTotals.iOwe}
-                className="display-number text-expense text-2xl md:text-4xl"
-                prefix={CURRENCY_SYMBOLS[currency]}
-                decimalPlaces={2}
-              />
-            </div>
-          </div>
-
-          {/* Net balance */}
-          <div className="finance-card p-4 text-center">
-            <p className="label-mono mb-1">Net Balance</p>
-            <span
-              className={cn(
-                "text-xl md:text-2xl font-semibold tabular-nums tracking-tight",
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="label-mono mb-2">Liabilities</p>
+              <div className={cn(
+                "display-number",
                 convertedTotals.net >= 0 ? "text-income" : "text-expense"
-              )}
-            >
-              {convertedTotals.net >= 0 ? "+" : ""}
-              {CURRENCY_SYMBOLS[currency]}
-              {Math.abs(convertedTotals.net).toLocaleString("en-US", {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              })}
-            </span>
+              )}>
+                {convertedTotals.net >= 0 ? "+" : "-"}
+                {CURRENCY_SYMBOLS[currency]}
+                <NumberTicker value={Math.abs(convertedTotals.net)} decimalPlaces={2} />
+              </div>
+            </div>
+          </div>
+
+          <div className="finance-card p-5">
+            <div className="grid grid-cols-3 gap-4 md:gap-0 md:divide-x md:divide-border">
+              <div className="md:pr-6">
+                <p className="label-mono mb-1">Owed to Me</p>
+                <p className="text-lg font-semibold tabular-nums text-income">
+                  {CURRENCY_SYMBOLS[currency]}{convertedTotals.owedToMe.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+              </div>
+              <div className="md:px-6">
+                <p className="label-mono mb-1">I Owe</p>
+                <p className="text-lg font-semibold tabular-nums text-expense">
+                  {CURRENCY_SYMBOLS[currency]}{convertedTotals.iOwe.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+              </div>
+              <div className="md:pl-6">
+                <p className="label-mono mb-1">Net Balance</p>
+                <p className={cn(
+                  "text-lg font-semibold tabular-nums",
+                  convertedTotals.net >= 0 ? "text-income" : "text-expense"
+                )}>
+                  {convertedTotals.net >= 0 ? "+" : ""}{CURRENCY_SYMBOLS[currency]}{Math.abs(convertedTotals.net).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+              </div>
+            </div>
           </div>
         </div>
       </BlurFade>

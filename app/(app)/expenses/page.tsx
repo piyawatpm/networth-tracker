@@ -313,7 +313,7 @@ export default function ExpensesPage() {
       {/* ================================================================= */}
       <BlurFade delay={0}>
         <section className="space-y-4">
-          <p className="label-mono">This Month&rsquo;s Expenses</p>
+          <p className="label-mono mb-2">This Month&rsquo;s Expenses</p>
           <div className="display-number text-expense">
             <NumberTicker
               value={thisMonthTotal}
@@ -323,33 +323,35 @@ export default function ExpensesPage() {
           </div>
 
           {/* Summary tiles */}
-          <div className="finance-card inline-flex flex-wrap divide-x divide-border text-sm">
-            <div className="px-5 py-3 text-center">
-              <p className="label-mono mb-1">This Month</p>
-              <p className="font-semibold tabular-nums">{format(thisMonthTotal)}</p>
-            </div>
-            <div className="px-5 py-3 text-center">
-              <p className="label-mono mb-1">Last Month</p>
-              <p className="font-semibold tabular-nums">{format(lastMonthTotal)}</p>
-            </div>
-            <div className="px-5 py-3 text-center">
-              <p className="label-mono mb-1">Daily Avg</p>
-              <p className="font-semibold tabular-nums">{format(dailyAvg)}/day</p>
-            </div>
-            <div className="px-5 py-3 text-center">
-              <p className="label-mono mb-1">Monthly Pace</p>
-              <p
-                className={cn(
-                  "font-semibold tabular-nums",
-                  paceVsLast > 10
-                    ? "text-expense"
-                    : paceVsLast < -10
-                      ? "text-income"
-                      : "text-foreground",
-                )}
-              >
-                → {format(monthlyPace)}
-              </p>
+          <div className="finance-card p-5">
+            <div className="grid grid-cols-2 gap-4 md:grid-cols-4 md:gap-0 md:divide-x md:divide-border">
+              <div className="md:pr-6">
+                <p className="label-mono mb-1">This Month</p>
+                <p className="text-lg font-semibold tabular-nums">{format(thisMonthTotal)}</p>
+              </div>
+              <div className="md:px-6">
+                <p className="label-mono mb-1">Last Month</p>
+                <p className="text-lg font-semibold tabular-nums">{format(lastMonthTotal)}</p>
+              </div>
+              <div className="md:px-6">
+                <p className="label-mono mb-1">Daily Avg</p>
+                <p className="text-lg font-semibold tabular-nums">{format(dailyAvg)}/day</p>
+              </div>
+              <div className="md:pl-6">
+                <p className="label-mono mb-1">Monthly Pace</p>
+                <p
+                  className={cn(
+                    "text-lg font-semibold tabular-nums",
+                    paceVsLast > 10
+                      ? "text-expense"
+                      : paceVsLast < -10
+                        ? "text-income"
+                        : "text-foreground",
+                  )}
+                >
+                  → {format(monthlyPace)}
+                </p>
+              </div>
             </div>
           </div>
         </section>
