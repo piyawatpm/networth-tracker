@@ -22,7 +22,7 @@ import { BlurFade } from "@/components/ui/blur-fade";
 import { NumberTicker } from "@/components/ui/number-ticker";
 import ReactECharts from "echarts-for-react";
 import { ECHARTS_COLORS, getPieBaseOption } from "@/lib/utils/echarts";
-import { Upload, FileText, X, Bitcoin } from "lucide-react";
+import { Upload, FileText, X, Bitcoin, ArrowUpDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -170,6 +170,20 @@ export default function CryptoPage() {
   // Interactive legend — tracks which tokens are visible
   const [selectedTokens, setSelectedTokens] = useState<Record<string, boolean>>({});
 
+  // Table sorting
+  type SortField = "token" | "amount" | "value" | "cost" | "pnl" | "pct" | "exchange";
+  const [sortField, setSortField] = useState<SortField>("value");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
+  function toggleSort(field: SortField) {
+    if (sortField === field) {
+      setSortDir((d) => (d === "desc" ? "asc" : "desc"));
+    } else {
+      setSortField(field);
+      setSortDir("desc");
+    }
+  }
+
   // Initialize selectedTokens when holdings change
   useEffect(() => {
     if (pricedHoldings.length > 0) {
@@ -216,6 +230,38 @@ export default function CryptoPage() {
         fill: ECHARTS_COLORS[i % ECHARTS_COLORS.length],
       }));
   }, [pricedHoldings, totalValueUsd]);
+
+  const sortedHoldings = useMemo(() => {
+    const list = [...pricedHoldings];
+    list.sort((a, b) => {
+      let cmp = 0;
+      switch (sortField) {
+        case "token":
+          cmp = a.token.localeCompare(b.token);
+          break;
+        case "amount":
+          cmp = a.amount - b.amount;
+          break;
+        case "value":
+          cmp = a.currentValueUsd - b.currentValueUsd;
+          break;
+        case "cost":
+          cmp = a.totalCostUsd - b.totalCostUsd;
+          break;
+        case "pnl":
+          cmp = (a.currentValueUsd - a.totalCostUsd) - (b.currentValueUsd - b.totalCostUsd);
+          break;
+        case "pct":
+          cmp = a.currentValueUsd - b.currentValueUsd; // same as value sort
+          break;
+        case "exchange":
+          cmp = (getExchange(a)).localeCompare(getExchange(b));
+          break;
+      }
+      return sortDir === "desc" ? -cmp : cmp;
+    });
+    return list;
+  }, [pricedHoldings, sortField, sortDir, getExchange]);
 
   const handleFile = useCallback(
     (file: File) => {
@@ -476,31 +522,73 @@ export default function CryptoPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border/60 text-left">
-                    <th className="px-6 pb-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-                      Token
+                    <th
+                      className="px-6 pb-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground font-medium cursor-pointer select-none"
+                      onClick={() => toggleSort("token")}
+                    >
+                      <span className="inline-flex items-center gap-1">
+                        Token
+                        {sortField === "token" && <ArrowUpDown className="h-2.5 w-2.5" />}
+                      </span>
                     </th>
-                    <th className="px-4 pb-2 text-right font-mono text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-                      Amount
+                    <th
+                      className="px-4 pb-2 text-right font-mono text-[10px] uppercase tracking-wider text-muted-foreground font-medium cursor-pointer select-none"
+                      onClick={() => toggleSort("amount")}
+                    >
+                      <span className="inline-flex items-center justify-end gap-1">
+                        Amount
+                        {sortField === "amount" && <ArrowUpDown className="h-2.5 w-2.5" />}
+                      </span>
                     </th>
-                    <th className="px-4 pb-2 text-right font-mono text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-                      Value
+                    <th
+                      className="px-4 pb-2 text-right font-mono text-[10px] uppercase tracking-wider text-muted-foreground font-medium cursor-pointer select-none"
+                      onClick={() => toggleSort("value")}
+                    >
+                      <span className="inline-flex items-center justify-end gap-1">
+                        Value
+                        {sortField === "value" && <ArrowUpDown className="h-2.5 w-2.5" />}
+                      </span>
                     </th>
-                    <th className="px-4 pb-2 text-right font-mono text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-                      Cost
+                    <th
+                      className="px-4 pb-2 text-right font-mono text-[10px] uppercase tracking-wider text-muted-foreground font-medium cursor-pointer select-none"
+                      onClick={() => toggleSort("cost")}
+                    >
+                      <span className="inline-flex items-center justify-end gap-1">
+                        Cost
+                        {sortField === "cost" && <ArrowUpDown className="h-2.5 w-2.5" />}
+                      </span>
                     </th>
-                    <th className="px-4 pb-2 text-right font-mono text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-                      P&L
+                    <th
+                      className="px-4 pb-2 text-right font-mono text-[10px] uppercase tracking-wider text-muted-foreground font-medium cursor-pointer select-none"
+                      onClick={() => toggleSort("pnl")}
+                    >
+                      <span className="inline-flex items-center justify-end gap-1">
+                        P&L
+                        {sortField === "pnl" && <ArrowUpDown className="h-2.5 w-2.5" />}
+                      </span>
                     </th>
-                    <th className="px-4 pb-2 text-right font-mono text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-                      Exchange
+                    <th
+                      className="px-4 pb-2 text-right font-mono text-[10px] uppercase tracking-wider text-muted-foreground font-medium cursor-pointer select-none"
+                      onClick={() => toggleSort("exchange")}
+                    >
+                      <span className="inline-flex items-center justify-end gap-1">
+                        Exchange
+                        {sortField === "exchange" && <ArrowUpDown className="h-2.5 w-2.5" />}
+                      </span>
                     </th>
-                    <th className="px-6 pb-2 text-right font-mono text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-                      % Port
+                    <th
+                      className="px-6 pb-2 text-right font-mono text-[10px] uppercase tracking-wider text-muted-foreground font-medium cursor-pointer select-none"
+                      onClick={() => toggleSort("pct")}
+                    >
+                      <span className="inline-flex items-center justify-end gap-1">
+                        % Port
+                        {sortField === "pct" && <ArrowUpDown className="h-2.5 w-2.5" />}
+                      </span>
                     </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {pricedHoldings.map((h, i) => {
+                  {sortedHoldings.map((h, i) => {
                     const rowPnl = h.currentValueUsd - h.totalCostUsd;
                     const pctOfPort =
                       totalValueUsd > 0
@@ -512,7 +600,7 @@ export default function CryptoPage() {
                         key={h.token}
                         className={cn(
                           "border-b border-border/40 transition-colors hover:bg-secondary/40",
-                          i === pricedHoldings.length - 1 && "border-b-0",
+                          i === sortedHoldings.length - 1 && "border-b-0",
                           selectedTokens[h.token] === false && "opacity-40",
                         )}
                       >
