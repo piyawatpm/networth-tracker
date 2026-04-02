@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { DatePicker } from "@/components/ui/date-picker";
 import {
   Select,
   SelectContent,
@@ -246,12 +247,7 @@ export function ExpenseDialog({ entry, onSave, onCreateRecurring, trigger, categ
           {/* Date */}
           <div className="grid gap-2">
             <Label htmlFor="expense-date">Date</Label>
-            <Input
-              id="expense-date"
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-            />
+            <DatePicker value={date} onChange={setDate} />
           </div>
 
           {/* Recurring toggle (new entries only) */}

@@ -1,7 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { Input } from "@/components/ui/input";
+import { DatePicker } from "@/components/ui/date-picker";
 import {
   getCurrentMonthKey,
   getLastMonthKey,
@@ -81,18 +81,16 @@ export function DateRangeFilter({ value, customRange, onChange }: DateRangeFilte
       </div>
       {value === "custom" && (
         <div className="flex items-center gap-2">
-          <Input
-            type="date"
+          <DatePicker
             value={customRange.from}
-            onChange={(e) => onChange("custom", { ...customRange, from: e.target.value })}
-            className="w-auto text-xs"
+            onChange={(v) => onChange("custom", { ...customRange, from: v })}
+            className="w-auto"
           />
           <span className="text-xs text-muted-foreground">to</span>
-          <Input
-            type="date"
+          <DatePicker
             value={customRange.to}
-            onChange={(e) => onChange("custom", { ...customRange, to: e.target.value })}
-            className="w-auto text-xs"
+            onChange={(v) => onChange("custom", { ...customRange, to: v })}
+            className="w-auto"
           />
         </div>
       )}

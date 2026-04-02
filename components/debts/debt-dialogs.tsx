@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { DatePicker } from "@/components/ui/date-picker";
 import {
   Select,
   SelectContent,
@@ -278,12 +279,7 @@ export function PaymentDialog({ debtId, onSave, trigger }: PaymentDialogProps) {
           {/* Date */}
           <div className="grid gap-1.5">
             <Label htmlFor="payment-date">Date</Label>
-            <Input
-              id="payment-date"
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-            />
+            <DatePicker value={date} onChange={setDate} />
           </div>
 
           {/* Notes */}

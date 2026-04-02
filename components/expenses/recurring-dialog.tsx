@@ -14,6 +14,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { DatePicker } from "@/components/ui/date-picker";
 import {
   Select,
   SelectContent,
@@ -155,11 +156,11 @@ function RecurringForm({
       <div className="grid grid-cols-2 gap-2">
         <div className="grid gap-2">
           <Label>Start Date</Label>
-          <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+          <DatePicker value={startDate} onChange={setStartDate} />
         </div>
         <div className="grid gap-2">
           <Label>End Date (optional)</Label>
-          <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+          <DatePicker value={endDate} onChange={setEndDate} />
         </div>
       </div>
 

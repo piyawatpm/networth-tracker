@@ -14,6 +14,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { DatePicker } from "@/components/ui/date-picker";
 import {
   Select,
   SelectContent,
@@ -210,12 +211,7 @@ export function IncomeDialog({ entry, onSave, onCreateRecurring, trigger }: Inco
           {/* Date */}
           <div className="grid gap-1.5">
             <Label htmlFor="income-date">Date</Label>
-            <Input
-              id="income-date"
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-            />
+            <DatePicker value={date} onChange={setDate} />
           </div>
 
           {/* Recurring toggle — only on new entries */}
