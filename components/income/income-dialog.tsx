@@ -138,7 +138,7 @@ export function IncomeDialog({ entry, onSave, onCreateRecurring, trigger }: Inco
             <Label htmlFor="income-type">Type</Label>
             <Select value={type} onValueChange={(v) => v && setType(v as IncomeType)}>
               <SelectTrigger className="w-full">
-                <SelectValue />
+                <span>{INCOME_TYPE_LABELS[type]}</span>
               </SelectTrigger>
               <SelectContent>
                 {TYPES.map((t) => (
@@ -232,7 +232,7 @@ export function IncomeDialog({ entry, onSave, onCreateRecurring, trigger }: Inco
               </label>
               {makeRecurring && (
                 <Select value={frequency} onValueChange={(v) => v && setFrequency(v as RecurringFrequency)}>
-                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="w-full"><span>{FREQUENCY_LABELS[frequency]}</span></SelectTrigger>
                   <SelectContent>
                     {FREQUENCIES.map((f) => (
                       <SelectItem key={f} value={f}>{FREQUENCY_LABELS[f]}</SelectItem>

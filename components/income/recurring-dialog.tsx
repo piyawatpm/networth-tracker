@@ -86,7 +86,7 @@ function RecurringForm({
       <div className="grid gap-2">
         <Label>Type</Label>
         <Select value={type} onValueChange={(v) => v && setType(v as IncomeType)}>
-          <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-full"><span>{INCOME_TYPE_LABELS[type]}</span></SelectTrigger>
           <SelectContent>
             {TYPES.map((t) => (
               <SelectItem key={t} value={t}>{INCOME_TYPE_LABELS[t]}</SelectItem>
@@ -124,7 +124,7 @@ function RecurringForm({
       <div className="grid gap-2">
         <Label>Frequency</Label>
         <Select value={frequency} onValueChange={(v) => v && setFrequency(v as RecurringFrequency)}>
-          <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-full"><span>{FREQUENCY_LABELS[frequency]}</span></SelectTrigger>
           <SelectContent>
             {FREQUENCIES.map((f) => (<SelectItem key={f} value={f}>{FREQUENCY_LABELS[f]}</SelectItem>))}
           </SelectContent>
