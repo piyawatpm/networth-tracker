@@ -41,11 +41,13 @@ interface IncomeDialogProps {
   onSave: (entry: IncomeEntry) => void;
   onCreateRecurring?: (template: RecurringIncome) => void;
   trigger: React.ReactNode;
+  categoryTypes?: string[];
+  categoryLabels?: Record<string, string>;
 }
 
-export function IncomeDialog({ entry, onSave, onCreateRecurring, trigger }: IncomeDialogProps) {
+export function IncomeDialog({ entry, onSave, onCreateRecurring, trigger, categoryTypes, categoryLabels }: IncomeDialogProps) {
   const [open, setOpen] = useState(false);
-  const [type, setType] = useState<IncomeType>(entry?.type ?? "salary");
+  const [type, setType] = useState<string>(entry?.type ?? (categoryTypes?.[0] ?? "salary"));
   const [description, setDescription] = useState(entry?.description ?? "");
   const [amount, setAmount] = useState(entry?.amount?.toString() ?? "");
   const [currency, setCurrency] = useState<Currency>(entry?.currency ?? "AUD");
@@ -58,7 +60,7 @@ export function IncomeDialog({ entry, onSave, onCreateRecurring, trigger }: Inco
 
   useEffect(() => {
     if (open) {
-      setType(entry?.type ?? "salary");
+      setType(entry?.type ?? (categoryTypes?.[0] ?? "salary"));
       setDescription(entry?.description ?? "");
       setAmount(entry?.amount?.toString() ?? "");
       setCurrency(entry?.currency ?? "AUD");
@@ -83,7 +85,7 @@ export function IncomeDialog({ entry, onSave, onCreateRecurring, trigger }: Inco
 
     const saved: IncomeEntry = {
       id: entry?.id ?? crypto.randomUUID(),
-      type,
+      type: type as IncomeType,
       description: description.trim(),
       amount: parsedAmount,
       currency,
@@ -100,7 +102,7 @@ export function IncomeDialog({ entry, onSave, onCreateRecurring, trigger }: Inco
     if (makeRecurring && onCreateRecurring && !entry) {
       onCreateRecurring({
         id: crypto.randomUUID(),
-        type,
+        type: type as IncomeType,
         description: description.trim(),
         amount: parsedAmount,
         currency,
@@ -117,7 +119,8 @@ export function IncomeDialog({ entry, onSave, onCreateRecurring, trigger }: Inco
     setOpen(false);
   }
 
-  const TYPES = Object.keys(INCOME_TYPE_LABELS) as IncomeType[];
+  const TYPES = categoryTypes ?? (Object.keys(INCOME_TYPE_LABELS) as IncomeType[]);
+  const LABELS: Record<string, string> = categoryLabels ?? INCOME_TYPE_LABELS;
   const FREQUENCIES = Object.keys(FREQUENCY_LABELS) as RecurringFrequency[];
   const descError = touched && !description.trim();
   const amountError = touched && (isNaN(parsedAmount) || parsedAmount <= 0);
@@ -137,14 +140,14 @@ export function IncomeDialog({ entry, onSave, onCreateRecurring, trigger }: Inco
           {/* Type */}
           <div className="grid gap-1.5">
             <Label htmlFor="income-type">Type</Label>
-            <Select value={type} onValueChange={(v) => v && setType(v as IncomeType)}>
+            <Select value={type} onValueChange={(v: string | null) => v && setType(v)}>
               <SelectTrigger className="w-full">
-                <span>{INCOME_TYPE_LABELS[type]}</span>
+                <span>{LABELS[type] ?? type}</span>
               </SelectTrigger>
               <SelectContent>
                 {TYPES.map((t) => (
                   <SelectItem key={t} value={t}>
-                    {INCOME_TYPE_LABELS[t]}
+                    {LABELS[t] ?? t}
                   </SelectItem>
                 ))}
               </SelectContent>

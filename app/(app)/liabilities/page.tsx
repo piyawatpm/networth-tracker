@@ -163,7 +163,7 @@ export default function LiabilitiesPage() {
       {/* Hero Section */}
       <BlurFade delay={0}>
         <div className="space-y-4">
-          <div className="flex items-start justify-between">
+          <div className="flex items-start justify-between gap-4">
             <div>
               <p className="label-mono mb-2">Liabilities</p>
               <div className={cn(
@@ -175,6 +175,15 @@ export default function LiabilitiesPage() {
                 <NumberTicker value={Math.abs(convertedTotals.net)} decimalPlaces={2} />
               </div>
             </div>
+            <LiabilityDialog
+              onSave={handleSaveDebt}
+              trigger={
+                <Button className="gap-1.5 rounded-full px-4">
+                  <Plus className="h-4 w-4" data-icon="inline-start" />
+                  Add Entry
+                </Button>
+              }
+            />
           </div>
 
           <div className="finance-card p-5">
@@ -203,19 +212,6 @@ export default function LiabilitiesPage() {
             </div>
           </div>
         </div>
-      </BlurFade>
-
-      {/* Add Debt Button */}
-      <BlurFade delay={0.05}>
-        <LiabilityDialog
-          onSave={handleSaveDebt}
-          trigger={
-            <Button className="gap-1.5">
-              <Plus className="h-4 w-4" />
-              Add Entry
-            </Button>
-          }
-        />
       </BlurFade>
 
       {/* Debt Cards */}

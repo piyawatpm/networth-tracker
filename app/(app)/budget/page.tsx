@@ -28,7 +28,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Download, FileSpreadsheet, CreditCard, Wallet, ArrowUpRight, ArrowDownRight } from "lucide-react";
+import { Download, CreditCard, Wallet, ArrowUpRight, ArrowDownRight } from "lucide-react";
 import { exportBudgetToXls } from "@/lib/utils/export-budget";
 
 // ---------------------------------------------------------------------------
@@ -136,10 +136,16 @@ export default function BudgetPage() {
     <div className="space-y-6">
       {/* Header */}
       <BlurFade delay={0}>
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <FileSpreadsheet className="h-6 w-6 text-muted-foreground" />
-            <h1 className="text-2xl font-semibold tracking-tight">Monthly Budget</h1>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="label-mono mb-2">Monthly Budget</p>
+            <div className={cn(
+              "display-number",
+              netBalance >= 0 ? "text-income" : "text-expense",
+            )}>
+              {netBalance >= 0 ? "+" : "-"}
+              <NumberTicker value={Math.abs(netBalance)} prefix={sym} decimalPlaces={0} />
+            </div>
           </div>
           <div className="flex items-center gap-3">
             <Select value={selectedMonth} onValueChange={(v) => v && setSelectedMonth(v)}>
@@ -162,51 +168,37 @@ export default function BudgetPage() {
         </div>
       </BlurFade>
 
-      {/* Summary Cards */}
+      {/* Summary Tiles */}
       <BlurFade delay={0.05}>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <div className="finance-card p-4">
-            <p className="label-mono mb-1">Total Income</p>
-            <NumberTicker
-              value={totalIncome}
-              className="text-xl md:text-2xl font-semibold tabular-nums text-income"
-              prefix={sym}
-              decimalPlaces={2}
-            />
-          </div>
-          <div className="finance-card p-4">
-            <p className="label-mono mb-1">Total Expenses</p>
-            <NumberTicker
-              value={totalExpense}
-              className="text-xl md:text-2xl font-semibold tabular-nums text-expense"
-              prefix={sym}
-              decimalPlaces={2}
-            />
-          </div>
-          <div className="finance-card p-4">
-            <p className="label-mono mb-1">Credit Card</p>
-            <NumberTicker
-              value={totalCC}
-              className="text-xl md:text-2xl font-semibold tabular-nums text-expense"
-              prefix={sym}
-              decimalPlaces={2}
-            />
-          </div>
-          <div className="finance-card p-4">
-            <p className="label-mono mb-1">Net Balance</p>
-            <span
-              className={cn(
-                "text-xl md:text-2xl font-semibold tabular-nums",
+        <div className="finance-card p-5">
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-4 md:gap-0 md:divide-x md:divide-border">
+            <div className="md:pr-6">
+              <p className="label-mono mb-1">Total Income</p>
+              <p className="text-lg font-semibold tabular-nums text-income">
+                {sym}{totalIncome.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </p>
+            </div>
+            <div className="md:px-6">
+              <p className="label-mono mb-1">Total Expenses</p>
+              <p className="text-lg font-semibold tabular-nums text-expense">
+                {sym}{totalExpense.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </p>
+            </div>
+            <div className="md:px-6">
+              <p className="label-mono mb-1">Credit Card</p>
+              <p className="text-lg font-semibold tabular-nums text-expense">
+                {sym}{totalCC.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </p>
+            </div>
+            <div className="md:pl-6">
+              <p className="label-mono mb-1">Net Balance</p>
+              <p className={cn(
+                "text-lg font-semibold tabular-nums",
                 netBalance >= 0 ? "text-income" : "text-expense",
-              )}
-            >
-              {netBalance >= 0 ? "+" : ""}
-              {sym}
-              {Math.abs(netBalance).toLocaleString("en-US", {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              })}
-            </span>
+              )}>
+                {netBalance >= 0 ? "+" : ""}{sym}{Math.abs(netBalance).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </p>
+            </div>
           </div>
         </div>
       </BlurFade>
