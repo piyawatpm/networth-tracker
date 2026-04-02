@@ -18,6 +18,13 @@ import { motion, AnimatePresence } from "motion/react";
 import { cn } from "@/lib/utils";
 import { BlurFade } from "@/components/ui/blur-fade";
 import { NumberTicker } from "@/components/ui/number-ticker";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { formatAxisValue } from "@/lib/utils/echarts";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 import { useCurrency } from "@/components/providers/currency-provider";
@@ -1142,134 +1149,83 @@ export default function DashboardPage() {
             );
           };
 
+          const [selectedIndicator, setSelectedIndicator] = useState<string | null>(null);
+
           const indicators = [
-            {
-              label: "Debt / Assets",
-              value: debtToAssetRatio,
-              max: 100,
-              thresholds: [30, 60] as [number, number],
-              invert: true,
-              suffix: "%",
-              status:
-                debtToAssetRatio <= 30
-                  ? "Healthy"
-                  : debtToAssetRatio <= 60
-                    ? "Moderate"
-                    : "High",
+            { label: "Debt / Assets", value: debtToAssetRatio, max: 100, thresholds: [30, 60] as [number, number], invert: true, suffix: "%",
+              status: debtToAssetRatio <= 30 ? "Healthy" : debtToAssetRatio <= 60 ? "Moderate" : "High",
+              formula: "Total Liabilities ÷ Total Assets",
+              detail: `${format(iOwe)} ÷ ${format(totalAssets)}`,
+              desc: "Measures how much of your assets are financed by debt. Lower is better — means you truly own more of what you have.",
+              tip: debtToAssetRatio <= 30 ? "You're in great shape. Keep debt low as you grow assets." : debtToAssetRatio <= 60 ? "Consider paying down debt before taking on more." : "Focus on debt reduction — pay off highest-interest debt first.",
             },
-            {
-              label: "Debt / Income",
-              value: debtToIncomeRatio,
-              max: 100,
-              thresholds: [35, 50] as [number, number],
-              invert: true,
-              suffix: "%",
-              status:
-                debtToIncomeRatio <= 35
-                  ? "Healthy"
-                  : debtToIncomeRatio <= 50
-                    ? "Caution"
-                    : "High",
+            { label: "Debt / Income", value: debtToIncomeRatio, max: 100, thresholds: [35, 50] as [number, number], invert: true, suffix: "%",
+              status: debtToIncomeRatio <= 35 ? "Healthy" : debtToIncomeRatio <= 50 ? "Caution" : "High",
+              formula: "Total Debt ÷ Annual Income",
+              detail: `${format(iOwe)} ÷ ${format(annualizedIncome)}`,
+              desc: "Shows your total debt burden relative to what you earn. Banks use this to assess lending risk — under 35% is ideal.",
+              tip: debtToIncomeRatio <= 35 ? "Lenders see you as low risk. Good position for future borrowing if needed." : "Avoid new debt until this ratio drops. Focus on increasing income or paying down principal.",
             },
-            {
-              label: "Savings Rate",
-              value: savingsRate,
-              max: 100,
-              thresholds: [10, 20] as [number, number],
-              invert: false,
-              suffix: "%",
-              status:
-                savingsRate >= 20
-                  ? "Excellent"
-                  : savingsRate >= 10
-                    ? "Good"
-                    : "Low",
+            { label: "Savings Rate", value: savingsRate, max: 100, thresholds: [10, 20] as [number, number], invert: false, suffix: "%",
+              status: savingsRate >= 20 ? "Excellent" : savingsRate >= 10 ? "Good" : "Low",
+              formula: "(Income − Expenses) ÷ Income",
+              detail: `(${format(periodIncomeTotal)} − ${format(periodExpenseTotal)}) ÷ ${format(periodIncomeTotal)}`,
+              desc: "The percentage of income you keep. The single most important habit for building wealth. 20%+ puts you ahead of most people.",
+              tip: savingsRate >= 20 ? "Outstanding! Consider directing extra savings into investments." : savingsRate >= 10 ? "Good start. Try automating an extra 5% into savings." : "Track your top 3 expense categories and find one to cut by 10%.",
             },
-            {
-              label: "Emergency Fund",
-              value: emergencyFundMonths,
-              max: 12,
-              thresholds: [3, 6] as [number, number],
-              invert: false,
-              suffix: "months",
-              status:
-                emergencyFundMonths >= 6
-                  ? "Strong"
-                  : emergencyFundMonths >= 3
-                    ? "Adequate"
-                    : "Build up",
+            { label: "Emergency Fund", value: emergencyFundMonths, max: 12, thresholds: [3, 6] as [number, number], invert: false, suffix: "months",
+              status: emergencyFundMonths >= 6 ? "Strong" : emergencyFundMonths >= 3 ? "Adequate" : "Build up",
+              formula: "Liquid Assets ÷ Monthly Expenses",
+              detail: `${format(liquidAssets)} ÷ ${format(monthlyExpenses)}/mo`,
+              desc: "How many months you could survive without income. Includes cash, bonds, and stablecoins. 3-6 months is the standard target.",
+              tip: emergencyFundMonths >= 6 ? "Well protected! Anything above 6 months could be invested for growth." : emergencyFundMonths >= 3 ? "You have a basic safety net. Build to 6 months for full protection." : "This is your #1 priority. Set up auto-transfers to build this up.",
             },
-            {
-              label: "Wealth / Income",
-              value: wealthToIncomeRatio,
-              max: 12,
-              thresholds: [1, 5] as [number, number],
-              invert: false,
-              suffix: "x annual",
-              status:
-                wealthToIncomeRatio >= 5
-                  ? "Strong"
-                  : wealthToIncomeRatio >= 1
-                    ? "Growing"
-                    : "Early",
+            { label: "Wealth / Income", value: wealthToIncomeRatio, max: 12, thresholds: [1, 5] as [number, number], invert: false, suffix: "x annual",
+              status: wealthToIncomeRatio >= 5 ? "Strong" : wealthToIncomeRatio >= 1 ? "Growing" : "Early",
+              formula: "Net Worth ÷ Annual Income",
+              detail: `${format(netWorth)} ÷ ${format(annualizedIncome)}`,
+              desc: "How many years of income you've accumulated. A rule of thumb: aim for 1x by 30, 3x by 40, 6x by 50, 10-12x by retirement.",
+              tip: wealthToIncomeRatio >= 5 ? "You're building real wealth. Stay the course." : wealthToIncomeRatio >= 1 ? "Good progress! Focus on increasing both savings rate and investment returns." : "You're in the accumulation phase. Every dollar saved now has the most compounding time.",
             },
-            {
-              label: "Invest / Net Worth",
-              value: Math.min(investmentToNetWorthRatio, 100),
-              max: 100,
-              thresholds: [40, 70] as [number, number],
-              invert: false,
-              suffix: "%",
-              status:
-                investmentToNetWorthRatio >= 70
-                  ? "Great"
-                  : investmentToNetWorthRatio >= 40
-                    ? "Good"
-                    : "Grow",
+            { label: "Invest / Net Worth", value: Math.min(investmentToNetWorthRatio, 100), max: 100, thresholds: [40, 70] as [number, number], invert: false, suffix: "%",
+              status: investmentToNetWorthRatio >= 70 ? "Great" : investmentToNetWorthRatio >= 40 ? "Good" : "Grow",
+              formula: "Investment Assets ÷ Net Worth",
+              detail: `${format(investmentAssets)} ÷ ${format(netWorth)}`,
+              desc: "What portion of your wealth is actively invested (portfolio + crypto). Higher means more of your money is working for you, generating returns.",
+              tip: investmentToNetWorthRatio >= 70 ? "Your money is working hard. Ensure you're diversified across asset classes." : "Consider moving idle cash into diversified investments for long-term growth.",
             },
-            {
-              label: "FI Ratio",
-              value: Math.min(fiRatio, 100),
-              max: 100,
-              thresholds: [25, 100] as [number, number],
-              invert: false,
-              suffix: "%",
-              status:
-                fiRatio >= 100
-                  ? "Free!"
-                  : fiRatio >= 25
-                    ? "On track"
-                    : "Building",
+            { label: "FI Ratio", value: Math.min(fiRatio, 100), max: 100, thresholds: [25, 100] as [number, number], invert: false, suffix: "%",
+              status: fiRatio >= 100 ? "Free!" : fiRatio >= 25 ? "On track" : "Building",
+              formula: "Passive Income ÷ Total Expenses",
+              detail: `${format(passiveAnnualized)}/yr ÷ ${format(annualizedExpenses)}/yr`,
+              desc: "The holy grail — when passive income (dividends, interest, rental, crypto yield) covers 100% of expenses, you're financially independent.",
+              tip: fiRatio >= 100 ? "Congratulations! You could live entirely on passive income." : fiRatio >= 25 ? "Great progress toward FI. Keep growing passive income sources." : "Focus on building dividend stocks, rental income, or yield-generating assets.",
             },
-            {
-              label: "Net Cash Flow",
-              value: Math.max(0, savingsRate),
-              max: 100,
-              thresholds: [0, 15] as [number, number],
-              invert: false,
-              suffix: format(netCashFlow)
-                .replace(/[A-Z$\s]/g, "")
-                .slice(0, 8),
+            { label: "Net Cash Flow", value: Math.max(0, savingsRate), max: 100, thresholds: [0, 15] as [number, number], invert: false,
+              suffix: format(netCashFlow).replace(/[A-Z$\s]/g, "").slice(0, 8),
               status: netCashFlow >= 0 ? "Surplus" : "Deficit",
+              formula: "Income − Expenses",
+              detail: `${format(periodIncomeTotal)} − ${format(periodExpenseTotal)}`,
+              desc: "Simple: are you earning more than you spend? A positive cash flow is the foundation of all wealth building.",
+              tip: netCashFlow >= 0 ? "You're cash-flow positive. Direct the surplus to savings and investments." : "You're spending more than you earn. Review expenses immediately and find cuts.",
             },
           ];
+
+          const selected = indicators.find((i) => i.label === selectedIndicator);
 
           return (
             <BlurFade delay={D * 2.5}>
               <div className="finance-card p-5">
                 <p className="label-mono mb-5">Financial Health Indicators</p>
-                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-4">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                   {indicators.map((ind) => {
-                    const isGood = ind.invert
-                      ? ind.value <= ind.thresholds[0]
-                      : ind.value >= ind.thresholds[1];
-                    const isBad = ind.invert
-                      ? ind.value > ind.thresholds[1]
-                      : ind.value < ind.thresholds[0];
+                    const isGood = ind.invert ? ind.value <= ind.thresholds[0] : ind.value >= ind.thresholds[1];
+                    const isBad = ind.invert ? ind.value > ind.thresholds[1] : ind.value < ind.thresholds[0];
                     return (
-                      <div
+                      <button
                         key={ind.label}
-                        className="flex flex-col items-center text-center"
+                        onClick={() => setSelectedIndicator(ind.label)}
+                        className="flex flex-col items-center text-center rounded-lg p-2 -m-2 transition-all hover:bg-secondary/50 cursor-pointer group"
                       >
                         <Gauge
                           value={ind.value}
@@ -1281,22 +1237,103 @@ export default function DashboardPage() {
                         <p className="text-[10px] font-medium mt-1 leading-tight">
                           {ind.label}
                         </p>
-                        <p
-                          className={cn(
-                            "text-[9px] mt-0.5 font-medium",
-                            isGood
-                              ? "text-income"
-                              : isBad
-                                ? "text-expense"
-                                : "text-muted-foreground",
-                          )}
-                        >
+                        <p className={cn(
+                          "text-[9px] mt-0.5 font-medium",
+                          isGood ? "text-income" : isBad ? "text-expense" : "text-muted-foreground",
+                        )}>
                           {ind.status}
                         </p>
-                      </div>
+                        <p className="text-[8px] text-muted-foreground/0 group-hover:text-muted-foreground/40 transition-colors mt-0.5">
+                          tap for details
+                        </p>
+                      </button>
                     );
                   })}
                 </div>
+
+                {/* Indicator Detail Modal */}
+                <Dialog open={selectedIndicator !== null} onOpenChange={(open) => { if (!open) setSelectedIndicator(null); }}>
+                  <DialogContent className="sm:max-w-sm">
+                    {selected && (() => {
+                      const isGood = selected.invert ? selected.value <= selected.thresholds[0] : selected.value >= selected.thresholds[1];
+                      const isBad = selected.invert ? selected.value > selected.thresholds[1] : selected.value < selected.thresholds[0];
+                      const color = isGood ? "oklch(0.723 0.219 149.579)" : isBad ? "oklch(0.637 0.237 25.331)" : "#d4a033";
+                      return (
+                        <>
+                          <DialogHeader>
+                            <DialogTitle>{selected.label}</DialogTitle>
+                            <DialogDescription>{selected.desc}</DialogDescription>
+                          </DialogHeader>
+                          <div className="space-y-4">
+                            {/* Large gauge */}
+                            <div className="flex justify-center">
+                              <svg viewBox="0 0 120 70" className="w-32">
+                                {(() => {
+                                  const pct = Math.min(1, Math.max(0, selected.value / selected.max));
+                                  const angle = pct * 180;
+                                  const r = 48;
+                                  const cx = 60;
+                                  const cy = 56;
+                                  const endAngle = (180 - angle) * (Math.PI / 180);
+                                  const ex = cx + r * Math.cos(endAngle);
+                                  const ey = cy - r * Math.sin(endAngle);
+                                  const largeArc = angle > 180 ? 1 : 0;
+                                  return (
+                                    <>
+                                      <path d={`M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy}`} fill="none" stroke="currentColor" className="text-border" strokeWidth="8" strokeLinecap="round" />
+                                      <path d={`M ${cx - r} ${cy} A ${r} ${r} 0 ${largeArc} 1 ${ex.toFixed(1)} ${ey.toFixed(1)}`} fill="none" stroke={color} strokeWidth="8" strokeLinecap="round" />
+                                      <text x={cx} y={cy - 10} textAnchor="middle" fill={color} fontSize="22" fontWeight="700" fontFamily="var(--font-geist-mono), monospace">
+                                        {selected.value < 10 ? selected.value.toFixed(1) : Math.round(selected.value)}
+                                      </text>
+                                      <text x={cx} y={cy + 4} textAnchor="middle" fill="currentColor" className="text-muted-foreground" fontSize="10">{selected.suffix}</text>
+                                    </>
+                                  );
+                                })()}
+                              </svg>
+                            </div>
+
+                            {/* Status */}
+                            <div className="text-center">
+                              <span className={cn("inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold",
+                                isGood ? "bg-income/10 text-income" : isBad ? "bg-expense/10 text-expense" : "bg-secondary text-secondary-foreground",
+                              )}>
+                                {selected.status}
+                              </span>
+                            </div>
+
+                            {/* Formula + Calculation */}
+                            <div className="rounded-lg bg-muted/50 p-3 space-y-1.5">
+                              <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Formula</p>
+                              <p className="text-sm font-mono">{selected.formula}</p>
+                              <p className="text-xs text-muted-foreground font-mono">{selected.detail}</p>
+                            </div>
+
+                            {/* Zone bar */}
+                            <div className="space-y-1">
+                              <div className="flex h-2 rounded-full overflow-hidden">
+                                <div className={cn("transition-all", selected.invert ? "bg-income/60" : "bg-expense/60")} style={{ width: `${(selected.thresholds[0] / selected.max) * 100}%` }} />
+                                <div className="bg-[#d4a033]/50 flex-1" style={{ width: `${((selected.thresholds[1] - selected.thresholds[0]) / selected.max) * 100}%` }} />
+                                <div className={cn("transition-all flex-1", selected.invert ? "bg-expense/60" : "bg-income/60")} />
+                              </div>
+                              <div className="flex justify-between text-[9px] text-muted-foreground/50">
+                                <span>0</span>
+                                <span>{selected.thresholds[0]}</span>
+                                <span>{selected.thresholds[1]}</span>
+                                <span>{selected.max}</span>
+                              </div>
+                            </div>
+
+                            {/* Recommendation */}
+                            <div className="rounded-lg border border-border/50 p-3">
+                              <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium mb-1">Recommendation</p>
+                              <p className="text-xs text-muted-foreground leading-relaxed">{selected.tip}</p>
+                            </div>
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </DialogContent>
+                </Dialog>
               </div>
             </BlurFade>
           );
