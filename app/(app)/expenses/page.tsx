@@ -5,17 +5,21 @@ import { useTheme } from "next-themes";
 import ReactECharts from "echarts-for-react";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 import { useCurrency } from "@/components/providers/currency-provider";
-import { useRecurringExpenses } from "@/hooks/use-recurring-expenses";
-import { useExpenseCategories } from "@/hooks/use-expense-categories";
+import { useRecurringEntries } from "@/hooks/use-recurring-entries";
+import { useCategories } from "@/hooks/use-categories";
 import type {
   ExpenseEntry,
+  RecurringExpense,
   IncomeEntry,
   PaymentMethod,
 } from "@/lib/utils/types";
 import { normalizeExpenseEntry, CURRENCY_SYMBOLS } from "@/lib/utils/types";
 import {
   PAYMENT_METHOD_LABELS,
+  EXPENSE_TYPE_LABELS,
+  EXPENSE_TYPE_COLORS,
 } from "@/lib/utils/constants";
+import { sumConverted, filterByDateRange } from "@/lib/utils/entry-helpers";
 import {
   getCurrentMonthKey,
   getLastMonthKey,
@@ -65,25 +69,33 @@ import {
   type DateRange,
 } from "@/components/expenses/date-range-filter";
 import { PaymentMethodBreakdown } from "@/components/expenses/payment-method-breakdown";
-import { SpendingTrend } from "@/components/expenses/spending-trend";
+import { MonthlyTrendChart } from "@/components/shared/monthly-trend-chart";
 import { ComparisonView } from "@/components/expenses/comparison-view";
-import { CumulativePaceChart } from "@/components/expenses/cumulative-pace-chart";
-import { ManageCategoriesDialog } from "@/components/expenses/manage-categories-dialog";
+import { CumulativePaceChart } from "@/components/shared/cumulative-pace-chart";
+import { ManageCategoriesDialog } from "@/components/shared/manage-categories-dialog";
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Recurring expense entry factory
 // ---------------------------------------------------------------------------
 
-function sumConverted(
-  entries: ExpenseEntry[],
-  convert: (amount: number, from: ExpenseEntry["currency"]) => number,
-) {
-  return entries.reduce((acc, e) => acc + convert(e.amount, e.currency), 0);
-}
-
-function filterByDateRange(entries: ExpenseEntry[], range: DateRange): ExpenseEntry[] {
-  return entries.filter((e) => e.date >= range.from && e.date <= range.to);
-}
+const RECURRING_EXPENSE_CONFIG = {
+  storageKey: "recurring_expenses",
+  createEntry: (template: RecurringExpense, date: string): ExpenseEntry => ({
+    id: crypto.randomUUID(),
+    type: template.type,
+    description: template.description,
+    amount: template.amount,
+    currency: template.currency,
+    vendor: template.vendor,
+    paymentMethod: template.paymentMethod,
+    date,
+    notes: template.notes,
+    images: [],
+    createdAt: Date.now(),
+    isRecurring: true,
+    recurringId: template.id,
+  }),
+};
 
 // ---------------------------------------------------------------------------
 // Page
@@ -115,7 +127,11 @@ export default function ExpensesPage() {
     removeCategory,
     getLabel,
     getColor,
-  } = useExpenseCategories();
+  } = useCategories({
+    storageKey: "custom_expense_categories",
+    defaultLabels: EXPENSE_TYPE_LABELS,
+    defaultColors: EXPENSE_TYPE_COLORS,
+  });
 
   // Recurring expenses
   const {
@@ -124,7 +140,7 @@ export default function ExpensesPage() {
     updateTemplate,
     deleteTemplate,
     toggleTemplate,
-  } = useRecurringExpenses(entries, setEntries);
+  } = useRecurringEntries(entries, setEntries, RECURRING_EXPENSE_CONFIG);
 
   // ---- State ----------------------------------------------------------------
 
@@ -381,10 +397,13 @@ export default function ExpensesPage() {
               />
               <div className="flex gap-2 shrink-0">
                 <ManageCategoriesDialog
+                  title="Manage Categories"
                   customCategories={customCategories}
+                  defaultLabels={EXPENSE_TYPE_LABELS}
                   onAdd={addCategory}
                   onRemove={removeCategory}
                   usedCategoryIds={usedCategoryIds}
+                  placeholder="e.g. Pet Care, Charity, Childcare"
                   trigger={
                     <Button variant="ghost" size="sm">
                       <Tags className="h-3.5 w-3.5 mr-1" />
@@ -765,11 +784,11 @@ export default function ExpensesPage() {
           {/* -------------------------------------------------------------- */}
           <TabsContent value="trends" className="space-y-6 pt-4">
             <div className="finance-card p-6">
-              <SpendingTrend entries={entries} getLabel={getLabel} getColor={getColor} />
+              <MonthlyTrendChart entries={entries} title="Monthly Spending (12 months)" getLabel={getLabel} getColor={getColor} />
             </div>
 
             <div className="finance-card p-6">
-              <CumulativePaceChart entries={entries} />
+              <CumulativePaceChart entries={entries} title="Spending Pace (This vs Last Month)" currentColor={{ dark: "#e09770", light: "#c95f3f" }} />
             </div>
 
             <div className="finance-card p-6">

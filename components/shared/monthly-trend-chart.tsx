@@ -4,18 +4,29 @@ import { useMemo, useState } from "react";
 import ReactECharts from "echarts-for-react";
 import { useTheme } from "next-themes";
 import { useCurrency } from "@/components/providers/currency-provider";
-import type { ExpenseEntry } from "@/lib/utils/types";
 import { getLastNMonthKeys, monthKeyToLabel, getMonthKey } from "@/lib/utils/timezone";
 import { getCartesianBaseOption, formatAxisValue } from "@/lib/utils/echarts";
 import { cn } from "@/lib/utils";
 
-interface SpendingTrendProps {
-  entries: ExpenseEntry[];
+type DefaultChartType = "line" | "bar";
+
+interface MonthlyTrendChartProps {
+  entries: { date: string; amount: number; currency: string; type: string }[];
+  title: string;
   getLabel: (type: string) => string;
   getColor: (type: string) => string;
+  defaultChartType?: DefaultChartType;
+  defaultBarColor?: { dark: string; light: string };
 }
 
-export function SpendingTrend({ entries, getLabel, getColor }: SpendingTrendProps) {
+export function MonthlyTrendChart({
+  entries,
+  title,
+  getLabel,
+  getColor,
+  defaultChartType = "line",
+  defaultBarColor,
+}: MonthlyTrendChartProps) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
   const { convert } = useCurrency();
@@ -27,11 +38,28 @@ export function SpendingTrend({ entries, getLabel, getColor }: SpendingTrendProp
     const base = getCartesianBaseOption(isDark);
 
     if (!byCategory) {
-      const data = monthKeys.map((mk) => {
-        return entries
+      const data = monthKeys.map((mk) =>
+        entries
           .filter((e) => getMonthKey(e.date) === mk)
-          .reduce((sum, e) => sum + convert(e.amount, e.currency), 0);
-      });
+          .reduce((sum, e) => sum + convert(e.amount, e.currency), 0),
+      );
+
+      if (defaultChartType === "bar") {
+        return {
+          ...base,
+          xAxis: { ...base.xAxis, type: "category" as const, data: monthKeys.map(monthKeyToLabel) },
+          yAxis: { ...base.yAxis, type: "value" as const, axisLabel: { ...base.yAxis.axisLabel, formatter: (v: number) => formatAxisValue(v) } },
+          series: [{
+            type: "bar" as const,
+            data,
+            itemStyle: {
+              color: isDark ? (defaultBarColor?.dark ?? "#2e8b57") : (defaultBarColor?.light ?? "#2e7d5b"),
+              borderRadius: [4, 4, 0, 0],
+            },
+            barMaxWidth: 32,
+          }],
+        };
+      }
 
       return {
         ...base,
@@ -95,12 +123,12 @@ export function SpendingTrend({ entries, getLabel, getColor }: SpendingTrendProp
       grid: { ...base.grid, bottom: 48 },
       series,
     };
-  }, [entries, convert, isDark, monthKeys, byCategory]);
+  }, [entries, convert, isDark, monthKeys, byCategory, getLabel, getColor, defaultChartType, defaultBarColor]);
 
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <p className="label-mono">Monthly Spending (12 months)</p>
+        <p className="label-mono">{title}</p>
         <button
           onClick={() => setByCategory((v) => !v)}
           className={cn(

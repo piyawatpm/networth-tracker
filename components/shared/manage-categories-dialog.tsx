@@ -12,8 +12,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { INCOME_TYPE_LABELS } from "@/lib/utils/constants";
-import type { CustomIncomeCategory } from "@/lib/utils/types";
 import { Plus, Trash2 } from "lucide-react";
 
 const PRESET_COLORS = [
@@ -22,26 +20,38 @@ const PRESET_COLORS = [
   "#5f6b80", "#c4943a", "#2e7d7b", "#4d7cc7", "#d4a033",
 ];
 
-interface ManageIncomeCategoriesDialogProps {
-  customCategories: CustomIncomeCategory[];
+interface CustomCategory {
+  id: string;
+  label: string;
+  color: string;
+}
+
+interface ManageCategoriesDialogProps {
+  title?: string;
+  customCategories: CustomCategory[];
+  defaultLabels: Record<string, string>;
   onAdd: (label: string, color: string) => void;
   onRemove: (id: string) => void;
   usedCategoryIds: Set<string>;
   trigger: React.ReactNode;
+  placeholder?: string;
 }
 
-export function ManageIncomeCategoriesDialog({
+export function ManageCategoriesDialog({
+  title = "Manage Categories",
   customCategories,
+  defaultLabels,
   onAdd,
   onRemove,
   usedCategoryIds,
   trigger,
-}: ManageIncomeCategoriesDialogProps) {
+  placeholder = "e.g. Pet Care, Charity, Childcare",
+}: ManageCategoriesDialogProps) {
   const [newLabel, setNewLabel] = useState("");
   const [newColor, setNewColor] = useState(PRESET_COLORS[0]);
   const [showForm, setShowForm] = useState(false);
 
-  const defaultTypes = Object.entries(INCOME_TYPE_LABELS);
+  const defaultTypes = Object.entries(defaultLabels);
 
   function handleAdd() {
     const trimmed = newLabel.trim();
@@ -57,14 +67,13 @@ export function ManageIncomeCategoriesDialog({
       <DialogTrigger render={trigger as React.ReactElement} />
       <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Manage Income Categories</DialogTitle>
+          <DialogTitle>{title}</DialogTitle>
           <DialogDescription>
             Default categories are always available. Add custom ones or remove unused custom categories.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
-          {/* Default categories */}
           <div className="space-y-1">
             <p className="label-mono mb-2">Default</p>
             <div className="flex flex-wrap gap-1.5">
@@ -79,12 +88,11 @@ export function ManageIncomeCategoriesDialog({
             </div>
           </div>
 
-          {/* Custom categories */}
           <div className="space-y-2">
             <p className="label-mono">Custom</p>
             {customCategories.length === 0 && !showForm && (
               <p className="text-xs text-muted-foreground">
-                No custom income categories yet.
+                No custom categories yet.
               </p>
             )}
             {customCategories.map((cat) => {
@@ -122,7 +130,7 @@ export function ManageIncomeCategoriesDialog({
                   <Input
                     value={newLabel}
                     onChange={(e) => setNewLabel(e.target.value)}
-                    placeholder="e.g. Side Hustle, Royalties, Grants"
+                    placeholder={placeholder}
                     onKeyDown={(e) => e.key === "Enter" && handleAdd()}
                     autoFocus
                   />

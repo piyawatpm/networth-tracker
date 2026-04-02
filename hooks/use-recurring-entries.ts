@@ -1,28 +1,45 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useMemo } from "react";
 import { useLocalStorage } from "./use-local-storage";
-import type { RecurringExpense, ExpenseEntry } from "@/lib/utils/types";
 import { getSydneyDateString, computeOccurrences } from "@/lib/utils/timezone";
+import { nextDay } from "@/lib/utils/entry-helpers";
+import type { RecurringFrequency } from "@/lib/utils/types";
 
-export function useRecurringExpenses(
-  entries: ExpenseEntry[],
-  setEntries: (value: ExpenseEntry[] | ((prev: ExpenseEntry[]) => ExpenseEntry[])) => void,
+interface UseRecurringEntriesConfig<T, E> {
+  storageKey: string;
+  createEntry: (template: T, date: string) => E;
+}
+
+export function useRecurringEntries<
+  T extends {
+    id: string;
+    frequency: RecurringFrequency;
+    startDate: string;
+    endDate?: string;
+    lastGeneratedDate?: string;
+    active: boolean;
+  },
+  E extends { id: string; date: string; recurringId?: string },
+>(
+  entries: E[],
+  setEntries: (value: E[] | ((prev: E[]) => E[])) => void,
+  config: UseRecurringEntriesConfig<T, E>,
 ) {
-  const [templates, setTemplates] = useLocalStorage<RecurringExpense[]>(
-    "recurring_expenses",
-    [],
-  );
+  const [templates, setTemplates] = useLocalStorage<T[]>(config.storageKey, []);
   const hasGenerated = useRef(false);
 
-  // Auto-generate missing entries on mount
+  // Stabilize config reference to avoid re-triggering effect
+  const createEntry = config.createEntry;
+  const storageKey = config.storageKey;
+
   useEffect(() => {
     if (hasGenerated.current) return;
     if (templates.length === 0) return;
 
     hasGenerated.current = true;
     const today = getSydneyDateString();
-    const newEntries: ExpenseEntry[] = [];
+    const newEntries: E[] = [];
     const updatedTemplates = templates.map((t) => ({ ...t }));
 
     for (const template of updatedTemplates) {
@@ -42,7 +59,6 @@ export function useRecurringExpenses(
         today,
       );
 
-      // Filter out dates that already have an entry with this recurringId
       const existingDates = new Set(
         entries
           .filter((e) => e.recurringId === template.id)
@@ -51,21 +67,7 @@ export function useRecurringExpenses(
 
       for (const date of occurrences) {
         if (existingDates.has(date)) continue;
-        newEntries.push({
-          id: crypto.randomUUID(),
-          type: template.type,
-          description: template.description,
-          amount: template.amount,
-          currency: template.currency,
-          vendor: template.vendor,
-          paymentMethod: template.paymentMethod,
-          date,
-          notes: template.notes,
-          images: [],
-          createdAt: Date.now(),
-          isRecurring: true,
-          recurringId: template.id,
-        });
+        newEntries.push(createEntry(template, date));
       }
 
       if (occurrences.length > 0) {
@@ -77,13 +79,13 @@ export function useRecurringExpenses(
       setEntries((prev) => [...prev, ...newEntries]);
       setTemplates(updatedTemplates);
     }
-  }, [templates, entries, setEntries, setTemplates]);
+  }, [templates, entries, setEntries, setTemplates, createEntry, storageKey]);
 
-  function addTemplate(template: RecurringExpense) {
+  function addTemplate(template: T) {
     setTemplates((prev) => [...prev, template]);
   }
 
-  function updateTemplate(updated: RecurringExpense) {
+  function updateTemplate(updated: T) {
     setTemplates((prev) =>
       prev.map((t) => (t.id === updated.id ? updated : t)),
     );
@@ -106,13 +108,4 @@ export function useRecurringExpenses(
     deleteTemplate,
     toggleTemplate,
   };
-}
-
-function nextDay(dateStr: string): string {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const date = new Date(y, m - 1, d + 1);
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
 }

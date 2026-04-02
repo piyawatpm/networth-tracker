@@ -5,10 +5,15 @@ import { useTheme } from "next-themes";
 import ReactECharts from "echarts-for-react";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 import { useCurrency } from "@/components/providers/currency-provider";
-import { useRecurringIncome } from "@/hooks/use-recurring-income";
-import { useIncomeCategories } from "@/hooks/use-income-categories";
-import type { IncomeEntry, IncomeType, ExpenseEntry } from "@/lib/utils/types";
+import { useRecurringEntries } from "@/hooks/use-recurring-entries";
+import { useCategories } from "@/hooks/use-categories";
+import type { IncomeEntry, IncomeType, RecurringIncome, ExpenseEntry } from "@/lib/utils/types";
 import { normalizeIncomeEntry, CURRENCY_SYMBOLS } from "@/lib/utils/types";
+import {
+  INCOME_TYPE_LABELS,
+  INCOME_TYPE_COLORS,
+} from "@/lib/utils/constants";
+import { sumConverted, filterByDateRange } from "@/lib/utils/entry-helpers";
 import {
   getCurrentMonthKey,
   getLastMonthKey,
@@ -53,31 +58,37 @@ import {
 // Feature components
 import { IncomeDialog } from "@/components/income/income-dialog";
 import { RecurringIncomeDialog } from "@/components/income/recurring-dialog";
-import { ManageIncomeCategoriesDialog } from "@/components/income/manage-categories-dialog";
+import { ManageCategoriesDialog } from "@/components/shared/manage-categories-dialog";
 import {
   DateRangeFilter,
   getPresetRange,
   type DatePreset,
   type DateRange,
 } from "@/components/expenses/date-range-filter";
-import { IncomeTrend } from "@/components/income/income-trend";
-import { IncomePaceChart } from "@/components/income/cumulative-pace-chart";
+import { MonthlyTrendChart } from "@/components/shared/monthly-trend-chart";
+import { CumulativePaceChart } from "@/components/shared/cumulative-pace-chart";
 import { ComparisonView } from "@/components/expenses/comparison-view";
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Recurring income entry factory
 // ---------------------------------------------------------------------------
 
-function sumConverted(
-  entries: IncomeEntry[],
-  convert: (amount: number, from: IncomeEntry["currency"]) => number,
-) {
-  return entries.reduce((acc, e) => acc + convert(e.amount, e.currency), 0);
-}
-
-function filterByDateRange(entries: IncomeEntry[], range: DateRange): IncomeEntry[] {
-  return entries.filter((e) => e.date >= range.from && e.date <= range.to);
-}
+const RECURRING_INCOME_CONFIG = {
+  storageKey: "recurring_income",
+  createEntry: (template: RecurringIncome, date: string): IncomeEntry => ({
+    id: crypto.randomUUID(),
+    type: template.type,
+    description: template.description,
+    amount: template.amount,
+    currency: template.currency,
+    source: template.source,
+    date,
+    notes: template.notes,
+    createdAt: Date.now(),
+    isRecurring: true,
+    recurringId: template.id,
+  }),
+};
 
 const PAGE_SIZE = 20;
 
@@ -107,7 +118,7 @@ export default function IncomePage() {
     updateTemplate,
     deleteTemplate,
     toggleTemplate,
-  } = useRecurringIncome(entries, setEntries);
+  } = useRecurringEntries(entries, setEntries, RECURRING_INCOME_CONFIG);
 
   // Dynamic income categories
   const {
@@ -118,7 +129,11 @@ export default function IncomePage() {
     removeCategory,
     getLabel,
     getColor,
-  } = useIncomeCategories();
+  } = useCategories({
+    storageKey: "custom_income_categories",
+    defaultLabels: INCOME_TYPE_LABELS,
+    defaultColors: INCOME_TYPE_COLORS,
+  });
 
   // Category ids in use
   const usedCategoryIds = useMemo(() => new Set(entries.map((e) => e.type)), [entries]);
@@ -395,11 +410,14 @@ export default function IncomePage() {
                 onChange={handleDateRangeChange}
               />
               <div className="flex gap-2 shrink-0">
-                <ManageIncomeCategoriesDialog
+                <ManageCategoriesDialog
+                  title="Manage Income Categories"
                   customCategories={customCategories}
+                  defaultLabels={INCOME_TYPE_LABELS}
                   onAdd={addCategory}
                   onRemove={removeCategory}
                   usedCategoryIds={usedCategoryIds}
+                  placeholder="e.g. Side Hustle, Royalties, Grants"
                   trigger={
                     <Button variant="ghost" size="sm">
                       <Tags className="h-3.5 w-3.5 mr-1" />
@@ -748,11 +766,11 @@ export default function IncomePage() {
           {/* -------------------------------------------------------------- */}
           <TabsContent value="trends" className="space-y-6 pt-4">
             <div className="finance-card p-6">
-              <IncomeTrend entries={entries} getLabel={getLabel} getColor={getColor} />
+              <MonthlyTrendChart entries={entries} title="Monthly Income (12 months)" getLabel={getLabel} getColor={getColor} defaultChartType="bar" defaultBarColor={{ dark: "#2e8b57", light: "#2e7d5b" }} />
             </div>
 
             <div className="finance-card p-6">
-              <IncomePaceChart entries={entries} />
+              <CumulativePaceChart entries={entries} title="Income Pace (This vs Last Month)" currentColor={{ dark: "#4ade80", light: "#2e8b57" }} />
             </div>
 
             <div className="finance-card p-6">

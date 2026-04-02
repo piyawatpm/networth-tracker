@@ -1,11 +1,9 @@
 "use client";
 
 import { useState, useMemo, useEffect, useCallback } from "react";
-import { useTheme } from "next-themes";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 import { useCurrency } from "@/components/providers/currency-provider";
 import type { PortfolioHolding, HoldingType, AccountType } from "@/lib/utils/types";
-import { HOLDING_TYPE_LABELS, CHART_COLORS } from "@/lib/utils/constants";
 import { getSydneyDateString } from "@/lib/utils/timezone";
 import {
   getPriceCache,
@@ -14,91 +12,26 @@ import {
   canAutoUpdate,
   addUpdateLog,
   getUpdateLog,
-  formatTimeAgo,
   type PriceCache,
   type PriceUpdateLog,
 } from "@/lib/utils/prices";
 import { cn } from "@/lib/utils";
 import { BlurFade } from "@/components/ui/blur-fade";
 import { NumberTicker } from "@/components/ui/number-ticker";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import {
-  Select,
-  SelectTrigger,
-  SelectContent,
-  SelectItem,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog";
 import { HoldingDialog } from "@/components/portfolio/holding-dialog";
-import { FundBreakdown, type FundAllocations } from "@/components/portfolio/fund-breakdown";
-import { LookThroughView } from "@/components/portfolio/look-through-view";
-import ReactECharts from "echarts-for-react";
-import { InteractiveDonut } from "@/components/ui/interactive-donut";
+import type { FundAllocations } from "@/components/portfolio/fund-breakdown";
+import { Plus, Download } from "lucide-react";
+
+import { PortfolioCharts } from "./_components/portfolio-charts";
+import { HoldingsTable } from "./_components/holdings-table";
+import { PriceUpdateStatus } from "./_components/price-update-status";
 import {
-  ECHARTS_COLORS,
-  formatAxisValue,
-  getCartesianBaseOption,
-} from "@/lib/utils/echarts";
-import {
-  Plus,
-  Pencil,
-  Trash2,
-  Briefcase,
-  ExternalLink,
-  RefreshCw,
-  Check,
-  Zap,
-  Hand,
-  History,
-  Search,
-  Download,
-} from "lucide-react";
-import * as XLSX from "xlsx";
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-const HOLDING_TYPES: HoldingType[] = ["stock", "etf", "fund", "bond", "other"];
-const ACCOUNT_TYPES: AccountType[] = ["normal", "super"];
-
-const HOLDING_TYPE_COLOR_MAP: Record<HoldingType, string> = {
-  stock: CHART_COLORS[0],
-  etf: CHART_COLORS[1],
-  fund: CHART_COLORS[2],
-  bond: CHART_COLORS[3],
-  other: CHART_COLORS[4],
-};
-
-type SortKey = "value" | "pnl" | "name" | "invested";
-
-const SORT_OPTIONS: { value: SortKey; label: string }[] = [
-  { value: "value", label: "Value \u2193" },
-  { value: "pnl", label: "P&L% \u2193" },
-  { value: "name", label: "Name A\u2192Z" },
-  { value: "invested", label: "Invested \u2193" },
-];
-
-type TrendPeriod = "1W" | "1M" | "3M" | "All";
-
-interface PortfolioSnapshot {
-  date: string;
-  value: number;
-  valueWithSuper: number;
-}
-
-// ---------------------------------------------------------------------------
-// Page
-// ---------------------------------------------------------------------------
+  type SortKey,
+  type TrendPeriod,
+  type PortfolioSnapshot,
+  exportPortfolioXls,
+} from "./_components/portfolio-constants";
 
 export default function PortfolioPage() {
   const [holdings, setHoldings] = useLocalStorage<PortfolioHolding[]>(
@@ -114,8 +47,6 @@ export default function PortfolioPage() {
     {},
   );
   const { format, convert, currency, symbol } = useCurrency();
-  const { resolvedTheme } = useTheme();
-  const isDark = resolvedTheme === "dark";
 
   // UI state
   const [includeSuper, setIncludeSuper] = useState(true);
@@ -124,7 +55,6 @@ export default function PortfolioPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("value");
   const [trendPeriod, setTrendPeriod] = useState<TrendPeriod>("All");
-  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [editingValueId, setEditingValueId] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState("");
   const [priceCache, setPriceCacheState] = useState<PriceCache>({});
@@ -133,15 +63,10 @@ export default function PortfolioPage() {
   const [updateLog, setUpdateLog] = useState<PriceUpdateLog[]>([]);
   const [logHoldingId, setLogHoldingId] = useState<string | null>(null);
 
-  // Load price cache and log on mount
   useEffect(() => {
     setPriceCacheState(getPriceCache());
     setUpdateLog(getUpdateLog());
   }, []);
-
-  // ---------------------------------------------------------------------------
-  // Price fetching
-  // ---------------------------------------------------------------------------
 
   const fetchPrices = useCallback(
     async (force = false) => {
@@ -245,10 +170,6 @@ export default function PortfolioPage() {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ---------------------------------------------------------------------------
-  // Inline value edit
-  // ---------------------------------------------------------------------------
-
   function startEditValue(h: PortfolioHolding) {
     setEditingValueId(h.id);
     setEditingValue(h.currentValue.toString());
@@ -273,10 +194,6 @@ export default function PortfolioPage() {
     }
     setEditingValueId(null);
   }
-
-  // ---------------------------------------------------------------------------
-  // Filtering + sorting
-  // ---------------------------------------------------------------------------
 
   const filteredHoldings = useMemo(() => {
     let result = holdings;
@@ -325,10 +242,6 @@ export default function PortfolioPage() {
     }
   }, [filteredHoldings, sortKey, convert]);
 
-  // ---------------------------------------------------------------------------
-  // Totals
-  // ---------------------------------------------------------------------------
-
   const totals = useMemo(() => {
     const totalValue = filteredHoldings.reduce(
       (s, h) => s + convert(h.currentValue, h.currency),
@@ -349,10 +262,6 @@ export default function PortfolioPage() {
     };
   }, [filteredHoldings, convert]);
 
-  // ---------------------------------------------------------------------------
-  // Daily snapshot recording
-  // ---------------------------------------------------------------------------
-
   useEffect(() => {
     if (holdings.length === 0) return;
     const today = getSydneyDateString();
@@ -372,10 +281,6 @@ export default function PortfolioPage() {
       { date: today, value: valueNoSuper, valueWithSuper: valueAll },
     ]);
   }, [holdings, snapshots, setSnapshots, convert]);
-
-  // ---------------------------------------------------------------------------
-  // Trend chart data (with period filtering)
-  // ---------------------------------------------------------------------------
 
   const trendData = useMemo(() => {
     let filtered = snapshots;
@@ -406,136 +311,6 @@ export default function PortfolioPage() {
     }));
   }, [snapshots, includeSuper, trendPeriod]);
 
-  // ---------------------------------------------------------------------------
-  // Allocation by Type
-  // ---------------------------------------------------------------------------
-
-  const allocationData = useMemo(() => {
-    const byType: Record<string, number> = {};
-    for (const h of filteredHoldings) {
-      byType[h.type] =
-        (byType[h.type] ?? 0) + convert(h.currentValue, h.currency);
-    }
-    return Object.entries(byType)
-      .map(([type, value]) => ({
-        name: HOLDING_TYPE_LABELS[type as HoldingType],
-        value,
-        type: type as HoldingType,
-        fill: HOLDING_TYPE_COLOR_MAP[type as HoldingType],
-      }))
-      .sort((a, b) => b.value - a.value);
-  }, [filteredHoldings, convert]);
-
-  // ---------------------------------------------------------------------------
-  // Top Holdings allocation
-  // ---------------------------------------------------------------------------
-
-  const topHoldingsData = useMemo(() => {
-    const items = filteredHoldings
-      .map((h) => ({
-        name: h.ticker || h.name,
-        value: convert(h.currentValue, h.currency),
-      }))
-      .sort((a, b) => b.value - a.value);
-
-    if (items.length <= 7) return items;
-
-    const top6 = items.slice(0, 6);
-    const otherValue = items.slice(6).reduce((s, i) => s + i.value, 0);
-    return [...top6, { name: "Other", value: otherValue }];
-  }, [filteredHoldings, convert]);
-
-  // ---------------------------------------------------------------------------
-  // Country allocation
-  // ---------------------------------------------------------------------------
-
-  const countryData = useMemo(() => {
-    const byCountry: Record<string, number> = {};
-    for (const h of filteredHoldings) {
-      const key = h.country || "Unknown";
-      byCountry[key] = (byCountry[key] ?? 0) + convert(h.currentValue, h.currency);
-    }
-    return Object.entries(byCountry)
-      .map(([country, value]) => ({ name: country, value }))
-      .sort((a, b) => b.value - a.value);
-  }, [filteredHoldings, convert]);
-
-  // ---------------------------------------------------------------------------
-  // Chart options (all memoized with theme)
-  // ---------------------------------------------------------------------------
-
-  const trendChartOption = useMemo(() => {
-    const base = getCartesianBaseOption(isDark);
-    return {
-      ...base,
-      grid: { ...base.grid, left: 56 },
-      xAxis: {
-        ...base.xAxis,
-        type: "category" as const,
-        data: trendData.map((d) => d.date),
-        boundaryGap: false,
-      },
-      yAxis: {
-        ...base.yAxis,
-        type: "value" as const,
-        axisLabel: {
-          ...base.yAxis.axisLabel,
-          formatter: formatAxisValue,
-        },
-      },
-      tooltip: {
-        ...base.tooltip,
-        trigger: "axis" as const,
-        formatter: "{b}: {c}",
-      },
-      series: [
-        {
-          type: "line" as const,
-          data: trendData.map((d) => d.value),
-          smooth: true,
-          showSymbol: false,
-          lineStyle: { width: 2, color: ECHARTS_COLORS[0] },
-          itemStyle: { color: ECHARTS_COLORS[0] },
-          areaStyle: {
-            opacity: 0.15,
-            color: {
-              type: "linear" as const,
-              x: 0,
-              y: 0,
-              x2: 0,
-              y2: 1,
-              colorStops: [
-                { offset: 0, color: ECHARTS_COLORS[0] },
-                { offset: 1, color: "transparent" },
-              ],
-            },
-          },
-        },
-      ],
-    };
-  }, [trendData, isDark]);
-
-  // ---------------------------------------------------------------------------
-  // Broker breakdown
-  // ---------------------------------------------------------------------------
-
-  const brokerBreakdown = useMemo(() => {
-    const byBroker: Record<string, { value: number; count: number }> = {};
-    for (const h of filteredHoldings) {
-      const name = h.broker || "Unknown";
-      if (!byBroker[name]) byBroker[name] = { value: 0, count: 0 };
-      byBroker[name].value += convert(h.currentValue, h.currency);
-      byBroker[name].count += 1;
-    }
-    return Object.entries(byBroker)
-      .map(([broker, d]) => ({ broker, ...d }))
-      .sort((a, b) => b.value - a.value);
-  }, [filteredHoldings, convert]);
-
-  // ---------------------------------------------------------------------------
-  // Handlers
-  // ---------------------------------------------------------------------------
-
   function handleSave(h: PortfolioHolding) {
     setHoldings((prev) => {
       const idx = prev.findIndex((p) => p.id === h.id);
@@ -550,77 +325,11 @@ export default function PortfolioPage() {
 
   function handleDelete(id: string) {
     setHoldings((prev) => prev.filter((h) => h.id !== id));
-    setDeleteConfirmId(null);
   }
-
-  // ---------------------------------------------------------------------------
-  // XLS Export
-  // ---------------------------------------------------------------------------
 
   function handleExportXls() {
-    const wb = XLSX.utils.book_new();
-    const rows: (string | number | null)[][] = [];
-
-    rows.push([
-      "Name",
-      "Ticker",
-      "Type",
-      "Account",
-      "Broker",
-      "Country",
-      "Currency",
-      "Units",
-      "Invested",
-      "Value",
-      "P&L",
-      "P&L %",
-    ]);
-
-    for (const h of holdings) {
-      const inv = convert(h.amountInvested, h.currency);
-      const cur = convert(h.currentValue, h.currency);
-      const pnl = cur - inv;
-      const pnlPct = inv > 0 ? ((pnl / inv) * 100) : 0;
-
-      rows.push([
-        h.name,
-        h.ticker,
-        HOLDING_TYPE_LABELS[h.type],
-        h.accountType === "super" ? "Super" : "Normal",
-        h.broker || "",
-        h.country || "",
-        h.currency,
-        h.units,
-        Math.round(inv * 100) / 100,
-        Math.round(cur * 100) / 100,
-        Math.round(pnl * 100) / 100,
-        Math.round(pnlPct * 10) / 10,
-      ]);
-    }
-
-    const ws = XLSX.utils.aoa_to_sheet(rows);
-    ws["!cols"] = [
-      { wch: 24 },
-      { wch: 10 },
-      { wch: 8 },
-      { wch: 8 },
-      { wch: 14 },
-      { wch: 8 },
-      { wch: 8 },
-      { wch: 12 },
-      { wch: 12 },
-      { wch: 12 },
-      { wch: 12 },
-      { wch: 8 },
-    ];
-
-    XLSX.utils.book_append_sheet(wb, ws, "Portfolio");
-    XLSX.writeFile(wb, `portfolio-${getSydneyDateString()}.xlsx`);
+    exportPortfolioXls(holdings, convert);
   }
-
-  // ---------------------------------------------------------------------------
-  // Render
-  // ---------------------------------------------------------------------------
 
   const DELAY = 0.05;
 
@@ -735,535 +444,60 @@ export default function PortfolioPage() {
         </div>
       </BlurFade>
 
-      {/* ── Value Trend Chart ── */}
-      <BlurFade delay={DELAY * 2}>
-        <div className="finance-card p-6">
-          <div className="mb-4 flex items-center justify-between">
-            <p className="label-mono">Value Trend</p>
-            <div className="flex items-center gap-1">
-              {(["1W", "1M", "3M", "All"] as TrendPeriod[]).map((p) => (
-                <button
-                  key={p}
-                  onClick={() => setTrendPeriod(p)}
-                  className={cn(
-                    "rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors",
-                    trendPeriod === p
-                      ? "bg-foreground/[0.08] text-foreground"
-                      : "text-muted-foreground hover:text-foreground hover:bg-foreground/[0.03]"
-                  )}
-                >
-                  {p}
-                </button>
-              ))}
-            </div>
-          </div>
-          {trendData.length > 1 ? (
-            <ReactECharts
-              option={trendChartOption}
-              style={{ height: 192, width: "100%" }}
-            />
-          ) : (
-            <div className="flex h-48 items-center justify-center">
-              <p className="text-sm text-muted-foreground/50">
-                {trendData.length === 1
-                  ? "Come back tomorrow to see your trend line"
-                  : "Add holdings to start tracking value over time"}
-              </p>
-            </div>
-          )}
-        </div>
-      </BlurFade>
+      {/* ── Charts (trend, donuts, broker, look-through) ── */}
+      <PortfolioCharts
+        filteredHoldings={filteredHoldings}
+        trendData={trendData}
+        trendPeriod={trendPeriod}
+        setTrendPeriod={setTrendPeriod}
+        totals={totals}
+        fundAllocations={fundAllocations}
+        format={format}
+        convert={convert}
+        baseDelay={DELAY}
+      />
 
-      {/* ── Filters + Search + Sort ── */}
-      <BlurFade delay={DELAY * 3}>
-        <div className="space-y-3">
-          {/* Search + Sort Row */}
-          <div className="flex items-center gap-3">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search by name or ticker..."
-                className="pl-9"
-              />
-            </div>
-            <div className="w-40 shrink-0">
-              <Select value={sortKey} onValueChange={(v) => setSortKey(v as SortKey)}>
-                <SelectTrigger size="sm">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {SORT_OPTIONS.map((o) => (
-                    <SelectItem key={o.value} value={o.value}>
-                      {o.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          {/* Type filter pills */}
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="label-mono mr-1">Type</span>
-            {(["all", ...HOLDING_TYPES] as const).map((t) => (
-              <button
-                key={t}
-                onClick={() => setTypeFilter(t)}
-                className={cn(
-                  "rounded-full px-3 py-1 text-sm font-medium transition-colors",
-                  typeFilter === t
-                    ? "bg-foreground/[0.06] text-foreground"
-                    : "text-muted-foreground hover:text-foreground hover:bg-foreground/[0.03]"
-                )}
-              >
-                {t === "all" ? "All" : HOLDING_TYPE_LABELS[t]}
-              </button>
-            ))}
-          </div>
-
-          {/* Account filter pills */}
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="label-mono mr-1">Account</span>
-            {(["all", ...ACCOUNT_TYPES] as const).map((t) => (
-              <button
-                key={t}
-                onClick={() => setAccountFilter(t)}
-                className={cn(
-                  "rounded-full px-3 py-1 text-sm font-medium transition-colors capitalize",
-                  accountFilter === t
-                    ? "bg-foreground/[0.06] text-foreground"
-                    : "text-muted-foreground hover:text-foreground hover:bg-foreground/[0.03]"
-                )}
-              >
-                {t === "all" ? "All" : t === "normal" ? "Normal" : "Super"}
-              </button>
-            ))}
-          </div>
-        </div>
-      </BlurFade>
-
-      {/* ── Charts Section (3-column) ── */}
-      {filteredHoldings.length > 0 && (
-        <div className="grid gap-6 md:grid-cols-3">
-          {/* Allocation by Type */}
-          <BlurFade delay={DELAY * 4}>
-            <InteractiveDonut
-              title="Allocation by Type"
-              data={allocationData.map((d) => ({ name: d.name, value: d.value, color: d.fill }))}
-              format={format}
-            />
-          </BlurFade>
-
-          {/* Top Holdings */}
-          <BlurFade delay={DELAY * 4.5}>
-            <InteractiveDonut
-              title="Top Holdings"
-              data={topHoldingsData.map((d, i) => ({ name: d.name, value: d.value, color: ECHARTS_COLORS[i % ECHARTS_COLORS.length] }))}
-              format={format}
-            />
-          </BlurFade>
-
-          {/* Country / Region */}
-          <BlurFade delay={DELAY * 5}>
-            <InteractiveDonut
-              title="By Country"
-              data={countryData.map((d, i) => ({ name: d.name, value: d.value, color: ECHARTS_COLORS[i % ECHARTS_COLORS.length] }))}
-              format={format}
-            />
-          </BlurFade>
-
-        </div>
-      )}
-
-      {/* ── Broker Breakdown ── */}
-      {brokerBreakdown.length > 0 && (
-        <BlurFade delay={DELAY * 5.5}>
-          <div className="finance-card p-6">
-            <p className="label-mono mb-4">By Broker</p>
-            <div className="space-y-2.5">
-              {brokerBreakdown.map((b, i) => {
-                const pct = totals.totalValue > 0 ? (b.value / totals.totalValue) * 100 : 0;
-                const color = CHART_COLORS[i % CHART_COLORS.length];
-                return (
-                  <div key={b.broker} className="space-y-1">
-                    <div className="flex items-center justify-between text-sm">
-                      <div className="flex items-center gap-2">
-                        <span
-                          className="inline-block h-2.5 w-2.5 rounded-full"
-                          style={{ backgroundColor: color }}
-                        />
-                        <span>{b.broker}</span>
-                        <span className="text-xs text-muted-foreground">
-                          {b.count} holding{b.count !== 1 ? "s" : ""}
-                        </span>
-                      </div>
-                      <span className="font-mono text-xs tabular-nums text-muted-foreground">
-                        {format(b.value)} ({pct.toFixed(1)}%)
-                      </span>
-                    </div>
-                    <div className="h-1.5 w-full rounded-full bg-muted">
-                      <div
-                        className="h-full rounded-full transition-all duration-500"
-                        style={{
-                          width: `${pct}%`,
-                          backgroundColor: color,
-                        }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </BlurFade>
-      )}
-
-      {/* ── Look-Through Exposure ── */}
-      {filteredHoldings.length > 0 && (
-        <BlurFade delay={DELAY * 6}>
-          <LookThroughView holdings={filteredHoldings} allocations={fundAllocations} />
-        </BlurFade>
-      )}
-
-      {/* ── Holdings List ── */}
-      <BlurFade delay={DELAY * 6}>
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <p className="label-mono">
-              Holdings ({filteredHoldings.length})
-            </p>
-            <div className="flex items-center gap-2">
-              {lastFetchStatus && (
-                <span className="text-[10px] text-muted-foreground">
-                  {lastFetchStatus}
-                </span>
-              )}
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                onClick={() => fetchPrices(true)}
-                disabled={isFetching}
-                className={cn(isFetching && "animate-spin")}
-              >
-                <RefreshCw className="h-3.5 w-3.5" />
-              </Button>
-            </div>
-          </div>
-
-          {sortedHoldings.length === 0 ? (
-            <div className="finance-card flex flex-col items-center justify-center gap-3 py-16">
-              <Briefcase className="h-10 w-10 text-muted-foreground/40" />
-              <p className="text-sm text-muted-foreground">
-                {holdings.length === 0
-                  ? "No holdings yet. Add your first one."
-                  : "No holdings match your filters."}
-              </p>
-              {holdings.length === 0 && (
-                <HoldingDialog
-                  onSave={handleSave}
-                  trigger={
-                    <Button
-                      variant="outline"
-                      className="rounded-full gap-1.5"
-                    >
-                      <Plus className="h-4 w-4" data-icon="inline-start" />
-                      Add Holding
-                    </Button>
-                  }
-                />
-              )}
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {sortedHoldings.map((h, i) => {
-                const invested = convert(h.amountInvested, h.currency);
-                const current = convert(h.currentValue, h.currency);
-                const pnl = current - invested;
-                const pnlPct = invested > 0 ? (pnl / invested) * 100 : 0;
-
-                return (
-                  <BlurFade key={h.id} delay={DELAY * 6 + i * 0.03}>
-                    <div className="finance-card p-4">
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="min-w-0 flex-1 space-y-1.5">
-                          <div className="flex items-center gap-2">
-                            <h3 className="truncate text-sm font-semibold">
-                              {h.name}
-                            </h3>
-                            {h.ticker && (
-                              <span className="shrink-0 font-mono text-xs text-muted-foreground">
-                                {h.ticker}
-                              </span>
-                            )}
-                            {/* Source currency badge */}
-                            <Badge
-                              variant="outline"
-                              className="shrink-0 px-1.5 py-0 text-[10px] font-mono"
-                            >
-                              {h.currency}
-                            </Badge>
-                            {h.link && (
-                              <a
-                                href={h.link}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
-                              >
-                                <ExternalLink className="h-3.5 w-3.5" />
-                              </a>
-                            )}
-                          </div>
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <Badge variant="secondary">
-                              {HOLDING_TYPE_LABELS[h.type]}
-                            </Badge>
-                            {h.accountType === "super" && (
-                              <Badge variant="outline">Super</Badge>
-                            )}
-                            {h.broker && (
-                              <span className="text-xs text-muted-foreground">
-                                {h.broker}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="flex shrink-0 items-start gap-6 text-right">
-                          <div className="hidden sm:block">
-                            <p className="label-mono mb-0.5">Units</p>
-                            <p className="text-sm tabular-nums">
-                              {h.units.toLocaleString("en-US", {
-                                maximumFractionDigits: 4,
-                              })}
-                            </p>
-                          </div>
-                          <div className="hidden sm:block">
-                            <p className="label-mono mb-0.5">Invested</p>
-                            <p className="text-sm tabular-nums">
-                              {format(h.amountInvested, h.currency)}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="label-mono mb-0.5 flex items-center gap-1">
-                              Value
-                              {canAutoUpdate(h.ticker) ? (
-                                <span title="Auto-updated">
-                                  <Zap className="h-2.5 w-2.5 text-accent" />
-                                </span>
-                              ) : (
-                                <span title="Manual update">
-                                  <Hand className="h-2.5 w-2.5 text-muted-foreground/50" />
-                                </span>
-                              )}
-                            </p>
-                            {editingValueId === h.id ? (
-                              <div className="flex items-center gap-1">
-                                <Input
-                                  type="number"
-                                  value={editingValue}
-                                  onChange={(e) =>
-                                    setEditingValue(e.target.value)
-                                  }
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter") saveEditValue(h);
-                                    if (e.key === "Escape")
-                                      setEditingValueId(null);
-                                  }}
-                                  className="h-6 w-24 text-xs tabular-nums px-1.5"
-                                  autoFocus
-                                />
-                                <Button
-                                  variant="ghost"
-                                  size="icon-xs"
-                                  onClick={() => saveEditValue(h)}
-                                >
-                                  <Check className="h-3 w-3" />
-                                </Button>
-                              </div>
-                            ) : (
-                              <p
-                                className="text-sm font-semibold tabular-nums cursor-pointer hover:text-accent transition-colors"
-                                onClick={() => startEditValue(h)}
-                                role="button"
-                              >
-                                {format(h.currentValue, h.currency)}
-                              </p>
-                            )}
-                            {priceCache[h.ticker?.toUpperCase()] && (
-                              <p className="text-[9px] text-muted-foreground/50 mt-0.5">
-                                {formatTimeAgo(
-                                  priceCache[h.ticker.toUpperCase()].updatedAt
-                                )}
-                              </p>
-                            )}
-                          </div>
-                          <div>
-                            <p className="label-mono mb-0.5">P&L</p>
-                            <p
-                              className={cn(
-                                "text-sm font-semibold tabular-nums",
-                                pnl >= 0 ? "text-income" : "text-expense"
-                              )}
-                            >
-                              {pnl >= 0 ? "+" : ""}
-                              {format(pnl)}
-                              <span className="ml-1 text-xs font-normal">
-                                {pnl >= 0 ? "+" : ""}
-                                {pnlPct.toFixed(1)}%
-                              </span>
-                            </p>
-                          </div>
-
-                          <div className="flex items-center gap-0.5">
-                            <Button
-                              variant="ghost"
-                              size="icon-xs"
-                              onClick={() => setLogHoldingId(h.id)}
-                            >
-                              <History className="h-3.5 w-3.5" />
-                            </Button>
-                            <HoldingDialog
-                              holding={h}
-                              onSave={handleSave}
-                              trigger={
-                                <Button variant="ghost" size="icon-xs">
-                                  <Pencil className="h-3.5 w-3.5" />
-                                </Button>
-                              }
-                            />
-                            {deleteConfirmId === h.id ? (
-                              <div className="flex items-center gap-1">
-                                <Button
-                                  variant="destructive"
-                                  size="xs"
-                                  onClick={() => handleDelete(h.id)}
-                                >
-                                  Confirm
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="xs"
-                                  onClick={() => setDeleteConfirmId(null)}
-                                >
-                                  Cancel
-                                </Button>
-                              </div>
-                            ) : (
-                              <Button
-                                variant="ghost"
-                                size="icon-xs"
-                                onClick={() => setDeleteConfirmId(h.id)}
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Fund Breakdown (expandable) */}
-                      {(h.type === "etf" || h.type === "fund" || fundAllocations[h.id]) && (
-                        <FundBreakdown
-                          holdingId={h.id}
-                          holdingName={h.name}
-                          ticker={h.ticker}
-                          country={h.country}
-                          holdingType={h.type}
-                          portfolioWeight={
-                            totals.totalValue > 0
-                              ? (current / totals.totalValue) * 100
-                              : 0
-                          }
-                        />
-                      )}
-                    </div>
-                  </BlurFade>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </BlurFade>
+      {/* ── Filters + Holdings List ── */}
+      <HoldingsTable
+        holdings={holdings}
+        sortedHoldings={sortedHoldings}
+        filteredHoldings={filteredHoldings}
+        totals={totals}
+        fundAllocations={fundAllocations}
+        priceCache={priceCache}
+        searchQuery={searchQuery}
+        setSearchQuery={setSearchQuery}
+        sortKey={sortKey}
+        setSortKey={setSortKey}
+        typeFilter={typeFilter}
+        setTypeFilter={(t) => setTypeFilter(t as HoldingType | "all")}
+        accountFilter={accountFilter}
+        setAccountFilter={(t) => setAccountFilter(t as AccountType | "all")}
+        isFetching={isFetching}
+        lastFetchStatus={lastFetchStatus}
+        format={format}
+        convert={convert}
+        onSave={handleSave}
+        onDelete={handleDelete}
+        onRefresh={() => fetchPrices(true)}
+        onStartEditValue={startEditValue}
+        onSaveEditValue={saveEditValue}
+        editingValueId={editingValueId}
+        editingValue={editingValue}
+        setEditingValue={setEditingValue}
+        setEditingValueId={setEditingValueId}
+        onShowLog={setLogHoldingId}
+        baseDelay={DELAY}
+      />
 
       {/* ── Per-holding Update Log Dialog ── */}
-      <Dialog
-        open={logHoldingId !== null}
-        onOpenChange={(open) => {
-          if (!open) setLogHoldingId(null);
-        }}
-      >
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>
-              Price History &mdash;{" "}
-              {holdings.find((h) => h.id === logHoldingId)?.name ?? ""}
-            </DialogTitle>
-            <DialogDescription>
-              {holdings.find((h) => h.id === logHoldingId)?.ticker ?? ""} update
-              log
-            </DialogDescription>
-          </DialogHeader>
-          {(() => {
-            const entries = updateLog.filter(
-              (e) => e.holdingId === logHoldingId
-            );
-            if (entries.length === 0) {
-              return (
-                <div className="py-8 text-center text-sm text-muted-foreground">
-                  No price updates recorded yet.
-                </div>
-              );
-            }
-            return (
-              <div className="max-h-72 overflow-y-auto -mx-1 px-1">
-                <div className="divide-y divide-border">
-                  {entries.map((entry, i) => (
-                    <div
-                      key={i}
-                      className="flex items-center justify-between py-2.5 text-sm"
-                    >
-                      <div className="flex items-center gap-2.5">
-                        {entry.source === "auto" ? (
-                          <span className="flex items-center gap-1 text-[10px] font-mono uppercase tracking-wider text-accent bg-accent/10 px-1.5 py-0.5 rounded">
-                            <Zap className="h-2.5 w-2.5" /> auto
-                          </span>
-                        ) : (
-                          <span className="flex items-center gap-1 text-[10px] font-mono uppercase tracking-wider text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-                            <Hand className="h-2.5 w-2.5" /> manual
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 font-mono tabular-nums text-xs">
-                        <span className="text-muted-foreground">
-                          {format(entry.oldValue)}
-                        </span>
-                        <span className="text-muted-foreground/40">
-                          &rarr;
-                        </span>
-                        <span
-                          className={cn(
-                            "font-medium",
-                            entry.newValue >= entry.oldValue
-                              ? "text-income"
-                              : "text-expense"
-                          )}
-                        >
-                          {format(entry.newValue)}
-                        </span>
-                      </div>
-                      <span className="text-[10px] text-muted-foreground/50 ml-2 shrink-0">
-                        {formatTimeAgo(entry.timestamp)}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })()}
-        </DialogContent>
-      </Dialog>
+      <PriceUpdateStatus
+        holdings={holdings}
+        updateLog={updateLog}
+        logHoldingId={logHoldingId}
+        setLogHoldingId={setLogHoldingId}
+        format={format}
+      />
     </div>
   );
 }

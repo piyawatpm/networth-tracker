@@ -4,7 +4,6 @@ import { useMemo } from "react";
 import ReactECharts from "echarts-for-react";
 import { useTheme } from "next-themes";
 import { useCurrency } from "@/components/providers/currency-provider";
-import type { ExpenseEntry } from "@/lib/utils/types";
 import {
   getCurrentMonthKey,
   getLastMonthKey,
@@ -15,10 +14,16 @@ import {
 import { getCartesianBaseOption, formatAxisValue } from "@/lib/utils/echarts";
 
 interface CumulativePaceChartProps {
-  entries: ExpenseEntry[];
+  entries: { date: string; amount: number; currency: string }[];
+  title: string;
+  currentColor: { dark: string; light: string };
 }
 
-export function CumulativePaceChart({ entries }: CumulativePaceChartProps) {
+export function CumulativePaceChart({
+  entries,
+  title,
+  currentColor,
+}: CumulativePaceChartProps) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
   const { convert } = useCurrency();
@@ -83,7 +88,7 @@ export function CumulativePaceChart({ entries }: CumulativePaceChartProps) {
           smooth: true,
           lineStyle: { width: 2.5 },
           showSymbol: false,
-          itemStyle: { color: isDark ? "#e09770" : "#c95f3f" },
+          itemStyle: { color: isDark ? currentColor.dark : currentColor.light },
         },
         {
           name: monthKeyToFullLabel(lastMonth),
@@ -96,11 +101,11 @@ export function CumulativePaceChart({ entries }: CumulativePaceChartProps) {
         },
       ],
     };
-  }, [entries, convert, isDark, currentMonth, lastMonth]);
+  }, [entries, convert, isDark, currentMonth, lastMonth, currentColor]);
 
   return (
     <div className="space-y-3">
-      <p className="label-mono">Spending Pace (This vs Last Month)</p>
+      <p className="label-mono">{title}</p>
       <ReactECharts option={option} style={{ height: "240px" }} />
     </div>
   );

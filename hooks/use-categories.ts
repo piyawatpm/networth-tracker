@@ -2,43 +2,49 @@
 
 import { useMemo } from "react";
 import { useLocalStorage } from "./use-local-storage";
-import type { CustomIncomeCategory, IncomeType } from "@/lib/utils/types";
-import {
-  INCOME_TYPE_LABELS,
-  INCOME_TYPE_COLORS,
-  CHART_COLORS,
-} from "@/lib/utils/constants";
+import { CHART_COLORS } from "@/lib/utils/constants";
+import { hashCode } from "@/lib/utils/entry-helpers";
 
-const DEFAULT_TYPES = Object.keys(INCOME_TYPE_LABELS) as IncomeType[];
+interface CustomCategory {
+  id: string;
+  label: string;
+  color: string;
+}
 
-export function useIncomeCategories() {
-  const [customCategories, setCustomCategories] = useLocalStorage<
-    CustomIncomeCategory[]
-  >("custom_income_categories", []);
+interface UseCategoriesConfig {
+  storageKey: string;
+  defaultLabels: Record<string, string>;
+  defaultColors: Record<string, string>;
+}
 
-  // Merged label map: defaults + custom
+export function useCategories({ storageKey, defaultLabels, defaultColors }: UseCategoriesConfig) {
+  const [customCategories, setCustomCategories] = useLocalStorage<CustomCategory[]>(
+    storageKey,
+    [],
+  );
+
+  const defaultTypes = Object.keys(defaultLabels);
+
   const allLabels = useMemo(() => {
-    const map: Record<string, string> = { ...INCOME_TYPE_LABELS };
+    const map: Record<string, string> = { ...defaultLabels };
     for (const c of customCategories) {
       map[c.id] = c.label;
     }
     return map;
-  }, [customCategories]);
+  }, [customCategories, defaultLabels]);
 
-  // Merged color map: defaults + custom
   const allColors = useMemo(() => {
-    const map: Record<string, string> = { ...INCOME_TYPE_COLORS };
+    const map: Record<string, string> = { ...defaultColors };
     for (const c of customCategories) {
       map[c.id] = c.color;
     }
     return map;
-  }, [customCategories]);
+  }, [customCategories, defaultColors]);
 
-  // Ordered list of all type keys
   const allTypes = useMemo(() => {
     const custom = customCategories.map((c) => c.id);
-    return [...DEFAULT_TYPES, ...custom];
-  }, [customCategories]);
+    return [...defaultTypes, ...custom];
+  }, [customCategories, defaultTypes]);
 
   function addCategory(label: string, color: string) {
     const id = label
@@ -50,7 +56,7 @@ export function useIncomeCategories() {
   }
 
   function removeCategory(id: string) {
-    if ((INCOME_TYPE_LABELS as Record<string, string>)[id]) return;
+    if ((defaultLabels as Record<string, string>)[id]) return;
     setCustomCategories((prev) => prev.filter((c) => c.id !== id));
   }
 
@@ -72,13 +78,4 @@ export function useIncomeCategories() {
     getLabel,
     getColor,
   };
-}
-
-function hashCode(s: string): number {
-  let hash = 0;
-  for (let i = 0; i < s.length; i++) {
-    hash = (hash << 5) - hash + s.charCodeAt(i);
-    hash |= 0;
-  }
-  return hash;
 }
