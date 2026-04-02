@@ -24,9 +24,9 @@ import {
 } from "@/components/ui/select";
 import {
   INCOME_TYPE_LABELS,
-  CURRENCIES,
   FREQUENCY_LABELS,
 } from "@/lib/utils/constants";
+import { useCurrency } from "@/components/providers/currency-provider";
 import { getSydneyDateString } from "@/lib/utils/timezone";
 import type {
   IncomeEntry,
@@ -46,6 +46,7 @@ interface IncomeDialogProps {
 }
 
 export function IncomeDialog({ entry, onSave, onCreateRecurring, trigger, categoryTypes, categoryLabels }: IncomeDialogProps) {
+  const { enabledCurrencies } = useCurrency();
   const [open, setOpen] = useState(false);
   const [type, setType] = useState<string>(entry?.type ?? (categoryTypes?.[0] ?? "salary"));
   const [description, setDescription] = useState(entry?.description ?? "");
@@ -192,7 +193,7 @@ export function IncomeDialog({ entry, onSave, onCreateRecurring, trigger, catego
               <Select value={currency} onValueChange={(v) => v && setCurrency(v as Currency)}>
                 <SelectTrigger className="w-24"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {CURRENCIES.map((c) => (
+                  {enabledCurrencies.map((c) => (
                     <SelectItem key={c} value={c}>{c}</SelectItem>
                   ))}
                 </SelectContent>
