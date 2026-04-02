@@ -151,6 +151,7 @@ export default function DashboardPage() {
 
   // Dashboard section visibility (persisted)
   const [hiddenSections, setHiddenSections] = useLocalStorage<string[]>("dashboard_hidden_sections", []);
+  const [emergencyFundTarget, setEmergencyFundTarget] = useLocalStorage<number>("emergency_fund_target_months", 6);
   const [showSectionSettings, setShowSectionSettings] = useState(false);
   const toggleSection = (key: string) => {
     setHiddenSections((prev) => prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]);
@@ -436,7 +437,7 @@ export default function DashboardPage() {
     };
     const items: ActivityItem[] = [];
     for (const e of incomeEntries) {
-      items.push({ id: e.id, kind: "income", type: e.type, label: INCOME_TYPE_LABELS[e.type], description: e.description, amount: e.amount, currency: e.currency, date: e.date });
+      items.push({ id: e.id, kind: "income", type: e.type, label: (INCOME_TYPE_LABELS as Record<string, string>)[e.type] ?? e.type, description: e.description, amount: e.amount, currency: e.currency, date: e.date });
     }
     for (const e of expenseEntries) {
       items.push({ id: e.id, kind: "expense", type: e.type, label: (EXPENSE_TYPE_LABELS as Record<string, string>)[e.type] ?? e.type, description: e.description, amount: e.amount, currency: e.currency, date: e.date });
@@ -828,6 +829,163 @@ export default function DashboardPage() {
                     </div>
                   );
                 })}
+              </div>
+            </div>
+          </BlurFade>
+        );
+      })()}
+
+      {/* EMERGENCY FUND TRACKER */}
+      {isVisible("emergency-fund") && (() => {
+        const recommendedAmount = monthlyExpenses * emergencyFundTarget;
+        const currentAmount = liquidAssets;
+        const progressPct = recommendedAmount > 0 ? Math.min(100, (currentAmount / recommendedAmount) * 100) : 0;
+        const shortfall = Math.max(0, recommendedAmount - currentAmount);
+        const isOnTrack = currentAmount >= recommendedAmount;
+        const [editingTarget, setEditingTarget] = useState(false);
+
+        return (
+          <BlurFade delay={D * 2.7}>
+            <div className="finance-card p-5">
+              <div className="flex items-center justify-between mb-4">
+                <p className="label-mono">Emergency Fund</p>
+                <div className="flex items-center gap-2">
+                  {editingTarget ? (
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] text-muted-foreground">Target:</span>
+                      {[3, 6, 9, 12].map((m) => (
+                        <button
+                          key={m}
+                          onClick={() => { setEmergencyFundTarget(m); setEditingTarget(false); }}
+                          className={cn(
+                            "rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors",
+                            emergencyFundTarget === m
+                              ? "bg-foreground text-background"
+                              : "bg-secondary text-secondary-foreground hover:bg-secondary/80",
+                          )}
+                        >
+                          {m}mo
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setEditingTarget(true)}
+                      className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      Target: {emergencyFundTarget} months
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-6 items-center">
+                {/* Progress section */}
+                <div className="space-y-3">
+                  {/* Progress bar */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="tabular-nums font-medium">
+                        {format(currentAmount)}
+                        <span className="text-muted-foreground font-normal ml-1">
+                          of {format(recommendedAmount)}
+                        </span>
+                      </span>
+                      <span className={cn(
+                        "text-xs font-semibold tabular-nums",
+                        isOnTrack ? "text-income" : progressPct >= 50 ? "text-foreground" : "text-expense",
+                      )}>
+                        {progressPct.toFixed(0)}%
+                      </span>
+                    </div>
+                    <div className="h-3 w-full rounded-full bg-muted overflow-hidden">
+                      {/* Zone markers */}
+                      <div className="relative h-full">
+                        <div
+                          className={cn(
+                            "absolute inset-y-0 left-0 rounded-full transition-all duration-700",
+                            isOnTrack ? "bg-income" : progressPct >= 50 ? "bg-[#d4a033]" : "bg-expense",
+                          )}
+                          style={{ width: `${progressPct}%` }}
+                        />
+                        {/* 3-month marker */}
+                        {emergencyFundTarget > 3 && (
+                          <div
+                            className="absolute inset-y-0 w-px bg-foreground/20"
+                            style={{ left: `${(3 / emergencyFundTarget) * 100}%` }}
+                          />
+                        )}
+                        {/* 6-month marker */}
+                        {emergencyFundTarget > 6 && (
+                          <div
+                            className="absolute inset-y-0 w-px bg-foreground/20"
+                            style={{ left: `${(6 / emergencyFundTarget) * 100}%` }}
+                          />
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between text-[9px] text-muted-foreground/50">
+                      <span>0</span>
+                      {emergencyFundTarget > 3 && (
+                        <span style={{ position: "relative", left: `${((3 / emergencyFundTarget) * 100) - 50}%` }}>3mo</span>
+                      )}
+                      {emergencyFundTarget > 6 && (
+                        <span style={{ position: "relative", left: `${((6 / emergencyFundTarget) * 100) - 50}%` }}>6mo</span>
+                      )}
+                      <span>{emergencyFundTarget}mo</span>
+                    </div>
+                  </div>
+
+                  {/* Details row */}
+                  <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs">
+                    <div>
+                      <span className="text-muted-foreground">Avg Monthly Expenses: </span>
+                      <span className="tabular-nums font-medium">{format(monthlyExpenses)}</span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Liquid Assets: </span>
+                      <span className="tabular-nums font-medium">{format(currentAmount)}</span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Coverage: </span>
+                      <span className="tabular-nums font-medium">{emergencyFundMonths.toFixed(1)} months</span>
+                    </div>
+                    {shortfall > 0 && (
+                      <div>
+                        <span className="text-muted-foreground">Shortfall: </span>
+                        <span className="tabular-nums font-medium text-expense">{format(shortfall)}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Radial gauge */}
+                <div className="flex flex-col items-center shrink-0">
+                  <svg viewBox="0 0 80 80" className="w-20 h-20">
+                    <circle cx="40" cy="40" r="32" fill="none" stroke="currentColor" className="text-border" strokeWidth="5" />
+                    <circle
+                      cx="40" cy="40" r="32" fill="none"
+                      stroke={isOnTrack ? "oklch(0.723 0.219 149.579)" : progressPct >= 50 ? "#d4a033" : "oklch(0.637 0.237 25.331)"}
+                      strokeWidth="5"
+                      strokeLinecap="round"
+                      strokeDasharray={`${(Math.min(progressPct, 100) / 100) * 201} 201`}
+                      transform="rotate(-90 40 40)"
+                    />
+                    <text x="40" y="37" textAnchor="middle" fontSize="14" fontWeight="700" fontFamily="var(--font-geist-mono), monospace"
+                      fill={isOnTrack ? "oklch(0.723 0.219 149.579)" : progressPct >= 50 ? "#d4a033" : "oklch(0.637 0.237 25.331)"}>
+                      {emergencyFundMonths.toFixed(1)}
+                    </text>
+                    <text x="40" y="50" textAnchor="middle" fontSize="8" fill="currentColor" className="text-muted-foreground">
+                      months
+                    </text>
+                  </svg>
+                  <p className={cn(
+                    "text-[10px] font-medium mt-1",
+                    isOnTrack ? "text-income" : "text-expense",
+                  )}>
+                    {isOnTrack ? "Fully funded" : `Need ${shortfall > 0 ? format(shortfall) : ""} more`}
+                  </p>
+                </div>
               </div>
             </div>
           </BlurFade>

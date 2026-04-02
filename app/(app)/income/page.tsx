@@ -578,6 +578,8 @@ export default function IncomePage() {
             {/* Add income button */}
             <div className="flex justify-end">
               <IncomeDialog
+                categoryTypes={categoryTypes}
+                categoryLabels={categoryLabels}
                 onSave={handleSave}
                 onCreateRecurring={addTemplate}
                 trigger={

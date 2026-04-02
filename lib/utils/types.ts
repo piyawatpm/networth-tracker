@@ -77,7 +77,7 @@ export type DebtDirection = "i_owe" | "owed_to_me";
 
 export interface IncomeEntry {
   id: string;
-  type: IncomeType;
+  type: string; // IncomeType or custom category id
   description: string;
   amount: number;
   currency: Currency;
