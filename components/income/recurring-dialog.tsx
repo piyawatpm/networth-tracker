@@ -30,10 +30,10 @@ import type {
   RecurringFrequency,
 } from "@/lib/utils/types";
 import {
-  CURRENCIES,
   INCOME_TYPE_LABELS,
   FREQUENCY_LABELS,
 } from "@/lib/utils/constants";
+import { useCurrency } from "@/components/providers/currency-provider";
 import { getSydneyDateString } from "@/lib/utils/timezone";
 import { Plus, Pencil, Trash2, Pause, Play } from "lucide-react";
 
@@ -46,6 +46,7 @@ function RecurringForm({
   onSave: (t: RecurringIncome) => void;
   onCancel: () => void;
 }) {
+  const { enabledCurrencies } = useCurrency();
   const TYPES = Object.keys(INCOME_TYPE_LABELS) as IncomeType[];
   const FREQUENCIES = Object.keys(FREQUENCY_LABELS) as RecurringFrequency[];
 
@@ -111,7 +112,7 @@ function RecurringForm({
           <Select value={currency} onValueChange={(v) => v && setCurrency(v as Currency)}>
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
-              {CURRENCIES.map((c) => (<SelectItem key={c} value={c}>{c}</SelectItem>))}
+              {enabledCurrencies.map((c) => (<SelectItem key={c} value={c}>{c}</SelectItem>))}
             </SelectContent>
           </Select>
         </div>

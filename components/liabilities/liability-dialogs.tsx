@@ -23,7 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { CURRENCIES } from "@/lib/utils/constants";
+import { useCurrency } from "@/components/providers/currency-provider";
 import { getSydneyDateString } from "@/lib/utils/timezone";
 import type {
   DebtRecord,
@@ -43,6 +43,7 @@ interface LiabilityDialogProps {
 }
 
 export function LiabilityDialog({ debt, onSave, trigger }: LiabilityDialogProps) {
+  const { enabledCurrencies } = useCurrency();
   const [open, setOpen] = useState(false);
   const [person, setPerson] = useState(debt?.person ?? "");
   const [direction, setDirection] = useState<DebtDirection>(
@@ -167,7 +168,7 @@ export function LiabilityDialog({ debt, onSave, trigger }: LiabilityDialogProps)
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {CURRENCIES.map((c) => (
+                  {enabledCurrencies.map((c) => (
                     <SelectItem key={c} value={c}>
                       {c}
                     </SelectItem>

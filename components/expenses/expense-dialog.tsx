@@ -31,10 +31,10 @@ import type {
   RecurringExpense,
 } from "@/lib/utils/types";
 import {
-  CURRENCIES,
   PAYMENT_METHOD_LABELS,
   FREQUENCY_LABELS,
 } from "@/lib/utils/constants";
+import { useCurrency } from "@/components/providers/currency-provider";
 import { getSydneyDateString } from "@/lib/utils/timezone";
 import { ImageUpload } from "./image-upload";
 
@@ -53,6 +53,7 @@ const PAYMENT_METHODS = Object.keys(PAYMENT_METHOD_LABELS) as PaymentMethod[];
 const FREQUENCIES = Object.keys(FREQUENCY_LABELS) as RecurringFrequency[];
 
 export function ExpenseDialog({ entry, onSave, onCreateRecurring, trigger, categoryTypes, categoryLabels }: ExpenseDialogProps) {
+  const { enabledCurrencies } = useCurrency();
   const [open, setOpen] = useState(false);
   const [type, setType] = useState<string>(entry?.type ?? "food");
   const [description, setDescription] = useState(entry?.description ?? "");
@@ -203,7 +204,7 @@ export function ExpenseDialog({ entry, onSave, onCreateRecurring, trigger, categ
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {CURRENCIES.map((c) => (
+                  {enabledCurrencies.map((c) => (
                     <SelectItem key={c} value={c}>
                       {c}
                     </SelectItem>

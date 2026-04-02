@@ -22,7 +22,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { HOLDING_TYPE_LABELS, CURRENCIES } from "@/lib/utils/constants";
+import { HOLDING_TYPE_LABELS } from "@/lib/utils/constants";
+import { useCurrency } from "@/components/providers/currency-provider";
 import type {
   PortfolioHolding,
   HoldingType,
@@ -37,6 +38,7 @@ interface HoldingDialogProps {
 }
 
 export function HoldingDialog({ holding, onSave, trigger }: HoldingDialogProps) {
+  const { enabledCurrencies } = useCurrency();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState(holding?.name ?? "");
   const [ticker, setTicker] = useState(holding?.ticker ?? "");
@@ -265,7 +267,7 @@ export function HoldingDialog({ holding, onSave, trigger }: HoldingDialogProps) 
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {CURRENCIES.map((c) => (
+                  {enabledCurrencies.map((c) => (
                     <SelectItem key={c} value={c}>
                       {c}
                     </SelectItem>
