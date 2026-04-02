@@ -31,7 +31,7 @@ import {
 } from "@/components/ui/dialog";
 import ReactECharts from "echarts-for-react";
 import { useTheme } from "next-themes";
-import { getEchartsBaseOption } from "@/lib/utils/echarts";
+import { getPieBaseOption } from "@/lib/utils/echarts";
 import { Plus, Pencil, Trash2, Receipt } from "lucide-react";
 import { ExpenseDialog } from "@/components/expenses/expense-dialog";
 
@@ -110,12 +110,11 @@ export default function ExpensesPage() {
 
   // ECharts pie option
   const pieOption = useMemo(() => {
-    const base = getEchartsBaseOption(isDark);
+    const base = getPieBaseOption(isDark);
     return {
       ...base,
       tooltip: {
         ...base.tooltip,
-        trigger: "item" as const,
         formatter: (params: { name: string; value: number; percent: number }) => {
           const label =
             EXPENSE_TYPE_LABELS[params.name as ExpenseType] ?? params.name;

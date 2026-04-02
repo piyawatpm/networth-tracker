@@ -17,7 +17,7 @@ import {
   formatDateString,
 } from "@/lib/utils/timezone";
 import { cn } from "@/lib/utils";
-import { getEchartsBaseOption, ECHARTS_COLORS } from "@/lib/utils/echarts";
+import { getPieBaseOption } from "@/lib/utils/echarts";
 import { BlurFade } from "@/components/ui/blur-fade";
 import { NumberTicker } from "@/components/ui/number-ticker";
 import {
@@ -154,9 +154,8 @@ export default function IncomePage() {
 
   const isDark = resolvedTheme === "dark";
   const pieOption = useMemo(() => {
-    const base = getEchartsBaseOption(isDark);
     return {
-      ...base,
+      ...getPieBaseOption(isDark),
       series: [{
         type: "pie",
         radius: ["55%", "85%"],
@@ -171,7 +170,6 @@ export default function IncomePage() {
         padAngle: 2,
         itemStyle: { borderWidth: 0 },
       }],
-      tooltip: { ...base.tooltip, trigger: "item" as const },
     };
   }, [breakdownByType, isDark]);
 

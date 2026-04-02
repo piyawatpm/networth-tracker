@@ -13,7 +13,7 @@ import { useTheme } from "next-themes";
 import { cn } from "@/lib/utils";
 import { BlurFade } from "@/components/ui/blur-fade";
 import { NumberTicker } from "@/components/ui/number-ticker";
-import { getEchartsBaseOption, ECHARTS_COLORS, formatAxisValue } from "@/lib/utils/echarts";
+import { getCartesianBaseOption, getPieBaseOption, ECHARTS_COLORS, formatAxisValue } from "@/lib/utils/echarts";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 import { useCurrency } from "@/components/providers/currency-provider";
 import { GoalSection } from "@/components/dashboard/goal-section";
@@ -315,7 +315,8 @@ export default function DashboardPage() {
 
   // ---- ECharts base -------------------------------------------------------
 
-  const base = useMemo(() => getEchartsBaseOption(isDark), [isDark]);
+  const base = useMemo(() => getCartesianBaseOption(isDark), [isDark]);
+  const pieBase = useMemo(() => getPieBaseOption(isDark), [isDark]);
 
   // CSS variable colors need to be resolved at render time for ECharts
   // We use computed style to get actual hex values
@@ -489,73 +490,55 @@ export default function DashboardPage() {
   // 4. Asset Allocation (Pie/Donut)
   const allocationPieOption = useMemo(() => {
     return {
-      ...base,
-      series: [
-        {
-          type: "pie" as const,
-          radius: ["55%", "90%"],
-          center: ["50%", "50%"],
-          data: allocationData.map((d) => ({
-            name: d.name,
-            value: d.value,
-            itemStyle: { color: d.color },
-          })),
-          label: { show: false },
-          emphasis: { scale: true, scaleSize: 6 },
-          itemStyle: {
-            borderColor: isDark ? "#1a1a1a" : "#f4f3ed",
-            borderWidth: 2,
-            borderRadius: 4,
-          },
-          padAngle: 2,
-        },
-      ],
+      ...pieBase,
+      series: [{
+        type: "pie" as const,
+        radius: ["55%", "90%"],
+        center: ["50%", "50%"],
+        data: allocationData.map((d) => ({
+          name: d.name,
+          value: d.value,
+          itemStyle: { color: d.color },
+        })),
+        label: { show: false },
+        emphasis: { scale: true, scaleSize: 6 },
+        padAngle: 2,
+      }],
       tooltip: {
-        ...base.tooltip,
-        trigger: "item" as const,
+        ...pieBase.tooltip,
         formatter: (params: { name: string; value: number; percent: number }) =>
-          `<span style="font-weight:600">${params.name}</span><br/><span style="font-family:ui-monospace,monospace">${format(params.value)}</span> (${params.percent}%)`,
+          `<span style="font-weight:600">${params.name}</span><br/>${format(params.value)} (${params.percent}%)`,
       },
     };
-  }, [base, allocationData, isDark, format]);
+  }, [pieBase, allocationData, format]);
 
-  // 5. Income Breakdown (Pie/Donut)
   const incomePieOption = useMemo(() => {
     return {
-      ...base,
-      series: [
-        {
-          type: "pie" as const,
-          radius: ["50%", "90%"],
-          center: ["50%", "50%"],
-          data: incomeByType.map((d) => ({
-            name: d.name,
-            value: d.value,
-            itemStyle: { color: d.color },
-          })),
-          label: { show: false },
-          emphasis: { scale: true, scaleSize: 6 },
-          itemStyle: {
-            borderColor: isDark ? "#1a1a1a" : "#f4f3ed",
-            borderWidth: 2,
-            borderRadius: 4,
-          },
-          padAngle: 2,
-        },
-      ],
+      ...pieBase,
+      series: [{
+        type: "pie" as const,
+        radius: ["50%", "90%"],
+        center: ["50%", "50%"],
+        data: incomeByType.map((d) => ({
+          name: d.name,
+          value: d.value,
+          itemStyle: { color: d.color },
+        })),
+        label: { show: false },
+        emphasis: { scale: true, scaleSize: 6 },
+        padAngle: 2,
+      }],
       tooltip: {
-        ...base.tooltip,
-        trigger: "item" as const,
+        ...pieBase.tooltip,
         formatter: (params: { name: string; value: number; percent: number }) =>
-          `<span style="font-weight:600">${params.name}</span><br/><span style="font-family:ui-monospace,monospace">${format(params.value)}</span> (${params.percent}%)`,
+          `<span style="font-weight:600">${params.name}</span><br/>${format(params.value)} (${params.percent}%)`,
       },
     };
-  }, [base, incomeByType, isDark, format]);
+  }, [pieBase, incomeByType, format]);
 
-  // 6. Expenses Breakdown (Pie/Donut)
   const expensePieOption = useMemo(() => {
     return {
-      ...base,
+      ...pieBase,
       series: [
         {
           type: "pie" as const,
@@ -568,22 +551,15 @@ export default function DashboardPage() {
           })),
           label: { show: false },
           emphasis: { scale: true, scaleSize: 6 },
-          itemStyle: {
-            borderColor: isDark ? "#1a1a1a" : "#f4f3ed",
-            borderWidth: 2,
-            borderRadius: 4,
-          },
           padAngle: 2,
-        },
-      ],
+        }],
       tooltip: {
-        ...base.tooltip,
-        trigger: "item" as const,
+        ...pieBase.tooltip,
         formatter: (params: { name: string; value: number; percent: number }) =>
-          `<span style="font-weight:600">${params.name}</span><br/><span style="font-family:ui-monospace,monospace">${format(params.value)}</span> (${params.percent}%)`,
+          `<span style="font-weight:600">${params.name}</span><br/>${format(params.value)} (${params.percent}%)`,
       },
     };
-  }, [base, expenseByType, isDark, format]);
+  }, [pieBase, expenseByType, format]);
 
   // ---- Render -------------------------------------------------------------
 

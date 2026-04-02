@@ -23,7 +23,7 @@ import { NumberTicker } from "@/components/ui/number-ticker";
 import { Input } from "@/components/ui/input";
 import ReactECharts from "echarts-for-react";
 import { useTheme } from "next-themes";
-import { getEchartsBaseOption, ECHARTS_COLORS, formatAxisValue } from "@/lib/utils/echarts";
+import { getCartesianBaseOption, getPieBaseOption, ECHARTS_COLORS, formatAxisValue } from "@/lib/utils/echarts";
 import { Plus, Pencil, Trash2, Briefcase, ExternalLink, RefreshCw, Check, Zap, Hand, History } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -282,7 +282,7 @@ export default function PortfolioPage() {
 
   // ECharts: Value Trend area chart option
   const trendChartOption = useMemo(() => {
-    const base = getEchartsBaseOption(isDark);
+    const base = getCartesianBaseOption(isDark);
     return {
       ...base,
       grid: { top: 12, right: 12, bottom: 32, left: 56, containLabel: false },
@@ -340,12 +340,11 @@ export default function PortfolioPage() {
 
   // ECharts: Allocation donut option
   const allocationChartOption = useMemo(() => {
-    const base = getEchartsBaseOption(isDark);
+    const base = getPieBaseOption(isDark);
     return {
       ...base,
       tooltip: {
         ...base.tooltip,
-        trigger: "item" as const,
         formatter: (params: { name: string; value: number; percent: number; color: string }) => {
           return `<div style="font-size:12px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${params.color};margin-right:6px"></span>${params.name}<br/><b style="font-family:var(--font-geist-mono),monospace">${format(params.value)}</b> <span style="color:${isDark ? "#888" : "#968360"}">${params.percent.toFixed(1)}%</span></div>`;
         },

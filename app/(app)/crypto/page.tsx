@@ -14,7 +14,7 @@ import { BlurFade } from "@/components/ui/blur-fade";
 import { NumberTicker } from "@/components/ui/number-ticker";
 import ReactECharts from "echarts-for-react";
 import { useTheme } from "next-themes";
-import { getEchartsBaseOption, ECHARTS_COLORS } from "@/lib/utils/echarts";
+import { getPieBaseOption, ECHARTS_COLORS } from "@/lib/utils/echarts";
 import { Upload, FileText, X, Bitcoin } from "lucide-react";
 
 function CryptoDonut({ chartData, isDark, format }: {
@@ -23,7 +23,7 @@ function CryptoDonut({ chartData, isDark, format }: {
   format: (amount: number, from?: "AUD" | "USD" | "THB", compact?: boolean) => string;
 }) {
   const option = useMemo(() => {
-    const base = getEchartsBaseOption(isDark);
+    const base = getPieBaseOption(isDark);
     return {
       ...base,
       series: [{

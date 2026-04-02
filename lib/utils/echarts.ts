@@ -1,5 +1,4 @@
 // Shared ECharts configuration — matches our design tokens
-// All charts should use these defaults for consistent styling
 
 export const ECHARTS_COLORS = [
   "#4d7cc7", // blue
@@ -19,17 +18,37 @@ export const ECHARTS_COLORS = [
   "#5090c0", // steel
 ];
 
-export function getEchartsBaseOption(isDark: boolean) {
-  const textColor = isDark ? "#888888" : "#968360";
-  const borderColor = isDark ? "#454545" : "#c9c3a8";
-  const bgColor = "transparent";
-
+function getColors(isDark: boolean) {
   return {
-    backgroundColor: bgColor,
+    text: isDark ? "#888888" : "#968360",
+    border: isDark ? "#454545" : "#c9c3a8",
+    fg: isDark ? "#f6f6f6" : "#2c251e",
+    tooltipBg: isDark ? "#2a2a2a" : "#f4f3ed",
+  };
+}
+
+function tooltipConfig(isDark: boolean) {
+  const c = getColors(isDark);
+  return {
+    backgroundColor: c.tooltipBg,
+    borderColor: c.border,
+    borderWidth: 1,
     textStyle: {
-      fontFamily: "var(--font-geist-sans), system-ui, sans-serif",
-      color: textColor,
+      color: c.fg,
+      fontSize: 12,
     },
+    padding: [8, 12],
+    extraCssText: "border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);",
+  };
+}
+
+// For bar/line/area charts (has xAxis, yAxis, grid)
+export function getCartesianBaseOption(isDark: boolean) {
+  const c = getColors(isDark);
+  return {
+    backgroundColor: "transparent",
+    color: ECHARTS_COLORS,
+    textStyle: { color: c.text },
     grid: {
       top: 12,
       right: 12,
@@ -40,43 +59,33 @@ export function getEchartsBaseOption(isDark: boolean) {
     xAxis: {
       axisLine: { show: false },
       axisTick: { show: false },
-      axisLabel: {
-        color: textColor,
-        fontSize: 11,
-        fontFamily: "var(--font-geist-mono), ui-monospace, monospace",
-      },
+      axisLabel: { color: c.text, fontSize: 11 },
       splitLine: { show: false },
     },
     yAxis: {
       axisLine: { show: false },
       axisTick: { show: false },
-      axisLabel: {
-        color: textColor,
-        fontSize: 11,
-        fontFamily: "var(--font-geist-mono), ui-monospace, monospace",
-      },
+      axisLabel: { color: c.text, fontSize: 11 },
       splitLine: {
-        lineStyle: {
-          color: borderColor,
-          type: "dashed" as const,
-          opacity: 0.5,
-        },
+        lineStyle: { color: c.border, type: "dashed" as const, opacity: 0.5 },
       },
     },
-    tooltip: {
-      backgroundColor: isDark ? "#2a2a2a" : "#f4f3ed",
-      borderColor: borderColor,
-      borderWidth: 1,
-      textStyle: {
-        color: isDark ? "#f6f6f6" : "#2c251e",
-        fontSize: 12,
-        fontFamily: "var(--font-geist-sans), system-ui, sans-serif",
-      },
-      padding: [8, 12],
-      extraCssText: "border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);",
-    },
-    color: ECHARTS_COLORS,
+    tooltip: { ...tooltipConfig(isDark), trigger: "axis" as const },
   };
+}
+
+// For pie/donut charts (NO xAxis, yAxis, grid)
+export function getPieBaseOption(isDark: boolean) {
+  return {
+    backgroundColor: "transparent",
+    color: ECHARTS_COLORS,
+    tooltip: { ...tooltipConfig(isDark), trigger: "item" as const },
+  };
+}
+
+// Legacy alias — use getCartesianBaseOption or getPieBaseOption instead
+export function getEchartsBaseOption(isDark: boolean) {
+  return getCartesianBaseOption(isDark);
 }
 
 // Format large numbers for axis labels
