@@ -53,32 +53,36 @@
 
 /* ── Light Theme (Sand/Terracotta) ────────────────────────────────────── */
 :root {
-  --background: #efeee5;
-  --foreground: #2c251e;
-  --surface: #f4f3ed;
-  --card: #f4f3ed;
+  /* Sand palette */
+  --background: #efeee5;       /* sand-100 */
+  --foreground: #2c251e;       /* sand-950 */
+  --surface: #f4f3ed;          /* sand-50 */
+  --card: #f4f3ed;             /* sand-50 */
   --card-foreground: #2c251e;
   --popover: #f4f3ed;
   --popover-foreground: #2c251e;
-  --primary: #c95f3f;
+  /* Terracotta accent */
+  --primary: #c95f3f;          /* terracotta-600 */
   --primary-foreground: #f4f3ed;
-  --secondary: #dedbca;
+  --secondary: #dedbca;        /* sand-200 */
   --secondary-foreground: #2c251e;
-  --muted: #dedbca;
-  --muted-foreground: #968360;
-  --accent: #c95f3f;
+  --muted: #dedbca;            /* sand-200 */
+  --muted-foreground: #968360; /* sand-600 */
+  --accent: #d77651;           /* terracotta-500 */
   --accent-foreground: #f4f3ed;
   --destructive: oklch(0.637 0.237 25.331);
-  --border: #c9c3a8;
+  --border: #c9c3a8;           /* sand-300 */
   --input: #c9c3a8;
   --ring: #c95f3f;
-  --income: oklch(0.723 0.219 149.579);
-  --expense: oklch(0.637 0.237 25.331);
-  --chart-1: oklch(0.623 0.214 259.815);
-  --chart-2: oklch(0.696 0.170 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.637 0.237 25.331);
-  --chart-5: oklch(0.715 0.143 215.221);
+  /* Semantic */
+  --income: oklch(0.723 0.219 149.579);  /* green-500 */
+  --expense: oklch(0.637 0.237 25.331);  /* red-500 */
+  /* Chart palette (matching ethpandaops) */
+  --chart-1: oklch(0.623 0.214 259.815); /* blue */
+  --chart-2: oklch(0.696 0.170 162.48);  /* teal */
+  --chart-3: oklch(0.769 0.188 70.08);   /* amber */
+  --chart-4: oklch(0.637 0.237 25.331);  /* red */
+  --chart-5: oklch(0.715 0.143 215.221); /* cyan */
   --radius: 0.5rem;
   --sidebar: #efeee5;
   --sidebar-foreground: #2c251e;
@@ -92,23 +96,25 @@
 
 /* ── Dark Theme ───────────────────────────────────────────────────────── */
 .dark {
-  --background: #1a1a1a;
-  --foreground: #f6f6f6;
+  /* Neutral palette */
+  --background: #1a1a1a;       /* neutral-950 */
+  --foreground: #f6f6f6;       /* neutral-50 */
   --surface: #242424;
   --card: #242424;
   --card-foreground: #f6f6f6;
   --popover: #242424;
   --popover-foreground: #f6f6f6;
-  --primary: #e09770;
+  /* Terracotta accent (lighter for dark bg) */
+  --primary: #e09770;          /* terracotta-400 */
   --primary-foreground: #1a1a1a;
-  --secondary: #3d3d3d;
+  --secondary: #3d3d3d;        /* neutral-900 */
   --secondary-foreground: #f6f6f6;
   --muted: #3d3d3d;
-  --muted-foreground: #888888;
-  --accent: #e09770;
+  --muted-foreground: #888888; /* neutral-400 */
+  --accent: #ebbd9e;           /* terracotta-300 */
   --accent-foreground: #1a1a1a;
   --destructive: oklch(0.704 0.191 22.216);
-  --border: #454545;
+  --border: #454545;           /* neutral-800 */
   --input: #454545;
   --ring: #e09770;
   --income: oklch(0.723 0.219 149.579);
