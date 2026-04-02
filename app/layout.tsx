@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Life Investment",
+  title: "Networth",
   description: "Personal finance & investment tracker",
 };
 

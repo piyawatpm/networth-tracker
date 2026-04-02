@@ -129,7 +129,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               href="/dashboard"
               className="mr-4 text-base font-semibold tracking-tight"
             >
-              Life Investment
+              Networth
             </Link>
             <nav className="hidden md:flex items-center gap-0.5">
               {NAV_ITEMS.map((item) => {

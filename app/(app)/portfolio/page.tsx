@@ -519,11 +519,21 @@ export default function PortfolioPage() {
     const base = getPieBaseOption(isDark);
     return {
       ...base,
+      legend: {
+        show: true,
+        bottom: 0,
+        left: "center",
+        textStyle: { color: isDark ? "#888" : "#968360", fontSize: 10 },
+        icon: "circle",
+        itemWidth: 8,
+        itemHeight: 8,
+        itemGap: 12,
+      },
       series: [
         {
           type: "pie" as const,
           radius: ["55%", "85%"],
-          center: ["50%", "50%"],
+          center: ["50%", "45%"],
           padAngle: 2,
           data: allocationData.map((d) => ({
             name: d.name,
@@ -547,11 +557,21 @@ export default function PortfolioPage() {
     const base = getPieBaseOption(isDark);
     return {
       ...base,
+      legend: {
+        show: true,
+        bottom: 0,
+        left: "center",
+        textStyle: { color: isDark ? "#888" : "#968360", fontSize: 10 },
+        icon: "circle",
+        itemWidth: 8,
+        itemHeight: 8,
+        itemGap: 12,
+      },
       series: [
         {
           type: "pie" as const,
           radius: ["55%", "85%"],
-          center: ["50%", "50%"],
+          center: ["50%", "45%"],
           padAngle: 2,
           data: topHoldingsData.map((d, i) => ({
             name: d.name,
@@ -575,11 +595,21 @@ export default function PortfolioPage() {
     const base = getPieBaseOption(isDark);
     return {
       ...base,
+      legend: {
+        show: true,
+        bottom: 0,
+        left: "center",
+        textStyle: { color: isDark ? "#888" : "#968360", fontSize: 10 },
+        icon: "circle",
+        itemWidth: 8,
+        itemHeight: 8,
+        itemGap: 12,
+      },
       series: [
         {
           type: "pie" as const,
           radius: ["55%", "85%"],
-          center: ["50%", "50%"],
+          center: ["50%", "45%"],
           padAngle: 2,
           data: countryData.map((d, i) => ({
             name: d.name,

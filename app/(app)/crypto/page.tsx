@@ -46,6 +46,7 @@ function CryptoDonut({
   const option = useMemo(
     () => ({
       ...base,
+      legend: { show: false },
       series: [
         {
           type: "pie" as const,
@@ -68,7 +69,7 @@ function CryptoDonut({
         },
       ],
     }),
-    [base, chartData],
+    [base, chartData, isDark],
   );
 
   return <ReactECharts option={option} style={{ height: 260, width: "100%" }} />;

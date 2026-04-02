@@ -116,11 +116,21 @@ export function LookThroughView({ holdings, allocations }: LookThroughViewProps)
     return {
       ...base,
       color: ECHARTS_COLORS,
+      legend: {
+        show: true,
+        bottom: 0,
+        left: "center",
+        textStyle: { color: isDark ? "#888" : "#968360", fontSize: 10 },
+        icon: "circle",
+        itemWidth: 8,
+        itemHeight: 8,
+        itemGap: 12,
+      },
       series: [
         {
           type: "pie" as const,
           radius: ["50%", "80%"],
-          center: ["50%", "50%"],
+          center: ["50%", "45%"],
           padAngle: 1,
           data: chartData.map((d, i) => ({
             name: d.name,
