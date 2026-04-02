@@ -12,6 +12,7 @@ import {
   Moon,
   Sun,
   Settings,
+  FileSpreadsheet,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useCurrency } from "@/components/providers/currency-provider";
@@ -25,6 +26,7 @@ const NAV_ITEMS = [
   { href: "/crypto", label: "Crypto", icon: Bitcoin },
   { href: "/portfolio", label: "Portfolio", icon: Briefcase },
   { href: "/liabilities", label: "Liabilities", icon: Handshake },
+  { href: "/budget", label: "Budget", icon: FileSpreadsheet },
 ];
 
 function ThemeToggle() {
