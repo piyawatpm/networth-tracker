@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
+import Link from "next/link";
 import {
   ArrowUpRight,
   ArrowDownRight,
@@ -12,7 +13,7 @@ import ReactECharts from "echarts-for-react";
 import { cn } from "@/lib/utils";
 import { BlurFade } from "@/components/ui/blur-fade";
 import { NumberTicker } from "@/components/ui/number-ticker";
-import { ECHARTS_COLORS, formatAxisValue } from "@/lib/utils/echarts";
+import { formatAxisValue } from "@/lib/utils/echarts";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 import { useCurrency } from "@/components/providers/currency-provider";
 import { GoalSection } from "@/components/dashboard/goal-section";
@@ -25,13 +26,13 @@ import {
   getLast6MonthKeys,
   monthKeyToLabel,
   formatDateString,
+  computeOccurrences,
 } from "@/lib/utils/timezone";
 import {
+  CHART_COLORS,
   INCOME_TYPE_LABELS,
   EXPENSE_TYPE_LABELS,
-  INCOME_TYPE_COLORS,
-  EXPENSE_TYPE_COLORS,
-  CHART_COLORS,
+  FREQUENCY_LABELS,
 } from "@/lib/utils/constants";
 import type {
   IncomeEntry,
@@ -39,9 +40,9 @@ import type {
   PortfolioHolding,
   DebtRecord,
   DebtTransaction,
-  IncomeType,
-  ExpenseType,
   Currency,
+  RecurringExpense,
+  RecurringIncome,
 } from "@/lib/utils/types";
 
 // ---------------------------------------------------------------------------
@@ -83,7 +84,7 @@ function isInPeriod(dateStr: string, period: Period): boolean {
 
 function getPreviousPeriodRange(period: Period): { start: string; end: string } {
   const today = getSydneyDateString();
-  const [y, m, d] = today.split("-").map(Number);
+  const [y, m] = today.split("-").map(Number);
   switch (period) {
     case "W": {
       const ws = getWeekStart();
@@ -135,6 +136,8 @@ export default function DashboardPage() {
   const [portfolioHoldings] = useLocalStorage<PortfolioHolding[]>("portfolio_holdings", []);
   const [debtRecords] = useLocalStorage<DebtRecord[]>("debt_records", []);
   const [debtTransactions] = useLocalStorage<DebtTransaction[]>("debt_transactions", []);
+  const [recurringExpenses] = useLocalStorage<RecurringExpense[]>("recurring_expense_templates", []);
+  const [recurringIncomes] = useLocalStorage<RecurringIncome[]>("recurring_income_templates", []);
 
   const [nwSnapshots, setNwSnapshots] = useLocalStorage<{ date: string; value: number }[]>("networth_snapshots", []);
 
@@ -221,35 +224,6 @@ export default function DashboardPage() {
   const incomeChange = prevIncomeTotal > 0 ? ((periodIncomeTotal - prevIncomeTotal) / prevIncomeTotal) * 100 : 0;
   const expenseChange = prevExpenseTotal > 0 ? ((periodExpenseTotal - prevExpenseTotal) / prevExpenseTotal) * 100 : 0;
 
-  // ---- Period breakdown by type -------------------------------------------
-
-  const incomeByType = useMemo(() => {
-    const map = new Map<IncomeType, number>();
-    for (const e of periodIncome) {
-      map.set(e.type, (map.get(e.type) ?? 0) + convert(e.amount, e.currency));
-    }
-    return Array.from(map.entries())
-      .map(([type, value]) => ({ name: INCOME_TYPE_LABELS[type], value, color: INCOME_TYPE_COLORS[type], type }))
-      .filter((d) => d.value > 0)
-      .sort((a, b) => b.value - a.value);
-  }, [periodIncome, convert]);
-
-  const expenseByType = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const e of periodExpenses) {
-      map.set(e.type, (map.get(e.type) ?? 0) + convert(e.amount, e.currency));
-    }
-    return Array.from(map.entries())
-      .map(([type, value]) => ({
-        name: (EXPENSE_TYPE_LABELS as Record<string, string>)[type] ?? type,
-        value,
-        color: (EXPENSE_TYPE_COLORS as Record<string, string>)[type] ?? CHART_COLORS[Math.abs(type.length) % CHART_COLORS.length],
-        type,
-      }))
-      .filter((d) => d.value > 0)
-      .sort((a, b) => b.value - a.value);
-  }, [periodExpenses, convert]);
-
   // ---- Asset allocation ---------------------------------------------------
 
   const allocationData = useMemo(() => {
@@ -275,28 +249,105 @@ export default function DashboardPage() {
     });
   }, [last6Keys, incomeEntries, expenseEntries, convert]);
 
-  // ---- Daily cash flow (last 14 days) for sparkline -----------------------
+  // ---- Portfolio Highlights (top 3 gainers / losers) ----------------------
 
-  const dailyCashFlow = useMemo(() => {
-    const today = getSydneyDateString();
-    const days: { date: string; income: number; expenses: number; net: number }[] = [];
-    for (let i = 13; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      const ds = d.toLocaleDateString("en-CA", { timeZone: "Australia/Sydney" });
-      let inc = 0, exp = 0;
-      for (const e of incomeEntries) { if (e.date === ds) inc += convert(e.amount, e.currency); }
-      for (const e of expenseEntries) { if (e.date === ds) exp += convert(e.amount, e.currency); }
-      days.push({ date: ds.slice(5), income: inc, expenses: exp, net: inc - exp });
+  const portfolioHighlights = useMemo(() => {
+    type Highlight = { name: string; pnl: number; pnlPct: number };
+    const items: Highlight[] = [];
+
+    for (const h of portfolioHoldings) {
+      const currentConverted = convert(h.currentValue, h.currency);
+      const costConverted = convert(h.amountInvested, h.currency);
+      const pnl = currentConverted - costConverted;
+      const pnlPct = costConverted > 0 ? (pnl / costConverted) * 100 : 0;
+      items.push({ name: h.ticker || h.name, pnl, pnlPct });
     }
-    return days;
-  }, [incomeEntries, expenseEntries, convert]);
 
-  // ---- Top spending categories (period) -----------------------------------
+    for (const h of cryptoHoldings) {
+      const currentConverted = convert(h.currentValueUsd, "USD");
+      const costConverted = convert(h.totalCostUsd, "USD");
+      const pnl = currentConverted - costConverted;
+      const pnlPct = costConverted > 0 ? (pnl / costConverted) * 100 : 0;
+      items.push({ name: h.token, pnl, pnlPct });
+    }
 
-  const topExpenseCategories = useMemo(() => {
-    return expenseByType.slice(0, 5);
-  }, [expenseByType]);
+    const sorted = [...items].sort((a, b) => b.pnl - a.pnl);
+    const gainers = sorted.filter((i) => i.pnl > 0).slice(0, 3);
+    const losers = sorted.filter((i) => i.pnl < 0).sort((a, b) => a.pnl - b.pnl).slice(0, 3);
+
+    return { gainers, losers };
+  }, [portfolioHoldings, cryptoHoldings, convert]);
+
+  // ---- Upcoming Recurring -------------------------------------------------
+
+  const upcomingRecurring = useMemo(() => {
+    type UpcomingItem = {
+      description: string;
+      amount: number;
+      currency: Currency;
+      kind: "income" | "expense";
+      frequency: string;
+      nextDate: string;
+    };
+
+    const todayStr = getSydneyDateString();
+    const thirtyDaysLater = (() => {
+      const d = new Date();
+      d.setDate(d.getDate() + 30);
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      return `${y}-${m}-${day}`;
+    })();
+
+    const items: UpcomingItem[] = [];
+
+    for (const t of recurringExpenses) {
+      if (!t.active) continue;
+      const occurrences = computeOccurrences(t.startDate, t.frequency, todayStr, thirtyDaysLater);
+      if (occurrences.length > 0) {
+        items.push({
+          description: t.description,
+          amount: t.amount,
+          currency: t.currency,
+          kind: "expense",
+          frequency: FREQUENCY_LABELS[t.frequency],
+          nextDate: occurrences[0],
+        });
+      }
+    }
+
+    for (const t of recurringIncomes) {
+      if (!t.active) continue;
+      const occurrences = computeOccurrences(t.startDate, t.frequency, todayStr, thirtyDaysLater);
+      if (occurrences.length > 0) {
+        items.push({
+          description: t.description,
+          amount: t.amount,
+          currency: t.currency,
+          kind: "income",
+          frequency: FREQUENCY_LABELS[t.frequency],
+          nextDate: occurrences[0],
+        });
+      }
+    }
+
+    return items.sort((a, b) => a.nextDate.localeCompare(b.nextDate)).slice(0, 5);
+  }, [recurringExpenses, recurringIncomes]);
+
+  // ---- Financial Health Score ---------------------------------------------
+
+  const healthScore = useMemo(() => {
+    let score = 0;
+    if (savingsRate > 0) score += Math.min(savingsRate, 30); // max 30 pts
+    if (debtToAssetRatio < 50) score += Math.max(0, 30 - debtToAssetRatio * 0.6); // max 30 pts
+    if (netWorth > 0) score += 20; // 20 pts for positive net worth
+    if (periodIncomeTotal > 0 && periodExpenseTotal < periodIncomeTotal) score += 20; // 20 pts for positive cash flow
+    return Math.round(Math.min(100, Math.max(0, score)));
+  }, [savingsRate, debtToAssetRatio, netWorth, periodIncomeTotal, periodExpenseTotal]);
+
+  const healthLabel = healthScore >= 80 ? "Excellent" : healthScore >= 60 ? "Good" : healthScore >= 40 ? "Fair" : "Needs Work";
+  const healthColor = healthScore >= 80 ? "#2e8b57" : healthScore >= 60 ? "#2e8b57" : healthScore >= 40 ? "#2c251e" : "#cd5c5c";
 
   // ---- Recent activity feed -----------------------------------------------
 
@@ -312,7 +363,7 @@ export default function DashboardPage() {
     for (const e of expenseEntries) {
       items.push({ id: e.id, kind: "expense", type: e.type, label: (EXPENSE_TYPE_LABELS as Record<string, string>)[e.type] ?? e.type, description: e.description, amount: e.amount, currency: e.currency, date: e.date });
     }
-    return items.sort((a, b) => (b.date ?? "").localeCompare(a.date ?? "")).slice(0, 10);
+    return items.sort((a, b) => (b.date ?? "").localeCompare(a.date ?? "")).slice(0, 5);
   }, [incomeEntries, expenseEntries]);
 
   // ---- ECharts base -------------------------------------------------------
@@ -372,36 +423,7 @@ export default function DashboardPage() {
     }],
   };
 
-  // 2. Daily Cash Flow (Bar - 14 days)
-  const dailyCashFlowOption = {
-    backgroundColor: "transparent",
-    grid: { top: 12, right: 8, bottom: 28, left: 44, containLabel: false },
-    xAxis: {
-      type: "category" as const,
-      data: dailyCashFlow.map((d) => d.date),
-      axisLine: { show: false }, axisTick: { show: false },
-      axisLabel: { color: CC.text, fontSize: 11, interval: 1 },
-      splitLine: { show: false },
-    },
-    yAxis: {
-      type: "value" as const,
-      axisLine: { show: false }, axisTick: { show: false },
-      axisLabel: { color: CC.text, fontSize: 11, formatter: (v: number) => formatAxisValue(v) },
-      splitLine: { lineStyle: { color: CC.border, type: "dashed" as const, opacity: 0.5 } },
-    },
-    tooltip: {
-      trigger: "axis" as const,
-      backgroundColor: CC.tooltipBg, borderColor: CC.border, borderWidth: 1,
-      padding: [8, 12], textStyle: { color: CC.fg, fontSize: 12 },
-      extraCssText: "border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);",
-    },
-    series: [
-      { name: "Income", type: "bar" as const, data: dailyCashFlow.map((d) => d.income), itemStyle: { color: CC.income, borderRadius: [3, 3, 0, 0] }, barGap: "10%" },
-      { name: "Expenses", type: "bar" as const, data: dailyCashFlow.map((d) => d.expenses), itemStyle: { color: CC.expense, borderRadius: [3, 3, 0, 0] } },
-    ],
-  };
-
-  // 3. Income vs Expenses (Bar - 6 months)
+  // 2. Income vs Expenses (Bar - 6 months)
   const incExpBarOption = {
     backgroundColor: "transparent",
     grid: { top: 12, right: 8, bottom: 28, left: 48, containLabel: false },
@@ -437,36 +459,15 @@ export default function DashboardPage() {
     padding: [8, 12], textStyle: { color: CC.fg, fontSize: 12 },
     extraCssText: "border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);",
   };
-  const pieEmphasis = { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: "rgba(0,0,0,0.3)" } };
 
-  // 4. Asset Allocation (Pie/Donut)
+  // 3. Asset Allocation (Pie/Donut)
   const allocationPieOption = {
     backgroundColor: "transparent",
     tooltip: pieTooltip,
     series: [{
       type: "pie" as const, radius: ["55%", "90%"], center: ["50%", "50%"], padAngle: 2,
       data: allocationData.map((d) => ({ name: d.name, value: d.value, itemStyle: { color: d.color } })),
-      label: { show: false }, emphasis: pieEmphasis,
-    }],
-  };
-
-  const incomePieOption = {
-    backgroundColor: "transparent",
-    tooltip: pieTooltip,
-    series: [{
-      type: "pie" as const, radius: ["50%", "90%"], center: ["50%", "50%"], padAngle: 2,
-      data: incomeByType.map((d) => ({ name: d.name, value: d.value, itemStyle: { color: d.color } })),
-      label: { show: false }, emphasis: pieEmphasis,
-    }],
-  };
-
-  const expensePieOption = {
-    backgroundColor: "transparent",
-    tooltip: pieTooltip,
-    series: [{
-      type: "pie" as const, radius: ["50%", "90%"], center: ["50%", "50%"], padAngle: 2,
-      data: expenseByType.map((d) => ({ name: d.name, value: d.value, itemStyle: { color: d.color } })),
-      label: { show: false }, emphasis: pieEmphasis,
+      label: { show: false }, emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: "rgba(0,0,0,0.3)" } },
     }],
   };
 
@@ -496,7 +497,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* NET WORTH HERO */}
+      {/* 1. NET WORTH HERO */}
       <BlurFade delay={0}>
         <section>
           <p className="label-mono mb-2">Net Worth</p>
@@ -506,7 +507,25 @@ export default function DashboardPage() {
         </section>
       </BlurFade>
 
-      {/* NET WORTH TREND + ASSET BREAKDOWN */}
+      {/* 2. QUICK ACTIONS */}
+      <BlurFade delay={D * 0.3}>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/income" className="bg-secondary text-secondary-foreground hover:bg-secondary/80 px-3 py-1.5 rounded-full text-xs font-medium transition-colors">
+            + Add Income
+          </Link>
+          <Link href="/expenses" className="bg-secondary text-secondary-foreground hover:bg-secondary/80 px-3 py-1.5 rounded-full text-xs font-medium transition-colors">
+            + Add Expense
+          </Link>
+          <Link href="/portfolio" className="bg-secondary text-secondary-foreground hover:bg-secondary/80 px-3 py-1.5 rounded-full text-xs font-medium transition-colors">
+            Update Portfolio
+          </Link>
+          <Link href="/crypto" className="bg-secondary text-secondary-foreground hover:bg-secondary/80 px-3 py-1.5 rounded-full text-xs font-medium transition-colors">
+            Upload CSV
+          </Link>
+        </div>
+      </BlurFade>
+
+      {/* 3. ASSET BREAKDOWN + NET WORTH TREND */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
         <BlurFade delay={D * 0.5} className="md:col-span-5">
           <div className="divide-y divide-border">
@@ -533,7 +552,6 @@ export default function DashboardPage() {
               <ReactECharts
                 option={nwTrendOption}
                 style={{ height: 144, width: "100%" }}
-               
               />
             ) : (
               <div className="flex h-36 items-center justify-center">
@@ -544,13 +562,12 @@ export default function DashboardPage() {
             )}
           </div>
         </BlurFade>
-
       </div>
 
-      {/* GOAL SECTION */}
+      {/* 4. GOAL SECTION */}
       <GoalSection netWorth={netWorth} symbol={symbol} format={format} />
 
-      {/* VITALS ROW */}
+      {/* 5. VITALS + FINANCIAL HEALTH SCORE */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
         <BlurFade delay={D} className="md:col-span-8">
           <div className="finance-card p-6">
@@ -593,40 +610,46 @@ export default function DashboardPage() {
           </div>
         </BlurFade>
 
-        {/* Ratios */}
+        {/* Financial Health Score */}
         <BlurFade delay={D * 2} className="md:col-span-4">
-          <div className="finance-card p-6 h-full flex flex-col justify-center">
-            <p className="label-mono mb-4">Key Ratios</p>
-            <div className="grid grid-cols-2 gap-6">
-              <div className="text-center">
-                <p className={cn("text-3xl font-semibold tracking-tighter tabular-nums", savingsRate >= 0 ? "text-income" : "text-expense")}>
-                  {savingsRate.toFixed(0)}%
-                </p>
-                <p className="label-mono mt-1">Savings Rate</p>
+          <div className="finance-card p-6 h-full flex flex-col items-center justify-center">
+            <p className="label-mono mb-4">Financial Health</p>
+            <div className="relative flex items-center justify-center">
+              <svg width="96" height="96" viewBox="0 0 96 96">
+                <circle cx="48" cy="48" r="40" fill="none" stroke="#c9c3a8" strokeWidth="6" opacity="0.3" />
+                <circle
+                  cx="48" cy="48" r="40" fill="none"
+                  stroke={healthColor} strokeWidth="6"
+                  strokeLinecap="round"
+                  strokeDasharray={`${(healthScore / 100) * 251.3} 251.3`}
+                  transform="rotate(-90 48 48)"
+                />
+              </svg>
+              <div className="absolute inset-0 flex flex-col items-center justify-center">
+                <span className="text-2xl font-bold tabular-nums" style={{ color: healthColor }}>{healthScore}</span>
               </div>
-              <div className="text-center">
-                <p className={cn("text-3xl font-semibold tracking-tighter tabular-nums", debtToAssetRatio <= 30 ? "text-income" : debtToAssetRatio <= 60 ? "text-foreground" : "text-expense")}>
-                  {debtToAssetRatio.toFixed(0)}%
-                </p>
-                <p className="label-mono mt-1">Liability / Assets</p>
-              </div>
+            </div>
+            <p className="text-sm font-medium mt-2" style={{ color: healthColor }}>{healthLabel}</p>
+            <div className="flex gap-4 mt-3 text-xs text-muted-foreground">
+              <span>Savings {savingsRate.toFixed(0)}%</span>
+              <span>Debt {debtToAssetRatio.toFixed(0)}%</span>
             </div>
           </div>
         </BlurFade>
+      </div>
 
-        {/* Daily Cash Flow Sparkline (14 days) */}
+      {/* 6. INCOME VS EXPENSES BAR + ASSET ALLOCATION DONUT */}
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
         <BlurFade delay={D * 3} className="md:col-span-7">
           <div className="finance-card p-6">
-            <p className="label-mono mb-4">Daily Flow (14 days)</p>
+            <p className="label-mono mb-4">Income vs Expenses (6 months)</p>
             <ReactECharts
-              option={dailyCashFlowOption}
-              style={{ height: 160, width: "100%" }}
-             
+              option={incExpBarOption}
+              style={{ height: 192, width: "100%" }}
             />
           </div>
         </BlurFade>
 
-        {/* Asset Allocation Donut */}
         <BlurFade delay={D * 4} className="md:col-span-5">
           <div className="finance-card p-6">
             <p className="label-mono mb-4">Asset Allocation</p>
@@ -636,7 +659,6 @@ export default function DashboardPage() {
                   <ReactECharts
                     option={allocationPieOption}
                     style={{ height: 144, width: 144 }}
-                   
                   />
                 </div>
                 <div className="flex-1 space-y-1.5 overflow-hidden">
@@ -655,137 +677,125 @@ export default function DashboardPage() {
             )}
           </div>
         </BlurFade>
+      </div>
 
-        {/* Income vs Expenses (6 months) */}
-        <BlurFade delay={D * 5} className="md:col-span-7">
+      {/* 7. PORTFOLIO HIGHLIGHTS + UPCOMING RECURRING */}
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
+        {/* Portfolio Highlights */}
+        <BlurFade delay={D * 5} className="md:col-span-6">
           <div className="finance-card p-6">
-            <p className="label-mono mb-4">Income vs Expenses (6 months)</p>
-            <ReactECharts
-              option={incExpBarOption}
-              style={{ height: 192, width: "100%" }}
-             
-            />
+            <p className="label-mono mb-4">Portfolio Highlights</p>
+            {portfolioHighlights.gainers.length === 0 && portfolioHighlights.losers.length === 0 ? (
+              <p className="text-sm text-muted-foreground/50 py-6">No holdings to show</p>
+            ) : (
+              <div className="space-y-4">
+                {portfolioHighlights.gainers.length > 0 && (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-2">Gainers</p>
+                    <div className="space-y-2">
+                      {portfolioHighlights.gainers.map((h) => (
+                        <div key={h.name} className="flex items-center justify-between">
+                          <span className="text-sm font-medium truncate mr-3">{h.name}</span>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className="font-mono tabular-nums text-sm text-income">
+                              +{format(h.pnl)}
+                            </span>
+                            <span className="font-mono tabular-nums text-xs text-income">
+                              +{h.pnlPct.toFixed(1)}%
+                            </span>
+                            <ArrowUpRight className="h-3.5 w-3.5 text-income" />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {portfolioHighlights.losers.length > 0 && (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-2">Losers</p>
+                    <div className="space-y-2">
+                      {portfolioHighlights.losers.map((h) => (
+                        <div key={h.name} className="flex items-center justify-between">
+                          <span className="text-sm font-medium truncate mr-3">{h.name}</span>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className="font-mono tabular-nums text-sm text-expense">
+                              {format(h.pnl)}
+                            </span>
+                            <span className="font-mono tabular-nums text-xs text-expense">
+                              {h.pnlPct.toFixed(1)}%
+                            </span>
+                            <ArrowDownRight className="h-3.5 w-3.5 text-expense" />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </BlurFade>
 
-        {/* Top Spending Categories */}
-        <BlurFade delay={D * 6} className="md:col-span-5">
-          <div className="finance-card p-6 h-full">
-            <p className="label-mono mb-4">Top Spending — {PERIOD_LABELS[period]}</p>
-            {topExpenseCategories.length > 0 ? (
+        {/* Upcoming Recurring */}
+        <BlurFade delay={D * 6} className="md:col-span-6">
+          <div className="finance-card p-6">
+            <p className="label-mono mb-4">Upcoming</p>
+            {upcomingRecurring.length === 0 ? (
+              <p className="text-sm text-muted-foreground/50 py-6">No recurring transactions set up</p>
+            ) : (
               <div className="space-y-3">
-                {topExpenseCategories.map((cat, i) => {
-                  const pct = periodExpenseTotal > 0 ? (cat.value / periodExpenseTotal) * 100 : 0;
+                {upcomingRecurring.map((item, idx) => {
+                  const shortDate = (() => {
+                    const [, m, d] = item.nextDate.split("-").map(Number);
+                    const dt = new Date(2000, m - 1, d);
+                    return dt.toLocaleDateString("en-AU", { month: "short", day: "numeric" });
+                  })();
                   return (
-                    <div key={cat.type}>
-                      <div className="flex items-center justify-between text-sm mb-1">
-                        <div className="flex items-center gap-2">
-                          <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: cat.color }} />
-                          <span className="text-muted-foreground">{cat.name}</span>
-                        </div>
-                        <span className="font-mono tabular-nums text-expense text-xs">{format(cat.value)}</span>
-                      </div>
-                      <div className="h-1.5 rounded-full bg-border/60 overflow-hidden">
-                        <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, backgroundColor: cat.color }} />
-                      </div>
+                    <div key={idx} className="flex items-center gap-3">
+                      <span className="text-xs text-muted-foreground tabular-nums w-14 shrink-0">{shortDate}</span>
+                      <span className="text-sm truncate flex-1">{item.description}</span>
+                      <span className={cn("font-mono tabular-nums text-sm shrink-0", item.kind === "income" ? "text-income" : "text-expense")}>
+                        {item.kind === "income" ? "+" : "-"}{format(item.amount, item.currency)}
+                      </span>
+                      <span className="text-xs text-muted-foreground bg-secondary px-1.5 py-0.5 rounded-full shrink-0">{item.frequency}</span>
                     </div>
                   );
                 })}
               </div>
-            ) : (
-              <p className="text-sm text-muted-foreground/50 py-8">No spending {PERIOD_LABELS[period].toLowerCase()}</p>
-            )}
-          </div>
-        </BlurFade>
-
-        {/* Income Breakdown */}
-        <BlurFade delay={D * 7} className="md:col-span-6">
-          <div className="finance-card p-6">
-            <p className="label-mono mb-4">Income — {PERIOD_LABELS[period]}</p>
-            {incomeByType.length > 0 ? (
-              <div className="flex items-center gap-6">
-                <div className="w-32 shrink-0">
-                  <ReactECharts
-                    option={incomePieOption}
-                    style={{ height: 128, width: 128 }}
-                   
-                  />
-                </div>
-                <div className="flex-1 space-y-1.5 overflow-hidden">
-                  {incomeByType.map((d, idx) => (
-                    <div key={idx} className="flex items-center gap-2 text-sm">
-                      <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: d.color }} />
-                      <span className="truncate text-muted-foreground">{d.name}</span>
-                      <span className="ml-auto font-mono tabular-nums text-xs whitespace-nowrap">{format(d.value, undefined, true)}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground/50 py-8">No income {PERIOD_LABELS[period].toLowerCase()}</p>
-            )}
-          </div>
-        </BlurFade>
-
-        {/* Expenses Breakdown */}
-        <BlurFade delay={D * 8} className="md:col-span-6">
-          <div className="finance-card p-6">
-            <p className="label-mono mb-4">Expenses — {PERIOD_LABELS[period]}</p>
-            {expenseByType.length > 0 ? (
-              <div className="flex items-center gap-6">
-                <div className="w-32 shrink-0">
-                  <ReactECharts
-                    option={expensePieOption}
-                    style={{ height: 128, width: 128 }}
-                   
-                  />
-                </div>
-                <div className="flex-1 space-y-1.5 overflow-hidden">
-                  {expenseByType.map((d, idx) => (
-                    <div key={idx} className="flex items-center gap-2 text-sm">
-                      <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: d.color }} />
-                      <span className="truncate text-muted-foreground">{d.name}</span>
-                      <span className="ml-auto font-mono tabular-nums text-xs whitespace-nowrap">{format(d.value, undefined, true)}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground/50 py-8">No expenses {PERIOD_LABELS[period].toLowerCase()}</p>
-            )}
-          </div>
-        </BlurFade>
-
-        {/* Recent Activity */}
-        <BlurFade delay={D * 9} className="md:col-span-12">
-          <div className="max-w-3xl">
-            <p className="label-mono mb-4">Recent Activity</p>
-            {recentActivity.length > 0 ? (
-              <div className="divide-y divide-border">
-                {recentActivity.map((item) => (
-                  <div key={item.id} className="flex items-center gap-3 py-3">
-                    <span className={cn("inline-flex items-center justify-center h-8 w-8 rounded-full shrink-0", item.kind === "income" ? "bg-income/10 text-income" : "bg-expense/10 text-expense")}>
-                      {item.kind === "income" ? <ArrowUpRight className="h-4 w-4" /> : <ArrowDownRight className="h-4 w-4" />}
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{item.description || item.label}</p>
-                      <p className="text-xs text-muted-foreground">{item.label}</p>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <p className={cn("text-sm font-mono tabular-nums font-medium", item.kind === "income" ? "text-income" : "text-expense")}>
-                        {item.kind === "income" ? "+" : "-"}{format(item.amount, item.currency as Currency)}
-                      </p>
-                      <p className="text-xs text-muted-foreground tabular-nums">{formatDateString(item.date)}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground/50 py-6">No transactions recorded yet</p>
             )}
           </div>
         </BlurFade>
       </div>
+
+      {/* 8. RECENT ACTIVITY */}
+      <BlurFade delay={D * 7} className="md:col-span-12">
+        <div className="max-w-3xl">
+          <p className="label-mono mb-4">Recent Activity</p>
+          {recentActivity.length > 0 ? (
+            <div className="divide-y divide-border">
+              {recentActivity.map((item) => (
+                <div key={item.id} className="flex items-center gap-3 py-3">
+                  <span className={cn("inline-flex items-center justify-center h-8 w-8 rounded-full shrink-0", item.kind === "income" ? "bg-income/10 text-income" : "bg-expense/10 text-expense")}>
+                    {item.kind === "income" ? <ArrowUpRight className="h-4 w-4" /> : <ArrowDownRight className="h-4 w-4" />}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{item.description || item.label}</p>
+                    <p className="text-xs text-muted-foreground">{item.label}</p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className={cn("text-sm font-mono tabular-nums font-medium", item.kind === "income" ? "text-income" : "text-expense")}>
+                      {item.kind === "income" ? "+" : "-"}{format(item.amount, item.currency as Currency)}
+                    </p>
+                    <p className="text-xs text-muted-foreground tabular-nums">{formatDateString(item.date)}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground/50 py-6">No transactions recorded yet</p>
+          )}
+        </div>
+      </BlurFade>
     </div>
   );
 }
