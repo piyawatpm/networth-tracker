@@ -118,7 +118,7 @@ export function ComparisonView({
       <div className="flex items-center justify-between">
         <p className="label-mono">Compare Months</p>
         <div className="flex items-center gap-2">
-          <Select value={monthA} onValueChange={onMonthAChange}>
+          <Select value={monthA} onValueChange={(v: string | null) => v && onMonthAChange(v)}>
             <SelectTrigger className="w-[120px]" size="sm"><SelectValue /></SelectTrigger>
             <SelectContent>
               {monthKeys.map((mk) => (
@@ -127,7 +127,7 @@ export function ComparisonView({
             </SelectContent>
           </Select>
           <span className="text-xs text-muted-foreground">vs</span>
-          <Select value={monthB} onValueChange={onMonthBChange}>
+          <Select value={monthB} onValueChange={(v: string | null) => v && onMonthBChange(v)}>
             <SelectTrigger className="w-[120px]" size="sm"><SelectValue /></SelectTrigger>
             <SelectContent>
               {monthKeys.map((mk) => (

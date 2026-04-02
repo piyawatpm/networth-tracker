@@ -98,7 +98,7 @@ export default function ExpensesPage() {
   );
   // Normalize old entries missing new fields
   const entries = useMemo(
-    () => rawEntries.map((e) => normalizeExpenseEntry(e as Record<string, unknown>)),
+    () => rawEntries.map((e) => normalizeExpenseEntry(e as unknown as Record<string, unknown>)),
     [rawEntries],
   );
 
@@ -617,7 +617,7 @@ export default function ExpensesPage() {
                           <td className="px-4 py-3 whitespace-nowrap">
                             <span className="inline-flex items-center gap-1.5">
                               {entry.isRecurring && (
-                                <RefreshCw className="h-3 w-3 text-muted-foreground" title="Recurring" />
+                                <RefreshCw className="h-3 w-3 text-muted-foreground" />
                               )}
                               <span
                                 className="inline-block h-2 w-2 rounded-full"
