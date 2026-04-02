@@ -113,7 +113,7 @@ export function SpendingTrend({ entries, getLabel, getColor }: SpendingTrendProp
           By Category
         </button>
       </div>
-      <ReactECharts option={option} style={{ height: "280px" }} />
+      <ReactECharts key={byCategory ? "stacked" : "single"} option={option} style={{ height: "280px" }} />
     </div>
   );
 }
