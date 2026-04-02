@@ -106,3 +106,135 @@ export function monthKeyToLabel(key: string): string {
   const date = new Date(year, month - 1);
   return date.toLocaleDateString("en-AU", { month: "short" });
 }
+
+/** Get the number of days in a given YYYY-MM month key */
+export function getDaysInMonth(monthKey: string): number {
+  const [year, month] = monthKey.split("-").map(Number);
+  return new Date(year, month, 0).getDate();
+}
+
+/** Get today's day-of-month in Sydney timezone (1-based) */
+export function getSydneyDayOfMonth(): number {
+  const dateStr = getSydneyDateString(); // YYYY-MM-DD
+  return parseInt(dateStr.split("-")[2], 10);
+}
+
+/** Get start and end date strings for a given month key (YYYY-MM) */
+export function getMonthDateRange(monthKey: string): { from: string; to: string } {
+  const days = getDaysInMonth(monthKey);
+  return {
+    from: `${monthKey}-01`,
+    to: `${monthKey}-${String(days).padStart(2, "0")}`,
+  };
+}
+
+/** Get all month keys that have data, sorted newest first */
+export function getMonthKeysFromEntries(entries: { date: string }[]): string[] {
+  const set = new Set<string>();
+  for (const e of entries) {
+    if (e.date) set.add(e.date.slice(0, 7));
+  }
+  return Array.from(set).sort((a, b) => b.localeCompare(a));
+}
+
+/** Get last N month keys from current month (inclusive), ordered oldest→newest */
+export function getLastNMonthKeys(n: number): string[] {
+  const today = getSydneyDateString();
+  const [year, month] = today.split("-").map(Number);
+  const keys: string[] = [];
+  for (let i = n - 1; i >= 0; i--) {
+    let m = month - i;
+    let y = year;
+    while (m <= 0) {
+      m += 12;
+      y -= 1;
+    }
+    keys.push(`${y}-${String(m).padStart(2, "0")}`);
+  }
+  return keys;
+}
+
+/** Get YYYY-MM-DD for the first day of the current year (Sydney) */
+export function getYTDStartDate(): string {
+  return `${getCurrentYearKey()}-01-01`;
+}
+
+/** Format a month key (YYYY-MM) to "Mar 2026" format */
+export function monthKeyToFullLabel(key: string): string {
+  const [year, month] = key.split("-").map(Number);
+  const date = new Date(year, month - 1);
+  return date.toLocaleDateString("en-AU", { month: "short", year: "numeric" });
+}
+
+/** Compute occurrence dates for a recurring expense between two dates */
+export function computeOccurrences(
+  startDate: string,
+  frequency: "weekly" | "fortnightly" | "monthly" | "yearly",
+  fromDate: string,
+  toDate: string,
+): string[] {
+  const dates: string[] = [];
+  const [sy, sm, sd] = startDate.split("-").map(Number);
+  const start = new Date(sy, sm - 1, sd);
+  const [fy, fm, fd] = fromDate.split("-").map(Number);
+  const from = new Date(fy, fm - 1, fd);
+  const [ty, tm, td] = toDate.split("-").map(Number);
+  const to = new Date(ty, tm - 1, td);
+
+  if (frequency === "weekly" || frequency === "fortnightly") {
+    const stepDays = frequency === "weekly" ? 7 : 14;
+    const current = new Date(start);
+    // Advance to the first occurrence on or after fromDate
+    while (current < from) {
+      current.setDate(current.getDate() + stepDays);
+    }
+    while (current <= to) {
+      dates.push(formatToDateString(current));
+      current.setDate(current.getDate() + stepDays);
+    }
+  } else if (frequency === "monthly") {
+    const targetDay = sd;
+    let y = from.getFullYear();
+    let m = from.getMonth(); // 0-based
+    // Start from the month of startDate if it's after fromDate's month
+    if (new Date(sy, sm - 1, 1) > from) {
+      y = sy;
+      m = sm - 1;
+    }
+    while (true) {
+      const daysInMonth = new Date(y, m + 1, 0).getDate();
+      const day = Math.min(targetDay, daysInMonth);
+      const candidate = new Date(y, m, day);
+      if (candidate > to) break;
+      if (candidate >= from && candidate >= start) {
+        dates.push(formatToDateString(candidate));
+      }
+      m++;
+      if (m > 11) { m = 0; y++; }
+    }
+  } else if (frequency === "yearly") {
+    const targetMonth = sm - 1;
+    const targetDay = sd;
+    let y = from.getFullYear();
+    if (new Date(y, targetMonth, targetDay) < from) y++;
+    while (true) {
+      const daysInMonth = new Date(y, targetMonth + 1, 0).getDate();
+      const day = Math.min(targetDay, daysInMonth);
+      const candidate = new Date(y, targetMonth, day);
+      if (candidate > to) break;
+      if (candidate >= start) {
+        dates.push(formatToDateString(candidate));
+      }
+      y++;
+    }
+  }
+
+  return dates;
+}
+
+function formatToDateString(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
