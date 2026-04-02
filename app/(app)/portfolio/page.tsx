@@ -39,6 +39,8 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { HoldingDialog } from "@/components/portfolio/holding-dialog";
+import { FundBreakdown, type FundAllocations } from "@/components/portfolio/fund-breakdown";
+import { LookThroughView } from "@/components/portfolio/look-through-view";
 import ReactECharts from "echarts-for-react";
 import {
   ECHARTS_COLORS,
@@ -106,6 +108,10 @@ export default function PortfolioPage() {
   const [snapshots, setSnapshots] = useLocalStorage<PortfolioSnapshot[]>(
     "portfolio_snapshots",
     []
+  );
+  const [fundAllocations] = useLocalStorage<FundAllocations>(
+    "fund_allocations",
+    {},
   );
   const { format, convert, currency, symbol } = useCurrency();
   const { resolvedTheme } = useTheme();
@@ -1080,6 +1086,13 @@ export default function PortfolioPage() {
         </BlurFade>
       )}
 
+      {/* ── Look-Through Exposure ── */}
+      {filteredHoldings.length > 0 && (
+        <BlurFade delay={DELAY * 6}>
+          <LookThroughView holdings={filteredHoldings} allocations={fundAllocations} />
+        </BlurFade>
+      )}
+
       {/* ── Holdings List ── */}
       <BlurFade delay={DELAY * 6}>
         <div className="space-y-3">
@@ -1315,6 +1328,22 @@ export default function PortfolioPage() {
                           </div>
                         </div>
                       </div>
+
+                      {/* Fund Breakdown (expandable) */}
+                      {(h.type === "etf" || h.type === "fund" || fundAllocations[h.id]) && (
+                        <FundBreakdown
+                          holdingId={h.id}
+                          holdingName={h.name}
+                          ticker={h.ticker}
+                          country={h.country}
+                          holdingType={h.type}
+                          portfolioWeight={
+                            totals.totalValue > 0
+                              ? (current / totals.totalValue) * 100
+                              : 0
+                          }
+                        />
+                      )}
                     </div>
                   </BlurFade>
                 );

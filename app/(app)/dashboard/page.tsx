@@ -7,6 +7,9 @@ import {
   ArrowDownRight,
   TrendingUp,
   TrendingDown,
+  Settings2,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import ReactECharts from "echarts-for-react";
 
