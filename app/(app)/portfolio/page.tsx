@@ -880,25 +880,41 @@ export default function PortfolioPage() {
       {/* ── Broker Breakdown ── */}
       {brokerBreakdown.length > 0 && (
         <BlurFade delay={DELAY * 5.5}>
-          <div className="finance-card p-5">
+          <div className="finance-card p-6">
             <p className="label-mono mb-4">By Broker</p>
-            <div className="divide-y divide-border">
-              {brokerBreakdown.map((b) => (
-                <div
-                  key={b.broker}
-                  className="flex items-center justify-between py-3 first:pt-0 last:pb-0"
-                >
-                  <div>
-                    <p className="text-sm font-medium">{b.broker}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {b.count} holding{b.count !== 1 ? "s" : ""}
-                    </p>
+            <div className="space-y-2.5">
+              {brokerBreakdown.map((b, i) => {
+                const pct = totals.totalValue > 0 ? (b.value / totals.totalValue) * 100 : 0;
+                const color = CHART_COLORS[i % CHART_COLORS.length];
+                return (
+                  <div key={b.broker} className="space-y-1">
+                    <div className="flex items-center justify-between text-sm">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="inline-block h-2.5 w-2.5 rounded-full"
+                          style={{ backgroundColor: color }}
+                        />
+                        <span>{b.broker}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {b.count} holding{b.count !== 1 ? "s" : ""}
+                        </span>
+                      </div>
+                      <span className="font-mono text-xs tabular-nums text-muted-foreground">
+                        {format(b.value)} ({pct.toFixed(1)}%)
+                      </span>
+                    </div>
+                    <div className="h-1.5 w-full rounded-full bg-muted">
+                      <div
+                        className="h-full rounded-full transition-all duration-500"
+                        style={{
+                          width: `${pct}%`,
+                          backgroundColor: color,
+                        }}
+                      />
+                    </div>
                   </div>
-                  <p className="text-sm font-semibold tabular-nums">
-                    {format(b.value)}
-                  </p>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </BlurFade>
