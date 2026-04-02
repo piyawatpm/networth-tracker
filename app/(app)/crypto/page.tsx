@@ -294,8 +294,8 @@ export default function CryptoPage() {
 
   const allSelected = pricedHoldings.length === filteredHoldings.length;
 
-  // Chart data: exclude tiny holdings (< 1% of total)
-  const chartData = useMemo(() => {
+  // Chart data: all tokens for legend, filtered for donut
+  const allChartTokens = useMemo(() => {
     if (totalValueUsd === 0) return [];
     return pricedHoldings
       .filter((h) => h.currentValueUsd / totalValueUsd >= 0.01)
@@ -305,6 +305,11 @@ export default function CryptoPage() {
         fill: ECHARTS_COLORS[i % ECHARTS_COLORS.length],
       }));
   }, [pricedHoldings, totalValueUsd]);
+
+  // Donut data: only selected tokens
+  const chartData = useMemo(() => {
+    return allChartTokens.filter((d) => selectedTokens[d.token] !== false);
+  }, [allChartTokens, selectedTokens]);
 
   // Exchange allocation data
   const exchangeData = useMemo(() => {
@@ -636,12 +641,16 @@ export default function CryptoPage() {
         <BlurFade delay={0.12}>
           <div className="finance-card p-6">
             <p className="label-mono mb-4">ALLOCATION</p>
-            {chartData.length > 0 && (
+            {chartData.length > 0 ? (
               <CryptoDonut chartData={chartData} isDark={isDark} />
-            )}
+            ) : allChartTokens.length > 0 ? (
+              <div className="flex items-center justify-center h-[260px] text-sm text-muted-foreground">
+                All tokens hidden
+              </div>
+            ) : null}
             {/* Clickable legend */}
             <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1.5">
-              {chartData.map((d) => {
+              {allChartTokens.map((d) => {
                 const isSelected = selectedTokens[d.token] !== false;
                 return (
                   <button
