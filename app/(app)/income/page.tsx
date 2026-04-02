@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useCallback } from "react";
 import { useTheme } from "next-themes";
 import ReactECharts from "echarts-for-react";
 import { useLocalStorage } from "@/hooks/use-local-storage";
@@ -149,6 +149,23 @@ export default function IncomePage() {
   // Delete confirmation
   const [deleteTarget, setDeleteTarget] = useState<IncomeEntry | null>(null);
 
+  // Pie chart interactive legend
+  const pieRef = useRef<ReactECharts>(null);
+  const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set());
+  const toggleType = useCallback((type: string) => {
+    setHiddenTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(type)) { next.delete(type); } else { next.add(type); }
+      return next;
+    });
+  }, []);
+  const highlightSlice = useCallback((name: string) => {
+    pieRef.current?.getEchartsInstance()?.dispatchAction({ type: "highlight", name });
+  }, []);
+  const downplayAll = useCallback(() => {
+    pieRef.current?.getEchartsInstance()?.dispatchAction({ type: "downplay" });
+  }, []);
+
   // ---- Derived data ---------------------------------------------------------
 
   const thisMonthEntries = useMemo(
@@ -215,11 +232,13 @@ export default function IncomePage() {
         radius: ["60%", "85%"],
         center: ["50%", "50%"],
         padAngle: 2,
-        data: breakdownByType.map((item) => ({
-          name: item.label,
-          value: item.value,
-          itemStyle: { color: item.color },
-        })),
+        data: breakdownByType
+          .filter((item) => !hiddenTypes.has(item.type))
+          .map((item) => ({
+            name: item.label,
+            value: item.value,
+            itemStyle: { color: item.color },
+          })),
         label: { show: false },
         emphasis: {
           itemStyle: {
@@ -230,7 +249,7 @@ export default function IncomePage() {
         },
       }],
     };
-  }, [breakdownByType, isDark]);
+  }, [breakdownByType, isDark, hiddenTypes]);
 
   // Records tab filters
   const typesPresent = useMemo(() => {
@@ -431,41 +450,53 @@ export default function IncomePage() {
                 <div className="grid gap-6 md:grid-cols-[240px_1fr]">
                   <div className="mx-auto aspect-square w-full max-w-[240px]">
                     <ReactECharts
+                      ref={pieRef}
                       option={pieOption}
                       style={{ width: "100%", height: "100%" }}
                     />
                   </div>
 
-                  <div className="flex flex-col justify-center gap-2.5">
+                  <div className="flex flex-col justify-center gap-2">
                     {breakdownByType.map((item) => {
-                      const pct =
-                        dateFilteredTotal > 0
-                          ? (item.value / dateFilteredTotal) * 100
-                          : 0;
+                      const isHidden = hiddenTypes.has(item.type);
+                      const visibleTotal = breakdownByType
+                        .filter((d) => !hiddenTypes.has(d.type))
+                        .reduce((s, d) => s + d.value, 0);
+                      const pct = !isHidden && visibleTotal > 0
+                        ? (item.value / visibleTotal) * 100
+                        : 0;
                       return (
-                        <div key={item.type} className="space-y-1">
-                          <div className="flex items-center justify-between text-sm">
+                        <button
+                          key={item.type}
+                          onClick={() => toggleType(item.type)}
+                          onMouseEnter={() => !isHidden && highlightSlice(item.label)}
+                          onMouseLeave={downplayAll}
+                          className={cn(
+                            "text-left rounded-lg px-2 py-1.5 transition-all",
+                            isHidden ? "opacity-40 hover:opacity-60" : "hover:bg-secondary/50"
+                          )}
+                        >
+                          <div className="flex items-center justify-between text-sm mb-1">
                             <div className="flex items-center gap-2">
                               <span
-                                className="inline-block h-2.5 w-2.5 rounded-full"
-                                style={{ backgroundColor: item.color }}
+                                className={cn("inline-block h-2.5 w-2.5 rounded-full transition-transform", isHidden && "scale-75")}
+                                style={{ backgroundColor: isHidden ? "#aaa" : item.color }}
                               />
-                              <span>{item.label}</span>
+                              <span className={cn(isHidden && "line-through text-muted-foreground")}>{item.label}</span>
                             </div>
                             <span className="font-mono text-xs tabular-nums text-muted-foreground">
-                              {format(item.value)} ({pct.toFixed(1)}%)
+                              {isHidden ? "—" : `${format(item.value)} (${pct.toFixed(1)}%)`}
                             </span>
                           </div>
-                          <div className="h-1.5 w-full rounded-full bg-muted">
-                            <div
-                              className="h-full rounded-full transition-all duration-500"
-                              style={{
-                                width: `${pct}%`,
-                                backgroundColor: item.color,
-                              }}
-                            />
-                          </div>
-                        </div>
+                          {!isHidden && (
+                            <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                              <div
+                                className="h-full rounded-full transition-all duration-500"
+                                style={{ width: `${pct}%`, backgroundColor: item.color }}
+                              />
+                            </div>
+                          )}
+                        </button>
                       );
                     })}
 

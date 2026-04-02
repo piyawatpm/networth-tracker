@@ -132,6 +132,16 @@ export default function ExpensesPage() {
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [methodFilter, setMethodFilter] = useState<PaymentMethod | "all">("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [hiddenCategories, setHiddenCategories] = useState<Set<string>>(new Set());
+
+  function toggleCategory(type: string) {
+    setHiddenCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(type)) next.delete(type);
+      else next.add(type);
+      return next;
+    });
+  }
 
   // Breakdown tab date range
   const [datePreset, setDatePreset] = useState<DatePreset>("this_month");
@@ -200,32 +210,26 @@ export default function ExpensesPage() {
       .reduce((sum, e) => sum + convert(e.amount, e.currency), 0);
   }, [incomeEntries, activeDateRange, convert]);
 
-  // Pie chart option
+  // Pie chart option (filtered by hidden categories)
   const pieOption = useMemo(() => {
     const base = getPieBaseOption(isDark);
+    const visibleData = breakdownByType
+      .filter((item) => !hiddenCategories.has(item.type))
+      .map((item) => ({
+        name: item.label,
+        value: item.value,
+        itemStyle: { color: item.color },
+      }));
     return {
       ...base,
-      legend: {
-        show: true,
-        bottom: 0,
-        left: "center",
-        textStyle: { color: isDark ? "#888" : "#968360", fontSize: 10 },
-        icon: "circle",
-        itemWidth: 8,
-        itemHeight: 8,
-        itemGap: 12,
-      },
+      legend: { show: false },
       series: [
         {
           type: "pie" as const,
           radius: ["60%", "85%"],
-          center: ["50%", "45%"],
+          center: ["50%", "50%"],
           padAngle: 2,
-          data: breakdownByType.map((item) => ({
-            name: item.label,
-            value: item.value,
-            itemStyle: { color: item.color },
-          })),
+          data: visibleData,
           label: { show: false },
           emphasis: {
             itemStyle: {
@@ -237,7 +241,7 @@ export default function ExpensesPage() {
         },
       ],
     };
-  }, [breakdownByType, isDark]);
+  }, [breakdownByType, isDark, hiddenCategories]);
 
   // Records tab: smart filter pills + search + method filter
   const typesPresent = useMemo(() => {
@@ -438,9 +442,10 @@ export default function ExpensesPage() {
                     />
                   </div>
 
-                  {/* Progress bars with income ratio */}
+                  {/* Interactive legend + progress bars */}
                   <div className="flex flex-col justify-center gap-2.5">
                     {breakdownByType.map((item) => {
+                      const isHidden = hiddenCategories.has(item.type);
                       const pct =
                         dateFilteredTotal > 0
                           ? (item.value / dateFilteredTotal) * 100
@@ -450,14 +455,28 @@ export default function ExpensesPage() {
                           ? (item.value / dateFilteredIncome) * 100
                           : null;
                       return (
-                        <div key={item.type} className="space-y-1">
+                        <div
+                          key={item.type}
+                          className={cn(
+                            "space-y-1 cursor-pointer select-none transition-opacity",
+                            isHidden && "opacity-30",
+                          )}
+                          onClick={() => toggleCategory(item.type)}
+                          role="button"
+                          title={isHidden ? `Show ${item.label}` : `Hide ${item.label}`}
+                        >
                           <div className="flex items-center justify-between text-sm">
                             <div className="flex items-center gap-2">
                               <span
-                                className="inline-block h-2.5 w-2.5 rounded-full"
-                                style={{ backgroundColor: item.color }}
+                                className={cn(
+                                  "inline-block h-2.5 w-2.5 rounded-full transition-all",
+                                  isHidden && "ring-1 ring-border bg-transparent",
+                                )}
+                                style={{ backgroundColor: isHidden ? "transparent" : item.color }}
                               />
-                              <span>{item.label}</span>
+                              <span className={cn(isHidden && "line-through text-muted-foreground")}>
+                                {item.label}
+                              </span>
                             </div>
                             <span className="font-mono text-xs tabular-nums text-muted-foreground">
                               {format(item.value)} ({pct.toFixed(1)}%)
@@ -472,7 +491,7 @@ export default function ExpensesPage() {
                             <div
                               className="h-full rounded-full transition-all duration-500"
                               style={{
-                                width: `${pct}%`,
+                                width: isHidden ? "0%" : `${pct}%`,
                                 backgroundColor: item.color,
                               }}
                             />
