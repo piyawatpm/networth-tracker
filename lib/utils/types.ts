@@ -50,8 +50,27 @@ export interface IncomeEntry {
   description: string;
   amount: number;
   currency: Currency;
-  date: string; // YYYY-MM-DD
+  date: string;
+  source: string;
   notes: string;
+  isRecurring?: boolean;
+  recurringId?: string;
+  createdAt: number;
+}
+
+export interface RecurringIncome {
+  id: string;
+  type: IncomeType;
+  description: string;
+  amount: number;
+  currency: Currency;
+  source: string;
+  notes: string;
+  frequency: RecurringFrequency;
+  startDate: string;
+  endDate?: string;
+  lastGeneratedDate?: string;
+  active: boolean;
   createdAt: number;
 }
 
@@ -155,6 +174,23 @@ export interface CryptoTransaction {
 export interface CachedRates {
   rates: Record<string, number>;
   fetchedAt: number; // unix timestamp ms
+}
+
+/** Normalize old IncomeEntry records that lack new fields */
+export function normalizeIncomeEntry(e: Record<string, unknown>): IncomeEntry {
+  return {
+    id: e.id as string,
+    type: (e.type as IncomeType) ?? "other",
+    description: (e.description as string) ?? "",
+    amount: (e.amount as number) ?? 0,
+    currency: (e.currency as Currency) ?? "AUD",
+    date: (e.date as string) ?? "",
+    source: (e.source as string) ?? "",
+    notes: (e.notes as string) ?? "",
+    isRecurring: (e.isRecurring as boolean) ?? false,
+    recurringId: e.recurringId as string | undefined,
+    createdAt: (e.createdAt as number) ?? Date.now(),
+  };
 }
 
 /** Normalize old ExpenseEntry records that lack new fields */
