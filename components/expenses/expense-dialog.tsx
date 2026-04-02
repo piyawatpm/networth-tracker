@@ -24,14 +24,12 @@ import {
 } from "@/components/ui/select";
 import type {
   ExpenseEntry,
-  ExpenseType,
   Currency,
   PaymentMethod,
   RecurringFrequency,
   RecurringExpense,
 } from "@/lib/utils/types";
 import {
-  EXPENSE_TYPE_LABELS,
   CURRENCIES,
   PAYMENT_METHOD_LABELS,
   FREQUENCY_LABELS,
@@ -44,15 +42,18 @@ interface ExpenseDialogProps {
   onSave: (entry: ExpenseEntry) => void;
   onCreateRecurring?: (template: RecurringExpense) => void;
   trigger: React.ReactNode;
+  /** Ordered list of all category type keys */
+  categoryTypes?: string[];
+  /** Map of type key → display label */
+  categoryLabels?: Record<string, string>;
 }
 
-const EXPENSE_TYPES = Object.keys(EXPENSE_TYPE_LABELS) as ExpenseType[];
 const PAYMENT_METHODS = Object.keys(PAYMENT_METHOD_LABELS) as PaymentMethod[];
 const FREQUENCIES = Object.keys(FREQUENCY_LABELS) as RecurringFrequency[];
 
-export function ExpenseDialog({ entry, onSave, onCreateRecurring, trigger }: ExpenseDialogProps) {
+export function ExpenseDialog({ entry, onSave, onCreateRecurring, trigger, categoryTypes, categoryLabels }: ExpenseDialogProps) {
   const [open, setOpen] = useState(false);
-  const [type, setType] = useState<ExpenseType>(entry?.type ?? "food");
+  const [type, setType] = useState<string>(entry?.type ?? "food");
   const [description, setDescription] = useState(entry?.description ?? "");
   const [amount, setAmount] = useState(entry?.amount?.toString() ?? "");
   const [currency, setCurrency] = useState<Currency>(entry?.currency ?? "AUD");
@@ -69,7 +70,7 @@ export function ExpenseDialog({ entry, onSave, onCreateRecurring, trigger }: Exp
   // Reset form when dialog opens
   useEffect(() => {
     if (open) {
-      setType(entry?.type ?? "food");
+      setType(entry?.type ?? (categoryTypes?.[0] ?? "food"));
       setDescription(entry?.description ?? "");
       setAmount(entry?.amount?.toString() ?? "");
       setCurrency(entry?.currency ?? "AUD");
@@ -150,15 +151,15 @@ export function ExpenseDialog({ entry, onSave, onCreateRecurring, trigger }: Exp
             <Label htmlFor="expense-type">Type</Label>
             <Select
               value={type}
-              onValueChange={(v) => v && setType(v as ExpenseType)}
+              onValueChange={(v) => v && setType(v)}
             >
               <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {EXPENSE_TYPES.map((t) => (
+                {(categoryTypes ?? []).map((t) => (
                   <SelectItem key={t} value={t}>
-                    {EXPENSE_TYPE_LABELS[t]}
+                    {categoryLabels?.[t] ?? t}
                   </SelectItem>
                 ))}
               </SelectContent>

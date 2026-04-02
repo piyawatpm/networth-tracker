@@ -24,13 +24,11 @@ import {
 import { Badge } from "@/components/ui/badge";
 import type {
   RecurringExpense,
-  ExpenseType,
   Currency,
   PaymentMethod,
   RecurringFrequency,
 } from "@/lib/utils/types";
 import {
-  EXPENSE_TYPE_LABELS,
   CURRENCIES,
   PAYMENT_METHOD_LABELS,
   FREQUENCY_LABELS,
@@ -46,12 +44,16 @@ function RecurringForm({
   template,
   onSave,
   onCancel,
+  categoryTypes,
+  categoryLabels,
 }: {
   template?: RecurringExpense;
   onSave: (t: RecurringExpense) => void;
   onCancel: () => void;
+  categoryTypes: string[];
+  categoryLabels: Record<string, string>;
 }) {
-  const [type, setType] = useState<ExpenseType>(template?.type ?? "food");
+  const [type, setType] = useState<string>(template?.type ?? (categoryTypes[0] ?? "food"));
   const [description, setDescription] = useState(template?.description ?? "");
   const [amount, setAmount] = useState(template?.amount?.toString() ?? "");
   const [currency, setCurrency] = useState<Currency>(template?.currency ?? "AUD");
@@ -86,7 +88,6 @@ function RecurringForm({
     });
   }
 
-  const EXPENSE_TYPES = Object.keys(EXPENSE_TYPE_LABELS) as ExpenseType[];
   const PAYMENT_METHODS = Object.keys(PAYMENT_METHOD_LABELS) as PaymentMethod[];
   const FREQUENCIES = Object.keys(FREQUENCY_LABELS) as RecurringFrequency[];
 
@@ -94,11 +95,11 @@ function RecurringForm({
     <div className="grid gap-3">
       <div className="grid gap-2">
         <Label>Type</Label>
-        <Select value={type} onValueChange={(v) => v && setType(v as ExpenseType)}>
+        <Select value={type} onValueChange={(v) => v && setType(v)}>
           <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
           <SelectContent>
-            {EXPENSE_TYPES.map((t) => (
-              <SelectItem key={t} value={t}>{EXPENSE_TYPE_LABELS[t]}</SelectItem>
+            {categoryTypes.map((t) => (
+              <SelectItem key={t} value={t}>{categoryLabels[t] ?? t}</SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -183,6 +184,8 @@ interface RecurringDialogProps {
   onDelete: (id: string) => void;
   onToggle: (id: string) => void;
   trigger: React.ReactNode;
+  categoryTypes: string[];
+  categoryLabels: Record<string, string>;
 }
 
 export function RecurringDialog({
@@ -192,6 +195,8 @@ export function RecurringDialog({
   onDelete,
   onToggle,
   trigger,
+  categoryTypes,
+  categoryLabels,
 }: RecurringDialogProps) {
   const [mode, setMode] = useState<"list" | "add" | "edit">("list");
   const [editTarget, setEditTarget] = useState<RecurringExpense | undefined>();
@@ -289,7 +294,7 @@ export function RecurringDialog({
         )}
 
         {mode === "add" && (
-          <RecurringForm onSave={handleSaveNew} onCancel={() => setMode("list")} />
+          <RecurringForm onSave={handleSaveNew} onCancel={() => setMode("list")} categoryTypes={categoryTypes} categoryLabels={categoryLabels} />
         )}
 
         {mode === "edit" && editTarget && (
@@ -297,6 +302,8 @@ export function RecurringDialog({
             template={editTarget}
             onSave={handleSaveEdit}
             onCancel={() => { setMode("list"); setEditTarget(undefined); }}
+            categoryTypes={categoryTypes}
+            categoryLabels={categoryLabels}
           />
         )}
       </DialogContent>

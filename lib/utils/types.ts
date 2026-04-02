@@ -55,9 +55,15 @@ export interface IncomeEntry {
   createdAt: number;
 }
 
+export interface CustomExpenseCategory {
+  id: string;        // kebab-case key, e.g. "pet-care"
+  label: string;     // display name, e.g. "Pet Care"
+  color: string;     // hex color
+}
+
 export interface ExpenseEntry {
   id: string;
-  type: ExpenseType;
+  type: string;      // ExpenseType or custom category id
   description: string;
   amount: number;
   currency: Currency;
@@ -73,7 +79,7 @@ export interface ExpenseEntry {
 
 export interface RecurringExpense {
   id: string;
-  type: ExpenseType;
+  type: string;      // ExpenseType or custom category id
   description: string;
   amount: number;
   currency: Currency;
@@ -155,7 +161,7 @@ export interface CachedRates {
 export function normalizeExpenseEntry(e: Record<string, unknown>): ExpenseEntry {
   return {
     id: e.id as string,
-    type: (e.type as ExpenseType) ?? "other",
+    type: (e.type as string) ?? "other",
     description: (e.description as string) ?? "",
     amount: (e.amount as number) ?? 0,
     currency: (e.currency as Currency) ?? "AUD",

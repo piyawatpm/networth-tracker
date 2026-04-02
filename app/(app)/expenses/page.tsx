@@ -6,16 +6,14 @@ import ReactECharts from "echarts-for-react";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 import { useCurrency } from "@/components/providers/currency-provider";
 import { useRecurringExpenses } from "@/hooks/use-recurring-expenses";
+import { useExpenseCategories } from "@/hooks/use-expense-categories";
 import type {
   ExpenseEntry,
-  ExpenseType,
   IncomeEntry,
   PaymentMethod,
 } from "@/lib/utils/types";
 import { normalizeExpenseEntry, CURRENCY_SYMBOLS } from "@/lib/utils/types";
 import {
-  EXPENSE_TYPE_LABELS,
-  EXPENSE_TYPE_COLORS,
   PAYMENT_METHOD_LABELS,
 } from "@/lib/utils/constants";
 import {
@@ -53,6 +51,7 @@ import {
   Receipt,
   Search,
   RefreshCw,
+  Tags,
 } from "lucide-react";
 
 // Feature components
@@ -69,12 +68,11 @@ import { PaymentMethodBreakdown } from "@/components/expenses/payment-method-bre
 import { SpendingTrend } from "@/components/expenses/spending-trend";
 import { ComparisonView } from "@/components/expenses/comparison-view";
 import { CumulativePaceChart } from "@/components/expenses/cumulative-pace-chart";
+import { ManageCategoriesDialog } from "@/components/expenses/manage-categories-dialog";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-const EXPENSE_TYPES = Object.keys(EXPENSE_TYPE_LABELS) as ExpenseType[];
 
 function sumConverted(
   entries: ExpenseEntry[],
@@ -107,6 +105,18 @@ export default function ExpensesPage() {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
 
+  // Dynamic expense categories
+  const {
+    allTypes: categoryTypes,
+    allLabels: categoryLabels,
+    allColors: categoryColors,
+    customCategories,
+    addCategory,
+    removeCategory,
+    getLabel,
+    getColor,
+  } = useExpenseCategories();
+
   // Recurring expenses
   const {
     templates,
@@ -119,7 +129,7 @@ export default function ExpensesPage() {
   // ---- State ----------------------------------------------------------------
 
   // Records tab filters
-  const [typeFilter, setTypeFilter] = useState<ExpenseType | "all">("all");
+  const [typeFilter, setTypeFilter] = useState<string>("all");
   const [methodFilter, setMethodFilter] = useState<PaymentMethod | "all">("all");
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -170,20 +180,20 @@ export default function ExpensesPage() {
   const dateFilteredTotal = sumConverted(dateFilteredEntries, convert);
 
   const breakdownByType = useMemo(() => {
-    const map: Record<ExpenseType, number> = {} as Record<ExpenseType, number>;
-    for (const t of EXPENSE_TYPES) map[t] = 0;
+    const map: Record<string, number> = {};
     for (const e of dateFilteredEntries) {
-      map[e.type] += convert(e.amount, e.currency);
+      map[e.type] = (map[e.type] ?? 0) + convert(e.amount, e.currency);
     }
-    return EXPENSE_TYPES.filter((t) => map[t] > 0)
-      .map((t) => ({
+    return Object.entries(map)
+      .filter(([, v]) => v > 0)
+      .map(([t, value]) => ({
         type: t,
-        label: EXPENSE_TYPE_LABELS[t],
-        value: map[t],
-        color: EXPENSE_TYPE_COLORS[t],
+        label: getLabel(t),
+        value,
+        color: getColor(t),
       }))
       .sort((a, b) => b.value - a.value);
-  }, [dateFilteredEntries, convert]);
+  }, [dateFilteredEntries, convert, getLabel, getColor]);
 
   // Income for ratio
   const dateFilteredIncome = useMemo(() => {
@@ -223,10 +233,13 @@ export default function ExpensesPage() {
 
   // Records tab: smart filter pills + search + method filter
   const typesPresent = useMemo(() => {
-    const set = new Set<ExpenseType>();
+    const set = new Set<string>();
     entries.forEach((e) => set.add(e.type));
     return Array.from(set);
   }, [entries]);
+
+  // Category ids that are in use (for manage dialog)
+  const usedCategoryIds = useMemo(() => new Set(entries.map((e) => e.type)), [entries]);
 
   const methodsPresent = useMemo(() => {
     const set = new Set<PaymentMethod>();
@@ -353,12 +366,26 @@ export default function ExpensesPage() {
                 onChange={handleDateRangeChange}
               />
               <div className="flex gap-2 shrink-0">
+                <ManageCategoriesDialog
+                  customCategories={customCategories}
+                  onAdd={addCategory}
+                  onRemove={removeCategory}
+                  usedCategoryIds={usedCategoryIds}
+                  trigger={
+                    <Button variant="ghost" size="sm">
+                      <Tags className="h-3.5 w-3.5 mr-1" />
+                      Categories
+                    </Button>
+                  }
+                />
                 <RecurringDialog
                   templates={templates}
                   onAdd={addTemplate}
                   onUpdate={updateTemplate}
                   onDelete={deleteTemplate}
                   onToggle={toggleTemplate}
+                  categoryTypes={categoryTypes}
+                  categoryLabels={categoryLabels}
                   trigger={
                     <Button variant="ghost" size="sm">
                       <RefreshCw className="h-3.5 w-3.5 mr-1" />
@@ -369,6 +396,8 @@ export default function ExpensesPage() {
                 <ExpenseDialog
                   onSave={handleSave}
                   onCreateRecurring={addTemplate}
+                  categoryTypes={categoryTypes}
+                  categoryLabels={categoryLabels}
                   trigger={
                     <Button size="sm">
                       <Plus className="mr-1 h-3.5 w-3.5" />
@@ -520,7 +549,7 @@ export default function ExpensesPage() {
                       : "bg-secondary text-secondary-foreground hover:bg-secondary/80",
                   )}
                 >
-                  {EXPENSE_TYPE_LABELS[t]}
+                  {getLabel(t)}
                 </button>
               ))}
             </div>
@@ -561,6 +590,8 @@ export default function ExpensesPage() {
               <ExpenseDialog
                 onSave={handleSave}
                 onCreateRecurring={addTemplate}
+                categoryTypes={categoryTypes}
+                categoryLabels={categoryLabels}
                 trigger={
                   <Button size="sm">
                     <Plus className="mr-1 h-3.5 w-3.5" />
@@ -622,10 +653,10 @@ export default function ExpensesPage() {
                               <span
                                 className="inline-block h-2 w-2 rounded-full"
                                 style={{
-                                  backgroundColor: EXPENSE_TYPE_COLORS[entry.type],
+                                  backgroundColor: getColor(entry.type),
                                 }}
                               />
-                              {EXPENSE_TYPE_LABELS[entry.type]}
+                              {getLabel(entry.type)}
                             </span>
                           </td>
                           <td className="px-4 py-3 hidden sm:table-cell">
@@ -664,6 +695,8 @@ export default function ExpensesPage() {
                               <ExpenseDialog
                                 entry={entry}
                                 onSave={handleSave}
+                                categoryTypes={categoryTypes}
+                                categoryLabels={categoryLabels}
                                 trigger={
                                   <Button variant="ghost" size="icon-xs">
                                     <Pencil className="h-3.5 w-3.5" />
@@ -694,7 +727,7 @@ export default function ExpensesPage() {
           {/* -------------------------------------------------------------- */}
           <TabsContent value="trends" className="space-y-6 pt-4">
             <div className="finance-card p-6">
-              <SpendingTrend entries={entries} />
+              <SpendingTrend entries={entries} getLabel={getLabel} getColor={getColor} />
             </div>
 
             <div className="finance-card p-6">
@@ -708,6 +741,8 @@ export default function ExpensesPage() {
                 monthB={compMonthB}
                 onMonthAChange={setCompMonthA}
                 onMonthBChange={setCompMonthB}
+                getLabel={getLabel}
+                getColor={getColor}
               />
             </div>
           </TabsContent>

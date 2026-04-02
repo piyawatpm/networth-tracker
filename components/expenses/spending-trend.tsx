@@ -4,17 +4,18 @@ import { useMemo, useState } from "react";
 import ReactECharts from "echarts-for-react";
 import { useTheme } from "next-themes";
 import { useCurrency } from "@/components/providers/currency-provider";
-import type { ExpenseEntry, ExpenseType } from "@/lib/utils/types";
-import { EXPENSE_TYPE_LABELS, EXPENSE_TYPE_COLORS } from "@/lib/utils/constants";
+import type { ExpenseEntry } from "@/lib/utils/types";
 import { getLastNMonthKeys, monthKeyToLabel, getMonthKey } from "@/lib/utils/timezone";
 import { getCartesianBaseOption, formatAxisValue } from "@/lib/utils/echarts";
 import { cn } from "@/lib/utils";
 
 interface SpendingTrendProps {
   entries: ExpenseEntry[];
+  getLabel: (type: string) => string;
+  getColor: (type: string) => string;
 }
 
-export function SpendingTrend({ entries }: SpendingTrendProps) {
+export function SpendingTrend({ entries, getLabel, getColor }: SpendingTrendProps) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
   const { convert } = useCurrency();
@@ -52,16 +53,16 @@ export function SpendingTrend({ entries }: SpendingTrendProps) {
       categoryTotals[e.type] = (categoryTotals[e.type] ?? 0) + convert(e.amount, e.currency);
     }
     const sorted = Object.entries(categoryTotals).sort((a, b) => b[1] - a[1]);
-    const top5 = sorted.slice(0, 5).map(([t]) => t as ExpenseType);
+    const top5 = sorted.slice(0, 5).map(([t]) => t);
     const hasOther = sorted.length > 5;
 
     const series = top5.map((t) => ({
-      name: EXPENSE_TYPE_LABELS[t],
+      name: getLabel(t),
       type: "line" as const,
       stack: "total",
       areaStyle: { opacity: 0.3 },
       lineStyle: { width: 1.5 },
-      itemStyle: { color: EXPENSE_TYPE_COLORS[t] },
+      itemStyle: { color: getColor(t) },
       data: monthKeys.map((mk) =>
         entries
           .filter((e) => getMonthKey(e.date) === mk && e.type === t)

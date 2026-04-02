@@ -235,12 +235,17 @@ export default function DashboardPage() {
   }, [periodIncome, convert]);
 
   const expenseByType = useMemo(() => {
-    const map = new Map<ExpenseType, number>();
+    const map = new Map<string, number>();
     for (const e of periodExpenses) {
       map.set(e.type, (map.get(e.type) ?? 0) + convert(e.amount, e.currency));
     }
     return Array.from(map.entries())
-      .map(([type, value]) => ({ name: EXPENSE_TYPE_LABELS[type], value, color: EXPENSE_TYPE_COLORS[type], type }))
+      .map(([type, value]) => ({
+        name: (EXPENSE_TYPE_LABELS as Record<string, string>)[type] ?? type,
+        value,
+        color: (EXPENSE_TYPE_COLORS as Record<string, string>)[type] ?? CHART_COLORS[Math.abs(type.length) % CHART_COLORS.length],
+        type,
+      }))
       .filter((d) => d.value > 0)
       .sort((a, b) => b.value - a.value);
   }, [periodExpenses, convert]);
@@ -305,7 +310,7 @@ export default function DashboardPage() {
       items.push({ id: e.id, kind: "income", type: e.type, label: INCOME_TYPE_LABELS[e.type], description: e.description, amount: e.amount, currency: e.currency, date: e.date });
     }
     for (const e of expenseEntries) {
-      items.push({ id: e.id, kind: "expense", type: e.type, label: EXPENSE_TYPE_LABELS[e.type as ExpenseType], description: e.description, amount: e.amount, currency: e.currency, date: e.date });
+      items.push({ id: e.id, kind: "expense", type: e.type, label: (EXPENSE_TYPE_LABELS as Record<string, string>)[e.type] ?? e.type, description: e.description, amount: e.amount, currency: e.currency, date: e.date });
     }
     return items.sort((a, b) => (b.date ?? "").localeCompare(a.date ?? "")).slice(0, 10);
   }, [incomeEntries, expenseEntries]);

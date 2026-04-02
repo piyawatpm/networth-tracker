@@ -4,11 +4,7 @@ import { useMemo } from "react";
 import ReactECharts from "echarts-for-react";
 import { useTheme } from "next-themes";
 import { useCurrency } from "@/components/providers/currency-provider";
-import type { ExpenseEntry, ExpenseType } from "@/lib/utils/types";
-import {
-  EXPENSE_TYPE_LABELS,
-  EXPENSE_TYPE_COLORS,
-} from "@/lib/utils/constants";
+import type { ExpenseEntry } from "@/lib/utils/types";
 import {
   Select,
   SelectContent,
@@ -30,6 +26,8 @@ interface ComparisonViewProps {
   monthB: string;
   onMonthAChange: (v: string) => void;
   onMonthBChange: (v: string) => void;
+  getLabel: (type: string) => string;
+  getColor: (type: string) => string;
 }
 
 export function ComparisonView({
@@ -38,6 +36,8 @@ export function ComparisonView({
   monthB,
   onMonthAChange,
   onMonthBChange,
+  getLabel,
+  getColor,
 }: ComparisonViewProps) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
@@ -63,7 +63,7 @@ export function ComparisonView({
     }
 
     const data = Object.entries(catMap)
-      .map(([type, { a, b }]) => ({ type: type as ExpenseType, a, b }))
+      .map(([type, { a, b }]) => ({ type, a, b }))
       .sort((x, y) => Math.max(y.a, y.b) - Math.max(x.a, x.b))
       .slice(0, 8);
 
@@ -72,7 +72,7 @@ export function ComparisonView({
 
   const chartOption = useMemo(() => {
     const base = getCartesianBaseOption(isDark);
-    const categories = categoryData.map((d) => EXPENSE_TYPE_LABELS[d.type]);
+    const categories = categoryData.map((d) => getLabel(d.type));
 
     return {
       ...base,
@@ -169,8 +169,8 @@ export function ComparisonView({
             return (
               <div key={d.type} className="flex items-center justify-between text-xs">
                 <div className="flex items-center gap-2">
-                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: EXPENSE_TYPE_COLORS[d.type] }} />
-                  <span>{EXPENSE_TYPE_LABELS[d.type]}</span>
+                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: getColor(d.type) }} />
+                  <span>{getLabel(d.type)}</span>
                 </div>
                 <div className="flex items-center gap-3 tabular-nums">
                   <span className="text-muted-foreground">{formatCur(d.a)}</span>
