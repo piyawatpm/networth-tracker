@@ -276,7 +276,7 @@ export default function IncomePage() {
               <ReactECharts
                 option={pieOption}
                 style={{ height: "200px" }}
-                notMerge
+                notMerge lazyUpdate
               />
 
               {/* Progress bars */}

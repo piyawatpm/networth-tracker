@@ -252,7 +252,7 @@ export default function ExpensesPage() {
                 <div className="mx-auto aspect-square w-full max-w-[240px]">
                   <ReactECharts
                     option={pieOption}
-                    notMerge
+                    notMerge lazyUpdate
                     style={{ width: "100%", height: "100%" }}
                     opts={{ renderer: "svg" }}
                   />

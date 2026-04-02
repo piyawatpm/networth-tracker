@@ -648,7 +648,7 @@ export default function DashboardPage() {
               <ReactECharts
                 option={nwTrendOption}
                 style={{ height: 144, width: "100%" }}
-                notMerge
+                notMerge lazyUpdate
               />
             ) : (
               <div className="flex h-36 items-center justify-center">
@@ -736,7 +736,7 @@ export default function DashboardPage() {
             <ReactECharts
               option={dailyCashFlowOption}
               style={{ height: 160, width: "100%" }}
-              notMerge
+              notMerge lazyUpdate
             />
           </div>
         </BlurFade>
@@ -751,7 +751,7 @@ export default function DashboardPage() {
                   <ReactECharts
                     option={allocationPieOption}
                     style={{ height: 144, width: 144 }}
-                    notMerge
+                    notMerge lazyUpdate
                   />
                 </div>
                 <div className="flex-1 space-y-1.5 overflow-hidden">
@@ -778,7 +778,7 @@ export default function DashboardPage() {
             <ReactECharts
               option={incExpBarOption}
               style={{ height: 192, width: "100%" }}
-              notMerge
+              notMerge lazyUpdate
             />
           </div>
         </BlurFade>
@@ -823,7 +823,7 @@ export default function DashboardPage() {
                   <ReactECharts
                     option={incomePieOption}
                     style={{ height: 128, width: 128 }}
-                    notMerge
+                    notMerge lazyUpdate
                   />
                 </div>
                 <div className="flex-1 space-y-1.5 overflow-hidden">
@@ -852,7 +852,7 @@ export default function DashboardPage() {
                   <ReactECharts
                     option={expensePieOption}
                     style={{ height: 128, width: 128 }}
-                    notMerge
+                    notMerge lazyUpdate
                   />
                 </div>
                 <div className="flex-1 space-y-1.5 overflow-hidden">
