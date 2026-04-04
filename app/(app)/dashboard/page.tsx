@@ -530,6 +530,9 @@ export default function DashboardPage() {
             periodIncome={periodIncomeTotal}
             periodExpenses={periodExpenseTotal}
             periodInvested={periodInvested}
+            incomeEntries={periodIncome}
+            expenseEntries={periodExpenses}
+            convert={convert}
             format={format}
             delay={0.2}
           />
