@@ -22,6 +22,7 @@ import { useCurrency } from "@/components/providers/currency-provider";
 import { cn } from "@/lib/utils";
 import { getCurrencySymbol } from "@/lib/utils/types";
 import { generateSampleData } from "@/app/(app)/seed/page";
+import { SyncProvider } from "@/components/providers/sync-provider";
 
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -271,6 +272,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
 
   return (
+    <SyncProvider>
     <div className="flex min-h-screen flex-col">
       <DemoBanner />
       {/* Desktop top nav */}
@@ -353,5 +355,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       {/* Bottom padding for mobile nav */}
       <div className="h-16 md:hidden" />
     </div>
+    </SyncProvider>
   );
 }
