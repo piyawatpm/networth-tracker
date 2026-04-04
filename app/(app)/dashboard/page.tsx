@@ -274,8 +274,10 @@ export default function DashboardPage() {
   const wealthToIncomeRatio = annualizedIncome > 0 ? netWorth / annualizedIncome : 0;
 
   const passiveIncome = useMemo(() => {
-    const passiveTypes = ["dividend", "crypto_yield", "interest", "rental"];
-    return periodIncome.filter((e) => passiveTypes.includes(e.type)).reduce((s, e) => s + convert(e.amount, e.currency), 0);
+    const defaultPassive = ["dividend", "crypto_yield", "interest", "rental"];
+    return periodIncome
+      .filter((e) => e.isPassive === true || (e.isPassive === undefined && defaultPassive.includes(e.type)))
+      .reduce((s, e) => s + convert(e.amount, e.currency), 0);
   }, [periodIncome, convert]);
 
   const passiveAnnualized = useMemo(() => {

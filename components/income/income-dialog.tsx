@@ -35,6 +35,7 @@ import type {
   RecurringIncome,
   RecurringFrequency,
 } from "@/lib/utils/types";
+import { DEFAULT_PASSIVE_TYPES } from "@/lib/utils/types";
 
 interface IncomeDialogProps {
   entry?: IncomeEntry;
@@ -55,19 +56,22 @@ export function IncomeDialog({ entry, onSave, onCreateRecurring, trigger, catego
   const [source, setSource] = useState(entry?.source ?? "");
   const [date, setDate] = useState(entry?.date ?? getSydneyDateString());
   const [notes, setNotes] = useState(entry?.notes ?? "");
+  const [isPassive, setIsPassive] = useState(entry?.isPassive ?? DEFAULT_PASSIVE_TYPES.includes(entry?.type ?? ""));
   const [makeRecurring, setMakeRecurring] = useState(false);
   const [frequency, setFrequency] = useState<RecurringFrequency>("fortnightly");
   const [touched, setTouched] = useState(false);
 
   useEffect(() => {
     if (open) {
-      setType(entry?.type ?? (categoryTypes?.[0] ?? "salary"));
+      const initType = entry?.type ?? (categoryTypes?.[0] ?? "salary");
+      setType(initType);
       setDescription(entry?.description ?? "");
       setAmount(entry?.amount?.toString() ?? "");
       setCurrency(entry?.currency ?? "AUD");
       setSource(entry?.source ?? "");
       setDate(entry?.date ?? getSydneyDateString());
       setNotes(entry?.notes ?? "");
+      setIsPassive(entry?.isPassive ?? DEFAULT_PASSIVE_TYPES.includes(initType));
       setMakeRecurring(false);
       setFrequency("fortnightly");
       setTouched(false);
@@ -93,6 +97,7 @@ export function IncomeDialog({ entry, onSave, onCreateRecurring, trigger, catego
       source: source.trim(),
       date,
       notes: notes.trim(),
+      isPassive,
       isRecurring: makeRecurring || entry?.isRecurring,
       recurringId: entry?.recurringId,
       createdAt: entry?.createdAt ?? Date.now(),
@@ -141,7 +146,7 @@ export function IncomeDialog({ entry, onSave, onCreateRecurring, trigger, catego
           {/* Type */}
           <div className="grid gap-1.5">
             <Label htmlFor="income-type">Type</Label>
-            <Select value={type} onValueChange={(v: string | null) => v && setType(v)}>
+            <Select value={type} onValueChange={(v: string | null) => { if (v) { setType(v); setIsPassive(DEFAULT_PASSIVE_TYPES.includes(v)); } }}>
               <SelectTrigger className="w-full">
                 <span>{LABELS[type] ?? type}</span>
               </SelectTrigger>
@@ -242,6 +247,18 @@ export function IncomeDialog({ entry, onSave, onCreateRecurring, trigger, catego
               )}
             </div>
           )}
+
+          {/* Passive income toggle */}
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="checkbox"
+              checked={isPassive}
+              onChange={(e) => setIsPassive(e.target.checked)}
+              className="rounded border-border"
+            />
+            <span>Passive income</span>
+            <span className="text-[10px] text-muted-foreground">(dividends, interest, rental, yield...)</span>
+          </label>
 
           {/* Notes */}
           <div className="grid gap-1.5">

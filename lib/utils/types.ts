@@ -84,10 +84,14 @@ export interface IncomeEntry {
   date: string;
   source: string;
   notes: string;
+  isPassive?: boolean;
   isRecurring?: boolean;
   recurringId?: string;
   createdAt: number;
 }
+
+/** Default income types considered passive (used when isPassive is undefined) */
+export const DEFAULT_PASSIVE_TYPES = ["dividend", "crypto_yield", "interest", "rental"];
 
 export interface CustomIncomeCategory {
   id: string;
