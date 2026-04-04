@@ -51,6 +51,9 @@ import {
 } from "./_components/upcoming-recurring";
 import { AssetBreakdown } from "./_components/asset-breakdown";
 import { IncomeExpenseCharts } from "./_components/income-expense-charts";
+import { WorldDistributionChart } from "./_components/world-distribution-chart";
+import { MoneyFlowCard } from "./_components/money-flow-card";
+import { totalInvestedInRange } from "@/lib/utils/portfolio-transactions";
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -163,6 +166,22 @@ export default function DashboardPage() {
   const portfolioTotal = useMemo(() => portfolioHoldings.reduce((s, h) => s + convert(h.currentValue, h.currency), 0), [portfolioHoldings, convert]);
   const cryptoTotal = useMemo(() => convert(getTotalCryptoValueUsd(cryptoHoldings), "USD"), [cryptoHoldings, convert]);
 
+  const normalTotal = useMemo(
+    () =>
+      portfolioHoldings
+        .filter((h) => h.accountType === "normal")
+        .reduce((s, h) => s + convert(h.currentValue, h.currency), 0),
+    [portfolioHoldings, convert],
+  );
+
+  const superTotal = useMemo(
+    () =>
+      portfolioHoldings
+        .filter((h) => h.accountType === "super")
+        .reduce((s, h) => s + convert(h.currentValue, h.currency), 0),
+    [portfolioHoldings, convert],
+  );
+
   const { owedToMe, iOwe } = useMemo(() => {
     let owedToMe = 0, iOwe = 0;
     for (const d of debtRecords) {
@@ -197,6 +216,19 @@ export default function DashboardPage() {
   const periodExpenseTotal = useMemo(() => sumConverted(periodExpenses, convert), [periodExpenses, convert]);
   const prevIncomeTotal = useMemo(() => sumConverted(prevPeriodIncome, convert), [prevPeriodIncome, convert]);
   const prevExpenseTotal = useMemo(() => sumConverted(prevPeriodExpenses, convert), [prevPeriodExpenses, convert]);
+
+  const periodInvested = useMemo(() => {
+    const today = getSydneyDateString();
+    let from: string;
+    if (period === "W") {
+      from = getWeekStart();
+    } else if (period === "M") {
+      from = today.slice(0, 7) + "-01";
+    } else {
+      from = today.slice(0, 4) + "-01-01";
+    }
+    return totalInvestedInRange(from, today, convert);
+  }, [period, convert]);
 
   const netCashFlow = periodIncomeTotal - periodExpenseTotal;
   const savingsRate = periodIncomeTotal > 0 ? ((periodIncomeTotal - periodExpenseTotal) / periodIncomeTotal) * 100 : 0;
@@ -449,6 +481,29 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
         <AssetBreakdown rows={assetRows} hiddenSections={hiddenSections} onToggleSection={toggleSection} format={format} delay={D * 0.5} />
         <NetWorthChart nwTrendData={nwTrendData} delay={D} />
+      </div>
+
+      {/* 3b. WORLD DISTRIBUTION + MONEY FLOW */}
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
+        <div className="md:col-span-5">
+          <WorldDistributionChart
+            normalTotal={normalTotal}
+            cryptoTotal={cryptoTotal}
+            superTotal={superTotal}
+            format={format}
+            delay={0.15}
+          />
+        </div>
+        <div className="md:col-span-7">
+          <MoneyFlowCard
+            periodLabel={period === "W" ? "This Week" : period === "M" ? "This Month" : "This Year"}
+            periodIncome={periodIncomeTotal}
+            periodExpenses={periodExpenseTotal}
+            periodInvested={periodInvested}
+            format={format}
+            delay={0.2}
+          />
+        </div>
       </div>
 
       {/* 4. GOAL SECTION */}
