@@ -11,21 +11,7 @@ import {
 import type { CachedRates } from "@/lib/utils/types";
 import { getCurrencySymbol, DEFAULT_CURRENCIES } from "@/lib/utils/types";
 import { fetchFxRates, convertCurrency, formatCurrency } from "@/lib/utils/fx";
-
-const ENABLED_KEY = "enabled_currencies";
-
-function getEnabledCurrencies(): string[] {
-  try {
-    const saved = localStorage.getItem(ENABLED_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-    }
-  } catch {
-    // ignore
-  }
-  return DEFAULT_CURRENCIES;
-}
+import { useCloudStorage } from "./data-provider";
 
 interface CurrencyContextValue {
   currency: string;
@@ -44,23 +30,9 @@ interface CurrencyContextValue {
 const CurrencyContext = createContext<CurrencyContextValue | null>(null);
 
 export function CurrencyProvider({ children }: { children: ReactNode }) {
-  const [currency, setCurrencyState] = useState<string>("AUD");
-  const [enabledCurrencies, setEnabledState] = useState<string[]>(DEFAULT_CURRENCIES);
+  const [currency, setCurrencyCloud] = useCloudStorage<string>("preferred_currency", "AUD");
+  const [enabledCurrencies, setEnabledCurrenciesCloud] = useCloudStorage<string[]>("enabled_currencies", DEFAULT_CURRENCIES);
   const [cachedRates, setCachedRates] = useState<CachedRates | null>(null);
-
-  // Hydrate from localStorage
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem("preferred_currency");
-      const enabled = getEnabledCurrencies();
-      setEnabledState(enabled);
-      if (saved && enabled.includes(saved)) {
-        setCurrencyState(saved);
-      }
-    } catch {
-      // Ignore
-    }
-  }, []);
 
   // Fetch FX rates
   useEffect(() => {
@@ -70,26 +42,16 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const setCurrency = useCallback((c: string) => {
-    setCurrencyState(c);
-    try {
-      localStorage.setItem("preferred_currency", c);
-    } catch {
-      // Ignore
-    }
-  }, []);
+    setCurrencyCloud(c);
+  }, [setCurrencyCloud]);
 
   const setEnabledCurrencies = useCallback((currencies: string[]) => {
-    setEnabledState(currencies);
-    try {
-      localStorage.setItem(ENABLED_KEY, JSON.stringify(currencies));
-    } catch {
-      // Ignore
-    }
+    setEnabledCurrenciesCloud(currencies);
     // If current currency is no longer enabled, switch to first enabled
     if (!currencies.includes(currency)) {
       setCurrency(currencies[0] ?? "USD");
     }
-  }, [currency, setCurrency]);
+  }, [currency, setCurrency, setEnabledCurrenciesCloud]);
 
   const cycleCurrency = useCallback(() => {
     const idx = enabledCurrencies.indexOf(currency);

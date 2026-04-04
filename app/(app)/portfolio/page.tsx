@@ -5,7 +5,6 @@ import { useCloudStorage } from "@/components/providers/data-provider";
 import { useCurrency } from "@/components/providers/currency-provider";
 import type { PortfolioHolding, HoldingType, AccountType, PortfolioTransaction } from "@/lib/utils/types";
 import { getSydneyDateString } from "@/lib/utils/timezone";
-import { addTransaction, getTransactions } from "@/lib/utils/portfolio-transactions";
 import { TransactionHistory } from "@/components/portfolio/transaction-history";
 import {
   getPriceCache,
@@ -64,13 +63,12 @@ export default function PortfolioPage() {
   const [lastFetchStatus, setLastFetchStatus] = useState<string | null>(null);
   const [updateLog, setUpdateLog] = useState<PriceUpdateLog[]>([]);
   const [logHoldingId, setLogHoldingId] = useState<string | null>(null);
-  const [transactions, setTransactions] = useState<PortfolioTransaction[]>([]);
+  const [transactions, setTransactions] = useCloudStorage<PortfolioTransaction[]>("portfolio_transactions", []);
   const [txHistoryHoldingId, setTxHistoryHoldingId] = useState<string | null>(null);
 
   useEffect(() => {
     setPriceCacheState(getPriceCache());
     setUpdateLog(getUpdateLog());
-    setTransactions(getTransactions());
   }, []);
 
   const fetchPrices = useCallback(
@@ -317,8 +315,7 @@ export default function PortfolioPage() {
   }, [snapshots, includeSuper, trendPeriod]);
 
   function handleTransaction(tx: PortfolioTransaction) {
-    addTransaction(tx);
-    setTransactions(getTransactions());
+    setTransactions((prev) => [tx, ...prev]);
     setHoldings((prev) =>
       prev.map((h) => {
         if (h.id !== tx.holdingId) return h;
@@ -364,8 +361,7 @@ export default function PortfolioPage() {
         notes: "Initial holding",
         createdAt: Date.now(),
       };
-      addTransaction(tx);
-      setTransactions(getTransactions());
+      setTransactions((prev) => [tx, ...prev]);
     }
   }
 

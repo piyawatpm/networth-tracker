@@ -28,57 +28,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-// ---------------------------------------------------------------------------
-// localStorage keys we manage
-// ---------------------------------------------------------------------------
-const ALL_STORAGE_KEYS = [
-  "income_entries",
-  "expense_entries",
-  "crypto_csv_text",
-  "crypto_csv_uploaded_at",
-  "crypto_exchange_overrides",
-  "crypto_stablecoin_tags",
-  "crypto_prices_cache",
-  "portfolio_holdings",
-  "portfolio_transactions",
-  "portfolio_snapshots",
-  "fund_allocations",
-  "debt_records",
-  "debt_transactions",
-  "preferred_currency",
-  "enabled_currencies",
-  "fx_rates_cache",
-  "networth_snapshots",
-  "networth_goal",
-  "networth_goals",
-  "price_cache",
-  "price_update_log",
-  "recurring_expense_templates",
-  "recurring_income_templates",
-  "custom_expense_categories",
-  "custom_income_categories",
-  "dashboard_hidden_sections",
-] as const;
-
-function getStorageSize(): string {
-  let total = 0;
-  for (const key of ALL_STORAGE_KEYS) {
-    const item = localStorage.getItem(key);
-    if (item) total += item.length * 2; // UTF-16
-  }
-  if (total > 1_000_000) return `${(total / 1_000_000).toFixed(1)} MB`;
-  if (total > 1_000) return `${(total / 1_000).toFixed(1)} KB`;
-  return `${total} B`;
-}
-
-function getKeyCount(): number {
-  let count = 0;
-  for (const key of ALL_STORAGE_KEYS) {
-    if (localStorage.getItem(key)) count++;
-  }
-  return count;
-}
+import { createClient } from "@/lib/supabase/client";
 
 // ---------------------------------------------------------------------------
 // Page
@@ -91,68 +41,58 @@ export default function SettingsPage() {
 
   const [status, setStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
-  const [storageInfo, setStorageInfo] = useState<{ size: string; keys: number } | null>(null);
-
-  // Refresh storage info
-  function refreshStorage() {
-    setStorageInfo({ size: getStorageSize(), keys: getKeyCount() });
-  }
-
-  // Show storage info on first render
-  if (typeof window !== "undefined" && !storageInfo) {
-    refreshStorage();
-  }
 
   // ---- Export ----------------------------------------------------------------
-  function handleExport() {
-    const data: Record<string, unknown> = {};
-    for (const key of ALL_STORAGE_KEYS) {
-      const item = localStorage.getItem(key);
-      if (item) {
-        try {
-          data[key] = JSON.parse(item);
-        } catch {
-          data[key] = item;
-        }
+  async function handleExport() {
+    try {
+      const supabase = createClient();
+      const { data } = await supabase.from("app_data").select("key, value");
+      if (!data) return;
+      const obj: Record<string, unknown> = {};
+      for (const row of data) {
+        try { obj[row.key] = JSON.parse(row.value); } catch { obj[row.key] = row.value; }
       }
+
+      const json = JSON.stringify(obj, null, 2);
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `networth-tracker-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      setStatus({ type: "success", message: "Backup exported successfully" });
+      setTimeout(() => setStatus(null), 3000);
+    } catch {
+      setStatus({ type: "error", message: "Failed to export data" });
+      setTimeout(() => setStatus(null), 5000);
     }
-
-    const json = JSON.stringify(data, null, 2);
-    const blob = new Blob([json], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `networth-tracker-backup-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-
-    setStatus({ type: "success", message: "Backup exported successfully" });
-    setTimeout(() => setStatus(null), 3000);
   }
 
   // ---- Import ----------------------------------------------------------------
   function handleImport(file: File) {
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       try {
-        const data = JSON.parse(e.target?.result as string);
-        if (typeof data !== "object" || data === null) {
+        const obj = JSON.parse(e.target?.result as string);
+        if (typeof obj !== "object" || obj === null) {
           throw new Error("Invalid backup format");
         }
 
-        let importedCount = 0;
-        for (const [key, value] of Object.entries(data)) {
-          if (ALL_STORAGE_KEYS.includes(key as typeof ALL_STORAGE_KEYS[number])) {
-            localStorage.setItem(key, typeof value === "string" ? value : JSON.stringify(value));
-            importedCount++;
-          }
-        }
+        const supabase = createClient();
+        const rows = Object.entries(obj).map(([key, value]) => ({
+          key,
+          value: JSON.stringify(value),
+          updated_at: new Date().toISOString(),
+        }));
+        await supabase.from("app_data").upsert(rows, { onConflict: "key" });
 
         setStatus({
           type: "success",
-          message: `Imported ${importedCount} data entries. Reload the page to see changes.`,
+          message: `Imported ${rows.length} data entries. Reloading...`,
         });
-        refreshStorage();
+        setTimeout(() => window.location.reload(), 1000);
       } catch {
         setStatus({ type: "error", message: "Failed to import — invalid file format" });
       }
@@ -161,35 +101,48 @@ export default function SettingsPage() {
   }
 
   // ---- Clear ----------------------------------------------------------------
-  function handleClear() {
-    for (const key of ALL_STORAGE_KEYS) {
-      localStorage.removeItem(key);
+  async function handleClear() {
+    try {
+      const supabase = createClient();
+      await supabase.from("app_data").delete().neq("key", "");
+      setShowClearConfirm(false);
+      setStatus({ type: "success", message: "All data cleared. Reloading..." });
+      setTimeout(() => window.location.reload(), 1000);
+    } catch {
+      setStatus({ type: "error", message: "Failed to clear data" });
     }
-    setShowClearConfirm(false);
-    setStatus({ type: "success", message: "All data cleared. Reload the page." });
-    refreshStorage();
   }
 
   // ---- Seed sample data ---------------------------------------------------
   async function handleSeed() {
-    const { generateSampleData } = await import("@/app/(app)/seed/page");
-    const data = generateSampleData();
-    localStorage.setItem("income_entries", JSON.stringify(data.incomeEntries));
-    localStorage.setItem("expense_entries", JSON.stringify(data.expenseEntries));
-    localStorage.setItem("portfolio_holdings", JSON.stringify(data.portfolioHoldings));
-    localStorage.setItem("crypto_csv_text", JSON.stringify(data.cryptoCsvText));
-    localStorage.setItem("debt_records", JSON.stringify(data.debtRecords));
-    localStorage.setItem("debt_transactions", JSON.stringify(data.debtTransactions));
-    localStorage.setItem("networth_snapshots", JSON.stringify(data.networthSnapshots));
-    localStorage.setItem("portfolio_snapshots", JSON.stringify(data.portfolioSnapshots));
-    localStorage.setItem("networth_goals", JSON.stringify(data.networthGoals));
-    localStorage.removeItem("networth_goal");
-    localStorage.setItem("recurring_income_templates", JSON.stringify(data.recurringIncomeTemplates));
-    localStorage.setItem("recurring_expense_templates", JSON.stringify(data.recurringExpenseTemplates));
-    localStorage.setItem("price_update_log", JSON.stringify(data.priceUpdateLog));
-    localStorage.setItem("enabled_currencies", JSON.stringify(["AUD", "USD", "THB", "EUR"]));
-    setStatus({ type: "success", message: "Sample data loaded. Reload the page to see changes." });
-    refreshStorage();
+    try {
+      const { generateSampleData } = await import("@/app/(app)/seed/page");
+      const data = generateSampleData();
+      const supabase = createClient();
+
+      const rows = [
+        { key: "income_entries", value: JSON.stringify(data.incomeEntries) },
+        { key: "expense_entries", value: JSON.stringify(data.expenseEntries) },
+        { key: "portfolio_holdings", value: JSON.stringify(data.portfolioHoldings) },
+        { key: "crypto_csv_text", value: JSON.stringify(data.cryptoCsvText) },
+        { key: "debt_records", value: JSON.stringify(data.debtRecords) },
+        { key: "debt_transactions", value: JSON.stringify(data.debtTransactions) },
+        { key: "networth_snapshots", value: JSON.stringify(data.networthSnapshots) },
+        { key: "portfolio_snapshots", value: JSON.stringify(data.portfolioSnapshots) },
+        { key: "networth_goals", value: JSON.stringify(data.networthGoals) },
+        { key: "recurring_income_templates", value: JSON.stringify(data.recurringIncomeTemplates) },
+        { key: "recurring_expense_templates", value: JSON.stringify(data.recurringExpenseTemplates) },
+        { key: "price_update_log", value: JSON.stringify(data.priceUpdateLog) },
+        { key: "enabled_currencies", value: JSON.stringify(["AUD", "USD", "THB", "EUR"]) },
+      ].map((r) => ({ ...r, updated_at: new Date().toISOString() }));
+
+      await supabase.from("app_data").upsert(rows, { onConflict: "key" });
+
+      setStatus({ type: "success", message: "Sample data loaded. Reloading..." });
+      setTimeout(() => window.location.reload(), 1000);
+    } catch {
+      setStatus({ type: "error", message: "Failed to load sample data" });
+    }
   }
 
   const lastFxUpdate = ratesFetchedAt
@@ -377,16 +330,13 @@ export default function SettingsPage() {
           {/* Storage info */}
           <div className="flex items-center justify-between rounded-lg bg-secondary/50 px-4 py-3">
             <div>
-              <p className="text-sm">Local Storage</p>
+              <p className="text-sm">Cloud Storage</p>
               <p className="text-xs text-muted-foreground">
-                All data stored in your browser
+                All data stored in Supabase
               </p>
             </div>
             <div className="text-right">
-              <p className="text-sm font-mono tabular-nums">{storageInfo?.size ?? "—"}</p>
-              <p className="text-[10px] text-muted-foreground">
-                {storageInfo?.keys ?? 0} entries
-              </p>
+              <p className="text-xs text-income font-medium">Connected</p>
             </div>
           </div>
 
@@ -475,49 +425,9 @@ export default function SettingsPage() {
       </BlurFade>
 
       {/* ================================================================= */}
-      {/* Cloud Sync (Coming Soon)                                           */}
-      {/* ================================================================= */}
-      <BlurFade delay={0.2}>
-        <section className="finance-card p-6 space-y-4 opacity-60">
-          <div className="flex items-center gap-2">
-            <Cloud className="h-4 w-4 text-muted-foreground" />
-            <h2 className="text-sm font-semibold">Cloud Sync</h2>
-            <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-              Coming Soon
-            </span>
-          </div>
-
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm">Sync to Database</p>
-              <p className="text-xs text-muted-foreground">
-                Turso (SQLite) — sync data across devices
-              </p>
-            </div>
-            <Button variant="outline" size="sm" disabled className="gap-1.5">
-              <Cloud className="h-3.5 w-3.5" />
-              Connect
-            </Button>
-          </div>
-
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm">Auto Backup</p>
-              <p className="text-xs text-muted-foreground">
-                Scheduled daily backups to cloud storage
-              </p>
-            </div>
-            <Button variant="outline" size="sm" disabled>
-              Enable
-            </Button>
-          </div>
-        </section>
-      </BlurFade>
-
-      {/* ================================================================= */}
       {/* Security (Coming Soon)                                             */}
       {/* ================================================================= */}
-      <BlurFade delay={0.25}>
+      <BlurFade delay={0.2}>
         <section className="finance-card p-6 space-y-4 opacity-60">
           <div className="flex items-center gap-2">
             <Shield className="h-4 w-4 text-muted-foreground" />
@@ -556,10 +466,10 @@ export default function SettingsPage() {
       {/* ================================================================= */}
       {/* App Info                                                           */}
       {/* ================================================================= */}
-      <BlurFade delay={0.3}>
+      <BlurFade delay={0.25}>
         <div className="text-center text-xs text-muted-foreground/50 space-y-1 pb-8">
           <p>Networth Tracker v1.0</p>
-          <p>Data stored locally in your browser. Export regularly.</p>
+          <p>Data stored in Supabase. Export regularly for backups.</p>
         </div>
       </BlurFade>
 

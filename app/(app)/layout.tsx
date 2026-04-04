@@ -24,7 +24,7 @@ import { useCurrency } from "@/components/providers/currency-provider";
 import { cn } from "@/lib/utils";
 import { getCurrencySymbol } from "@/lib/utils/types";
 
-import { SyncProvider, useSyncStatus } from "@/components/providers/sync-provider";
+import { useSaveToCloud } from "@/components/providers/data-provider";
 
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -182,7 +182,7 @@ function CurrencyToggle() {
 }
 
 function SaveButton() {
-  const { syncStatus, lastSyncTime, save } = useSyncStatus();
+  const { status: syncStatus, lastSaveTime: lastSyncTime, save } = useSaveToCloud();
 
   function formatTimeAgo(ts: number | null): string {
     if (!ts) return "Never";
@@ -207,8 +207,8 @@ function SaveButton() {
     return `${hrs}h ${mins}m`;
   }
 
-  const isSyncing = syncStatus === "syncing";
-  const isSynced = syncStatus === "synced";
+  const isSyncing = syncStatus === "saving";
+  const isSynced = syncStatus === "saved";
   const isError = syncStatus === "error";
 
   return (
@@ -265,7 +265,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
 
   return (
-    <SyncProvider>
     <div className="flex min-h-screen flex-col">
       {/* Desktop top nav */}
       <header className="sticky top-0 z-50 border-b border-border/60 bg-background/80 backdrop-blur-md">
@@ -348,6 +347,5 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       {/* Bottom padding for mobile nav */}
       <div className="h-16 md:hidden" />
     </div>
-    </SyncProvider>
   );
 }

@@ -29,6 +29,7 @@ import type {
   IncomeEntry,
   ExpenseEntry,
   PortfolioHolding,
+  PortfolioTransaction,
   DebtRecord,
   DebtTransaction,
   Currency,
@@ -146,6 +147,7 @@ export default function DashboardPage() {
   const [debtTransactions] = useCloudStorage<DebtTransaction[]>("debt_transactions", []);
   const [recurringExpenses] = useCloudStorage<RecurringExpense[]>("recurring_expense_templates", []);
   const [recurringIncomes] = useCloudStorage<RecurringIncome[]>("recurring_income_templates", []);
+  const [portfolioTransactions] = useCloudStorage<PortfolioTransaction[]>("portfolio_transactions", []);
   const [nwSnapshots, setNwSnapshots] = useCloudStorage<{ date: string; value: number }[]>("networth_snapshots", []);
 
   const { convert, format, symbol } = useCurrency();
@@ -228,8 +230,8 @@ export default function DashboardPage() {
     } else {
       from = today.slice(0, 4) + "-01-01";
     }
-    return totalInvestedInRange(from, today, convert);
-  }, [period, convert]);
+    return totalInvestedInRange(portfolioTransactions, from, today, convert);
+  }, [period, convert, portfolioTransactions]);
 
   const netCashFlow = periodIncomeTotal - periodExpenseTotal;
   const savingsRate = periodIncomeTotal > 0 ? ((periodIncomeTotal - periodExpenseTotal) / periodIncomeTotal) * 100 : 0;
