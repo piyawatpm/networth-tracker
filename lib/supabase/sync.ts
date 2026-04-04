@@ -32,6 +32,7 @@ const SYNC_KEYS = [
 
 /** Push all localStorage data to Supabase */
 export async function pushToSupabase(): Promise<{ success: boolean; error?: string }> {
+  if (typeof window === "undefined") return { success: false, error: "No window" };
   try {
     const supabase = createClient();
     const rows: { key: string; value: string; updated_at: string }[] = [];
@@ -58,8 +59,46 @@ export async function pushToSupabase(): Promise<{ success: boolean; error?: stri
   }
 }
 
-/** Pull all data from Supabase into localStorage */
-export async function pullFromSupabase(): Promise<{ success: boolean; keysRestored: number; error?: string }> {
+/**
+ * Merge data from Supabase into localStorage.
+ * - Keys missing locally but present in Supabase → restore them
+ * - Keys present locally → keep local version (local wins)
+ * Returns how many keys were restored from cloud.
+ */
+export async function mergeFromSupabase(): Promise<{ success: boolean; keysRestored: number; error?: string }> {
+  if (typeof window === "undefined") return { success: false, keysRestored: 0, error: "No window" };
+  try {
+    const supabase = createClient();
+    const { data, error } = await supabase.from("app_data").select("key, value");
+
+    if (error) return { success: false, keysRestored: 0, error: error.message };
+    if (!data || data.length === 0) return { success: true, keysRestored: 0 };
+
+    let restored = 0;
+    for (const row of data) {
+      if (!SYNC_KEYS.includes(row.key)) continue;
+
+      const localValue = localStorage.getItem(row.key);
+
+      // Restore from cloud if missing locally or local is empty/default
+      if (localValue === null || localValue === "[]" || localValue === "{}") {
+        localStorage.setItem(row.key, row.value);
+        restored++;
+      }
+    }
+
+    return { success: true, keysRestored: restored };
+  } catch (e) {
+    return { success: false, keysRestored: 0, error: String(e) };
+  }
+}
+
+/**
+ * Force pull ALL data from Supabase, overwriting localStorage.
+ * Used for "Restore from Cloud" button.
+ */
+export async function forceRestoreFromSupabase(): Promise<{ success: boolean; keysRestored: number; error?: string }> {
+  if (typeof window === "undefined") return { success: false, keysRestored: 0, error: "No window" };
   try {
     const supabase = createClient();
     const { data, error } = await supabase.from("app_data").select("key, value");
@@ -79,22 +118,6 @@ export async function pullFromSupabase(): Promise<{ success: boolean; keysRestor
   } catch (e) {
     return { success: false, keysRestored: 0, error: String(e) };
   }
-}
-
-/** Check if localStorage has any meaningful data */
-export function hasLocalData(): boolean {
-  if (typeof window === "undefined") return false;
-  const criticalKeys = ["income_entries", "expense_entries", "portfolio_holdings"];
-  return criticalKeys.some((key) => {
-    const raw = localStorage.getItem(key);
-    if (!raw) return false;
-    try {
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) && parsed.length > 0;
-    } catch {
-      return false;
-    }
-  });
 }
 
 /** Get last sync timestamp from localStorage */

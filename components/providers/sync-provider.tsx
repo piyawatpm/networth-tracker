@@ -10,8 +10,7 @@ import {
 } from "react";
 import {
   pushToSupabase,
-  pullFromSupabase,
-  hasLocalData,
+  mergeFromSupabase,
   getLastSyncTime,
   setLastSyncTime,
 } from "@/lib/supabase/sync";
@@ -35,7 +34,6 @@ export function useSyncStatus() {
 export function SyncProvider({ children }: { children: React.ReactNode }) {
   const [syncStatus, setSyncStatus] = useState<"idle" | "syncing" | "synced" | "error">("idle");
   const [lastSyncTime, setLastSyncTimeState] = useState<number | null>(null);
-  const [restored, setRestored] = useState(false);
   const hasMounted = useRef(false);
 
   // Load last sync time on mount
@@ -43,36 +41,29 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     setLastSyncTimeState(getLastSyncTime());
   }, []);
 
-  // Restore from Supabase on first load if localStorage is empty
+  // Always merge from Supabase on first load — fills in missing keys
   useEffect(() => {
     if (hasMounted.current) return;
     hasMounted.current = true;
 
-    async function restore() {
-      if (hasLocalData()) {
-        setRestored(true);
-        return;
-      }
-
+    async function syncOnLoad() {
       setSyncStatus("syncing");
-      const result = await pullFromSupabase();
+      const result = await mergeFromSupabase();
+
       if (result.success && result.keysRestored > 0) {
-        setRestored(true);
+        // New data was restored from cloud — reload to pick up in hooks
         setSyncStatus("synced");
         window.location.reload();
       } else {
-        setRestored(true);
         setSyncStatus("idle");
       }
     }
 
-    restore();
+    syncOnLoad();
   }, []);
 
   // Manual save function
   const save = useCallback(async () => {
-    if (!hasLocalData()) return;
-
     setSyncStatus("syncing");
     const result = await pushToSupabase();
     if (result.success) {
@@ -89,19 +80,15 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
 
   // Save before leaving the page
   useEffect(() => {
-    if (!restored) return;
-
     function handleBeforeUnload() {
-      if (hasLocalData()) {
-        pushToSupabase();
-      }
+      pushToSupabase();
     }
     window.addEventListener("beforeunload", handleBeforeUnload);
 
     return () => {
       window.removeEventListener("beforeunload", handleBeforeUnload);
     };
-  }, [restored]);
+  }, []);
 
   return (
     <SyncContext.Provider value={{ syncStatus, lastSyncTime, save }}>
