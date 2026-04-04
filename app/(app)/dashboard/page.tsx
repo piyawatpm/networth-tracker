@@ -154,6 +154,7 @@ export default function DashboardPage() {
 
   const { convert, format, symbol } = useCurrency();
   const [period, setPeriod] = useState<Period>("M");
+  const [includeSuper, setIncludeSuper] = useState(true);
 
   // Section visibility
   const [hiddenSections, setHiddenSections] = useCloudStorage<string[]>("dashboard_hidden_sections", []);
@@ -198,7 +199,8 @@ export default function DashboardPage() {
     return { owedToMe, iOwe };
   }, [debtRecords, debtTransactions, convert]);
 
-  const totalAssets = portfolioTotal + cryptoTotal + owedToMe;
+  const activePortfolioTotal = includeSuper ? portfolioTotal : normalTotal;
+  const totalAssets = activePortfolioTotal + cryptoTotal + owedToMe;
   const netWorth = totalAssets - iOwe;
 
   // Net worth snapshots
@@ -461,11 +463,33 @@ export default function DashboardPage() {
 
       {/* 1. NET WORTH HERO */}
       <BlurFade delay={0}>
-        <section>
-          <p className="label-mono mb-2">Net Worth</p>
-          <div className="display-number">
-            <NumberTicker value={netWorth} prefix={symbol} decimalPlaces={0} className="display-number" />
+        <section className="flex items-start justify-between gap-4">
+          <div>
+            <p className="label-mono mb-2">Net Worth</p>
+            <div className="display-number">
+              <NumberTicker value={netWorth} prefix={symbol} decimalPlaces={0} className="display-number" />
+            </div>
           </div>
+          <button
+            onClick={() => setIncludeSuper(!includeSuper)}
+            className="flex items-center gap-2.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground mt-1"
+          >
+            <span className="hidden sm:inline">Include Super</span>
+            <span className="sm:hidden">Super</span>
+            <span
+              className={cn(
+                "relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors",
+                includeSuper ? "bg-income" : "bg-border"
+              )}
+            >
+              <span
+                className={cn(
+                  "inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform",
+                  includeSuper ? "translate-x-[18px]" : "translate-x-[3px]"
+                )}
+              />
+            </span>
+          </button>
         </section>
       </BlurFade>
 
