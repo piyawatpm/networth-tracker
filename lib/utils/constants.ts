@@ -173,3 +173,33 @@ export const FREQUENCY_LABELS: Record<RecurringFrequency, string> = {
   monthly: "Monthly",
   yearly: "Yearly",
 };
+
+export type FinancialWorld = "normal" | "crypto" | "super";
+
+export const INCOME_WORLD_MAP: Record<string, FinancialWorld> = {
+  salary: "normal",
+  super_employer: "super",
+  super_personal: "super",
+  arena_bot: "crypto",
+  arb_bot: "crypto",
+  uber: "normal",
+  freelance: "normal",
+  dividend: "normal",
+  crypto_yield: "crypto",
+  interest: "normal",
+  rental: "normal",
+  bonus: "normal",
+  other: "normal",
+};
+
+export const WORLD_LABELS: Record<FinancialWorld, string> = {
+  normal: "Traditional",
+  crypto: "Crypto",
+  super: "Super",
+};
+
+export const WORLD_COLORS: Record<FinancialWorld, string> = {
+  normal: "#b8860b",
+  crypto: "#2e8b57",
+  super: "#4d7cc7",
+};

@@ -167,6 +167,20 @@ export interface PortfolioHolding {
   createdAt: number;
 }
 
+export interface PortfolioTransaction {
+  id: string;
+  holdingId: string;
+  holdingName: string;
+  type: "buy" | "sell";
+  units: number;
+  pricePerUnit: number;
+  totalAmount: number;
+  currency: Currency;
+  date: string; // YYYY-MM-DD
+  notes: string;
+  createdAt: number;
+}
+
 export interface DebtRecord {
   id: string;
   person: string;
