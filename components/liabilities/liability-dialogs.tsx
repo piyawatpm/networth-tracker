@@ -209,34 +209,45 @@ export function LiabilityDialog({ debt, onSave, trigger }: LiabilityDialogProps)
 
 interface PaymentDialogProps {
   debtId: string;
+  direction: DebtDirection;
+  personName: string;
   onSave: (t: DebtTransaction) => void;
   trigger: React.ReactNode;
 }
 
-export function PaymentDialog({ debtId, onSave, trigger }: PaymentDialogProps) {
+export function PaymentDialog({ debtId, direction, personName, onSave, trigger }: PaymentDialogProps) {
   const [open, setOpen] = useState(false);
+  const [action, setAction] = useState<"pay" | "borrow">("pay");
   const [amount, setAmount] = useState("");
   const [date, setDate] = useState(getSydneyDateString());
   const [notes, setNotes] = useState("");
 
+  const isOwedToMe = direction === "owed_to_me";
+
   useEffect(() => {
     if (open) {
+      setAction("pay");
       setAmount("");
       setDate(getSydneyDateString());
       setNotes("");
     }
   }, [open]);
 
+  // Labels based on direction + action
+  const payLabel = isOwedToMe ? `${personName} Paid Back` : "I Paid Back";
+  const borrowLabel = isOwedToMe ? `${personName} Borrowed More` : "I Borrowed More";
+
   function handleSave() {
     const parsed = parseFloat(amount);
-    if (isNaN(parsed) || parsed === 0) {
-      return;
-    }
+    if (isNaN(parsed) || parsed <= 0) return;
+
+    // "pay" reduces debt (positive), "borrow" increases debt (negative)
+    const finalAmount = action === "pay" ? parsed : -parsed;
 
     const saved: DebtTransaction = {
       id: crypto.randomUUID(),
       debtId,
-      amount: parsed,
+      amount: finalAmount,
       date,
       notes: notes.trim(),
       images: [],
@@ -252,29 +263,52 @@ export function PaymentDialog({ debtId, onSave, trigger }: PaymentDialogProps) {
       <DialogTrigger render={trigger as React.JSX.Element} />
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
-          <DialogTitle>Record Payment</DialogTitle>
+          <DialogTitle>
+            {isOwedToMe ? `${personName} owes you` : `You owe ${personName}`}
+          </DialogTitle>
           <DialogDescription>
-            Enter a positive amount to reduce the debt, or a negative amount for
-            an adjustment.
+            Record a payment or additional borrowing.
           </DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-4 py-2">
+          {/* Action toggle */}
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => setAction("pay")}
+              className={`rounded-lg border p-2.5 text-sm font-medium transition-colors ${
+                action === "pay"
+                  ? "border-income bg-income/10 text-income"
+                  : "border-border text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {payLabel}
+            </button>
+            <button
+              onClick={() => setAction("borrow")}
+              className={`rounded-lg border p-2.5 text-sm font-medium transition-colors ${
+                action === "borrow"
+                  ? "border-expense bg-expense/10 text-expense"
+                  : "border-border text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {borrowLabel}
+            </button>
+          </div>
+
           {/* Amount */}
           <div className="grid gap-1.5">
             <Label htmlFor="payment-amount">Amount</Label>
             <Input
               id="payment-amount"
               type="number"
+              min="0"
               step="0.01"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               placeholder="0.00"
               className="tabular-nums"
             />
-            <p className="text-xs text-muted-foreground">
-              Positive = reduce debt, negative = add more
-            </p>
           </div>
 
           {/* Date */}
@@ -290,7 +324,7 @@ export function PaymentDialog({ debtId, onSave, trigger }: PaymentDialogProps) {
               id="payment-notes"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="e.g. Partial repayment"
+              placeholder={action === "pay" ? "e.g. Bank transfer" : "e.g. Dinner last night"}
             />
           </div>
         </div>
@@ -299,7 +333,13 @@ export function PaymentDialog({ debtId, onSave, trigger }: PaymentDialogProps) {
           <DialogClose render={<Button variant="outline" />}>
             Cancel
           </DialogClose>
-          <Button onClick={handleSave}>Record Payment</Button>
+          <Button
+            onClick={handleSave}
+            disabled={isNaN(parseFloat(amount)) || parseFloat(amount) <= 0}
+            className={action === "borrow" ? "bg-expense hover:bg-expense/90" : ""}
+          >
+            {action === "pay" ? "Record Payment" : "Record Borrowing"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

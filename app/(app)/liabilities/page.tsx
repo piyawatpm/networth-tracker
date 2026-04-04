@@ -323,11 +323,13 @@ export default function LiabilitiesPage() {
                     {!isCompleted && (
                       <PaymentDialog
                         debtId={debt.id}
+                        direction={debt.direction}
+                        personName={debt.person}
                         onSave={handleSaveTransaction}
                         trigger={
                           <Button size="sm" variant="outline" className="gap-1">
                             <Plus className="h-3.5 w-3.5" />
-                            Record Payment
+                            Add Transaction
                           </Button>
                         }
                       />
@@ -384,23 +386,31 @@ export default function LiabilitiesPage() {
                   {/* Expandable payment history */}
                   {isExpanded && payments.length > 0 && (
                     <div className="border-t border-border/60 pt-3 space-y-2">
-                      <p className="label-mono">Payment History</p>
-                      {payments.map((txn) => (
+                      <p className="label-mono">Transaction History</p>
+                      {payments.map((txn) => {
+                        const isPay = txn.amount >= 0;
+                        const txLabel = isPay
+                          ? (isOwedToMe ? "Paid back" : "You paid")
+                          : (isOwedToMe ? "Borrowed more" : "You borrowed");
+                        return (
                         <div
                           key={txn.id}
                           className="flex items-center justify-between gap-3 rounded-lg bg-muted/50 px-3 py-2"
                         >
                           <div className="min-w-0 space-y-0.5">
                             <div className="flex items-center gap-2">
+                              <span className={cn(
+                                "text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded",
+                                isPay ? "text-income bg-income/10" : "text-expense bg-expense/10"
+                              )}>
+                                {txLabel}
+                              </span>
                               <span
                                 className={cn(
                                   "text-sm font-medium tabular-nums",
-                                  txn.amount >= 0
-                                    ? "text-income"
-                                    : "text-expense"
+                                  isPay ? "text-income" : "text-expense"
                                 )}
                               >
-                                {txn.amount >= 0 ? "+" : ""}
                                 {sym}
                                 {Math.abs(txn.amount).toLocaleString("en-US", {
                                   minimumFractionDigits: 2,
@@ -433,7 +443,8 @@ export default function LiabilitiesPage() {
                             }
                           />
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
