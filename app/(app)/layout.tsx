@@ -16,13 +16,17 @@ import {
   FileSpreadsheet,
   AlertTriangle,
   X,
+  Cloud,
+  CloudOff,
+  RefreshCw,
+  Check,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useCurrency } from "@/components/providers/currency-provider";
 import { cn } from "@/lib/utils";
 import { getCurrencySymbol } from "@/lib/utils/types";
 import { generateSampleData } from "@/app/(app)/seed/page";
-import { SyncProvider } from "@/components/providers/sync-provider";
+import { SyncProvider, useSyncStatus } from "@/components/providers/sync-provider";
 
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -179,6 +183,85 @@ function CurrencyToggle() {
   );
 }
 
+function SaveButton() {
+  const { syncStatus, lastSyncTime, save } = useSyncStatus();
+
+  function formatTimeAgo(ts: number | null): string {
+    if (!ts) return "Never";
+    const diff = Date.now() - ts;
+    const mins = Math.floor(diff / 60_000);
+    if (mins < 1) return "Just now";
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    const days = Math.floor(hrs / 24);
+    return `${days}d ago`;
+  }
+
+  // Next cron: midnight UTC
+  function getNextCron(): string {
+    const now = new Date();
+    const next = new Date(now);
+    next.setUTCHours(24, 0, 0, 0); // next midnight UTC
+    const diff = next.getTime() - now.getTime();
+    const hrs = Math.floor(diff / 3_600_000);
+    const mins = Math.floor((diff % 3_600_000) / 60_000);
+    return `${hrs}h ${mins}m`;
+  }
+
+  const isSyncing = syncStatus === "syncing";
+  const isSynced = syncStatus === "synced";
+  const isError = syncStatus === "error";
+
+  return (
+    <div className="relative group">
+      <button
+        onClick={() => save()}
+        disabled={isSyncing}
+        className={cn(
+          "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors",
+          isSyncing && "bg-secondary text-muted-foreground",
+          isSynced && "bg-income/10 text-income",
+          isError && "bg-expense/10 text-expense",
+          !isSyncing && !isSynced && !isError && "bg-secondary text-secondary-foreground hover:bg-secondary/80",
+        )}
+      >
+        {isSyncing ? (
+          <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+        ) : isSynced ? (
+          <Check className="h-3.5 w-3.5" />
+        ) : isError ? (
+          <CloudOff className="h-3.5 w-3.5" />
+        ) : (
+          <Cloud className="h-3.5 w-3.5" />
+        )}
+        <span className="hidden sm:inline text-xs">
+          {isSyncing ? "Saving..." : isSynced ? "Saved" : isError ? "Failed" : "Save"}
+        </span>
+      </button>
+
+      {/* Hover tooltip */}
+      <div className="absolute right-0 top-full mt-2 w-52 rounded-lg bg-popover p-3 shadow-lg ring-1 ring-border/50 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 z-50 pointer-events-none">
+        <div className="space-y-2 text-xs">
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">Last saved</span>
+            <span className="font-mono">{formatTimeAgo(lastSyncTime)}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">Next snapshot</span>
+            <span className="font-mono">in {getNextCron()}</span>
+          </div>
+          <div className="pt-1.5 border-t border-border/50">
+            <p className="text-[10px] text-muted-foreground/60">
+              Click to save to cloud. Also auto-saves when you close the tab.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DemoBanner() {
   const [visible, setVisible] = useState(false);
   const router = useRouter();
@@ -307,6 +390,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </nav>
           </div>
           <div className="flex items-center gap-1.5">
+            <SaveButton />
             <Link
               href="/settings"
               className="flex items-center justify-center h-8 w-8 rounded-full bg-secondary text-secondary-foreground transition-colors hover:bg-secondary/80"
