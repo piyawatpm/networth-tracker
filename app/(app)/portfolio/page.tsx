@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect, useCallback } from "react";
-import { useLocalStorage } from "@/hooks/use-local-storage";
+import { useCloudStorage } from "@/components/providers/data-provider";
 import { useCurrency } from "@/components/providers/currency-provider";
 import type { PortfolioHolding, HoldingType, AccountType, PortfolioTransaction } from "@/lib/utils/types";
 import { getSydneyDateString } from "@/lib/utils/timezone";
@@ -36,15 +36,15 @@ import {
 } from "./_components/portfolio-constants";
 
 export default function PortfolioPage() {
-  const [holdings, setHoldings] = useLocalStorage<PortfolioHolding[]>(
+  const [holdings, setHoldings] = useCloudStorage<PortfolioHolding[]>(
     "portfolio_holdings",
     []
   );
-  const [snapshots, setSnapshots] = useLocalStorage<PortfolioSnapshot[]>(
+  const [snapshots, setSnapshots] = useCloudStorage<PortfolioSnapshot[]>(
     "portfolio_snapshots",
     []
   );
-  const [fundAllocations] = useLocalStorage<FundAllocations>(
+  const [fundAllocations] = useCloudStorage<FundAllocations>(
     "fund_allocations",
     {},
   );

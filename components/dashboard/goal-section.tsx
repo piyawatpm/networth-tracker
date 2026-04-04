@@ -3,7 +3,7 @@
 import { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Target, Plus, Pencil, Trash2, Check, Trophy, Sparkles } from "lucide-react";
-import { useLocalStorage } from "@/hooks/use-local-storage";
+import { useCloudStorage } from "@/components/providers/data-provider";
 import { useCurrency } from "@/components/providers/currency-provider";
 import { BlurFade } from "@/components/ui/blur-fade";
 import { Button } from "@/components/ui/button";
@@ -128,15 +128,15 @@ function GoalDialog({ goal, onSave, trigger }: {
 // ---------------------------------------------------------------------------
 
 export function GoalSection({ netWorth, symbol, format }: GoalSectionProps) {
-  const [goals, setGoals] = useLocalStorage<Goal[]>("networth_goals", []);
-  const [oldGoal, setOldGoal] = useLocalStorage<{ amount: number; currency: string; setAt: number } | null>("networth_goal", null);
+  const [goals, setGoals] = useCloudStorage<Goal[]>("networth_goals", []);
+  const [oldGoal, setOldGoal] = useCloudStorage<{ amount: number; currency: string; setAt: number } | null>("networth_goal", null);
   if (oldGoal && goals.length === 0) {
     const migrated: Goal = { id: crypto.randomUUID(), name: "Net Worth Goal", amount: oldGoal.amount, currency: oldGoal.currency, setAt: oldGoal.setAt, achievedAt: null };
     setGoals([migrated]);
     setOldGoal(null);
   }
 
-  const [snapshots] = useLocalStorage<{ date: string; value: number }[]>("networth_snapshots", []);
+  const [snapshots] = useCloudStorage<{ date: string; value: number }[]>("networth_snapshots", []);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const { convert } = useCurrency();
 

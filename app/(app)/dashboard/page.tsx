@@ -6,7 +6,7 @@ import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { BlurFade } from "@/components/ui/blur-fade";
 import { NumberTicker } from "@/components/ui/number-ticker";
-import { useLocalStorage } from "@/hooks/use-local-storage";
+import { useCloudStorage } from "@/components/providers/data-provider";
 import { useCurrency } from "@/components/providers/currency-provider";
 import { GoalSection } from "@/components/dashboard/goal-section";
 import {
@@ -138,21 +138,21 @@ function sumConverted(
 
 export default function DashboardPage() {
   // ---- Data sources -------------------------------------------------------
-  const [incomeEntries] = useLocalStorage<IncomeEntry[]>("income_entries", []);
-  const [expenseEntries] = useLocalStorage<ExpenseEntry[]>("expense_entries", []);
-  const [cryptoCsvText] = useLocalStorage<string>("crypto_csv_text", "");
-  const [portfolioHoldings] = useLocalStorage<PortfolioHolding[]>("portfolio_holdings", []);
-  const [debtRecords] = useLocalStorage<DebtRecord[]>("debt_records", []);
-  const [debtTransactions] = useLocalStorage<DebtTransaction[]>("debt_transactions", []);
-  const [recurringExpenses] = useLocalStorage<RecurringExpense[]>("recurring_expense_templates", []);
-  const [recurringIncomes] = useLocalStorage<RecurringIncome[]>("recurring_income_templates", []);
-  const [nwSnapshots, setNwSnapshots] = useLocalStorage<{ date: string; value: number }[]>("networth_snapshots", []);
+  const [incomeEntries] = useCloudStorage<IncomeEntry[]>("income_entries", []);
+  const [expenseEntries] = useCloudStorage<ExpenseEntry[]>("expense_entries", []);
+  const [cryptoCsvText] = useCloudStorage<string>("crypto_csv_text", "");
+  const [portfolioHoldings] = useCloudStorage<PortfolioHolding[]>("portfolio_holdings", []);
+  const [debtRecords] = useCloudStorage<DebtRecord[]>("debt_records", []);
+  const [debtTransactions] = useCloudStorage<DebtTransaction[]>("debt_transactions", []);
+  const [recurringExpenses] = useCloudStorage<RecurringExpense[]>("recurring_expense_templates", []);
+  const [recurringIncomes] = useCloudStorage<RecurringIncome[]>("recurring_income_templates", []);
+  const [nwSnapshots, setNwSnapshots] = useCloudStorage<{ date: string; value: number }[]>("networth_snapshots", []);
 
   const { convert, format, symbol } = useCurrency();
   const [period, setPeriod] = useState<Period>("M");
 
   // Section visibility
-  const [hiddenSections, setHiddenSections] = useLocalStorage<string[]>("dashboard_hidden_sections", []);
+  const [hiddenSections, setHiddenSections] = useCloudStorage<string[]>("dashboard_hidden_sections", []);
   const toggleSection = (key: string) => {
     setHiddenSections((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
   };

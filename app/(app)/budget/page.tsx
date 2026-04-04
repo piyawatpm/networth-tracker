@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { useLocalStorage } from "@/hooks/use-local-storage";
+import { useCloudStorage } from "@/components/providers/data-provider";
 import { useCurrency } from "@/components/providers/currency-provider";
 import type { IncomeEntry, ExpenseEntry } from "@/lib/utils/types";
 import { getCurrencySymbol } from "@/lib/utils/types";
@@ -36,8 +36,8 @@ import { exportBudgetToXls } from "@/lib/utils/export-budget";
 // ---------------------------------------------------------------------------
 
 export default function BudgetPage() {
-  const [incomeEntries] = useLocalStorage<IncomeEntry[]>("income_entries", []);
-  const [expenseEntries] = useLocalStorage<ExpenseEntry[]>("expense_entries", []);
+  const [incomeEntries] = useCloudStorage<IncomeEntry[]>("income_entries", []);
+  const [expenseEntries] = useCloudStorage<ExpenseEntry[]>("expense_entries", []);
   const { convert, format, currency: displayCurrency } = useCurrency();
 
   // Month selector

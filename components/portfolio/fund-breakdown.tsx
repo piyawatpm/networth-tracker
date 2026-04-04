@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useLocalStorage } from "@/hooks/use-local-storage";
+import { useCloudStorage } from "@/components/providers/data-provider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -56,7 +56,7 @@ export function FundBreakdown({
   holdingType,
   portfolioWeight,
 }: FundBreakdownProps) {
-  const [allocations, setAllocations] = useLocalStorage<FundAllocations>(
+  const [allocations, setAllocations] = useCloudStorage<FundAllocations>(
     "fund_allocations",
     {},
   );

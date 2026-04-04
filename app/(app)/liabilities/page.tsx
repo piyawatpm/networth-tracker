@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { useLocalStorage } from "@/hooks/use-local-storage";
+import { useCloudStorage } from "@/components/providers/data-provider";
 import { useCurrency } from "@/components/providers/currency-provider";
 import { cn } from "@/lib/utils";
 import { formatDateString } from "@/lib/utils/timezone";
@@ -65,8 +65,8 @@ function getProgressPercent(
 // ---------------------------------------------------------------------------
 
 export default function LiabilitiesPage() {
-  const [debts, setDebts] = useLocalStorage<DebtRecord[]>("debt_records", []);
-  const [transactions, setTransactions] = useLocalStorage<DebtTransaction[]>(
+  const [debts, setDebts] = useCloudStorage<DebtRecord[]>("debt_records", []);
+  const [transactions, setTransactions] = useCloudStorage<DebtTransaction[]>(
     "debt_transactions",
     []
   );

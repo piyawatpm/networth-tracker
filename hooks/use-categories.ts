@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { useLocalStorage } from "./use-local-storage";
+import { useCloudStorage } from "@/components/providers/data-provider";
 import { CHART_COLORS } from "@/lib/utils/constants";
 import { hashCode } from "@/lib/utils/entry-helpers";
 
@@ -18,7 +18,7 @@ interface UseCategoriesConfig {
 }
 
 export function useCategories({ storageKey, defaultLabels, defaultColors }: UseCategoriesConfig) {
-  const [customCategories, setCustomCategories] = useLocalStorage<CustomCategory[]>(
+  const [customCategories, setCustomCategories] = useCloudStorage<CustomCategory[]>(
     storageKey,
     [],
   );

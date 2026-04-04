@@ -3,7 +3,7 @@
 import { useState, useMemo } from "react";
 import { useTheme } from "next-themes";
 import ReactECharts from "echarts-for-react";
-import { useLocalStorage } from "@/hooks/use-local-storage";
+import { useCloudStorage } from "@/components/providers/data-provider";
 import { useCurrency } from "@/components/providers/currency-provider";
 import { useRecurringEntries } from "@/hooks/use-recurring-entries";
 import { useCategories } from "@/hooks/use-categories";
@@ -102,7 +102,7 @@ const RECURRING_EXPENSE_CONFIG = {
 // ---------------------------------------------------------------------------
 
 export default function ExpensesPage() {
-  const [rawEntries, setEntries] = useLocalStorage<ExpenseEntry[]>(
+  const [rawEntries, setEntries] = useCloudStorage<ExpenseEntry[]>(
     "expense_entries",
     [],
   );
@@ -112,7 +112,7 @@ export default function ExpensesPage() {
     [rawEntries],
   );
 
-  const [incomeEntries] = useLocalStorage<IncomeEntry[]>("income_entries", []);
+  const [incomeEntries] = useCloudStorage<IncomeEntry[]>("income_entries", []);
   const { currency, format, convert, symbol } = useCurrency();
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";

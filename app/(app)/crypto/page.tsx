@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { useTheme } from "next-themes";
-import { useLocalStorage } from "@/hooks/use-local-storage";
+import { useCloudStorage } from "@/components/providers/data-provider";
 import { useCurrency } from "@/components/providers/currency-provider";
 import {
   parseAndComputeHoldings,
@@ -28,13 +28,13 @@ import { CryptoDonut } from "./_components/crypto-donut";
 import { HoldingsBreakdown } from "./_components/holdings-breakdown";
 
 export default function CryptoPage() {
-  const [csvText, setCsvText] = useLocalStorage<string>("crypto_csv_text", "");
+  const [csvText, setCsvText] = useCloudStorage<string>("crypto_csv_text", "");
   const { convert } = useCurrency();
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
 
   // Timestamps
-  const [csvUploadedAt, setCsvUploadedAt] = useLocalStorage<number | null>(
+  const [csvUploadedAt, setCsvUploadedAt] = useCloudStorage<number | null>(
     "crypto_csv_uploaded_at",
     null,
   );
@@ -52,7 +52,7 @@ export default function CryptoPage() {
   }, []);
 
   // Exchange overrides (manual assignments persisted across CSV re-imports)
-  const [exchangeOverrides, setExchangeOverrides] = useLocalStorage<Record<string, string>>(
+  const [exchangeOverrides, setExchangeOverrides] = useCloudStorage<Record<string, string>>(
     "crypto_exchange_overrides",
     {},
   );
@@ -60,7 +60,7 @@ export default function CryptoPage() {
   const [editExchangeValue, setEditExchangeValue] = useState("");
 
   // Stablecoin tag overrides
-  const [stablecoinTags, setStablecoinTags] = useLocalStorage<Record<string, boolean>>(
+  const [stablecoinTags, setStablecoinTags] = useCloudStorage<Record<string, boolean>>(
     "crypto_stablecoin_tags",
     {},
   );

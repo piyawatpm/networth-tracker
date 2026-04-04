@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useMemo } from "react";
-import { useLocalStorage } from "./use-local-storage";
+import { useCloudStorage } from "@/components/providers/data-provider";
 import { getSydneyDateString, computeOccurrences } from "@/lib/utils/timezone";
 import { nextDay } from "@/lib/utils/entry-helpers";
 import type { RecurringFrequency } from "@/lib/utils/types";
@@ -26,7 +26,7 @@ export function useRecurringEntries<
   setEntries: (value: E[] | ((prev: E[]) => E[])) => void,
   config: UseRecurringEntriesConfig<T, E>,
 ) {
-  const [templates, setTemplates] = useLocalStorage<T[]>(config.storageKey, []);
+  const [templates, setTemplates] = useCloudStorage<T[]>(config.storageKey, []);
   const hasGenerated = useRef(false);
 
   // Stabilize config reference to avoid re-triggering effect
