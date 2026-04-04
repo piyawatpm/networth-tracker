@@ -79,7 +79,7 @@ import { ManageCategoriesDialog } from "@/components/shared/manage-categories-di
 // ---------------------------------------------------------------------------
 
 const RECURRING_EXPENSE_CONFIG = {
-  storageKey: "recurring_expenses",
+  storageKey: "recurring_expense_templates",
   createEntry: (template: RecurringExpense, date: string): ExpenseEntry => ({
     id: crypto.randomUUID(),
     type: template.type,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useRef, useCallback } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useTheme } from "next-themes";
 import ReactECharts from "echarts-for-react";
 import { useLocalStorage } from "@/hooks/use-local-storage";
@@ -74,7 +74,7 @@ import { ComparisonView } from "@/components/expenses/comparison-view";
 // ---------------------------------------------------------------------------
 
 const RECURRING_INCOME_CONFIG = {
-  storageKey: "recurring_income",
+  storageKey: "recurring_income_templates",
   createEntry: (template: RecurringIncome, date: string): IncomeEntry => ({
     id: crypto.randomUUID(),
     type: template.type,
@@ -299,7 +299,7 @@ export default function IncomePage() {
   const pagedEntries = filteredEntries.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   // Reset page when filters change
-  useMemo(() => { setPage(0); }, [typeFilter, searchQuery, sortField, sortDir]);
+  useEffect(() => { setPage(0); }, [typeFilter, searchQuery, sortField, sortDir]);
 
   // ---- Handlers -------------------------------------------------------------
 

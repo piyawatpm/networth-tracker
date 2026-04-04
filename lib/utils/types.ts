@@ -97,7 +97,7 @@ export interface CustomIncomeCategory {
 
 export interface RecurringIncome {
   id: string;
-  type: IncomeType;
+  type: string; // IncomeType or custom category id
   description: string;
   amount: number;
   currency: Currency;

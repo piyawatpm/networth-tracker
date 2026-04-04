@@ -50,7 +50,7 @@ function RecurringForm({
   const TYPES = Object.keys(INCOME_TYPE_LABELS) as IncomeType[];
   const FREQUENCIES = Object.keys(FREQUENCY_LABELS) as RecurringFrequency[];
 
-  const [type, setType] = useState<IncomeType>(template?.type ?? "salary");
+  const [type, setType] = useState<string>(template?.type ?? "salary");
   const [description, setDescription] = useState(template?.description ?? "");
   const [amount, setAmount] = useState(template?.amount?.toString() ?? "");
   const [currency, setCurrency] = useState<Currency>(template?.currency ?? "AUD");
@@ -87,8 +87,8 @@ function RecurringForm({
     <div className="grid gap-3">
       <div className="grid gap-2">
         <Label>Type</Label>
-        <Select value={type} onValueChange={(v) => v && setType(v as IncomeType)}>
-          <SelectTrigger className="w-full"><span>{INCOME_TYPE_LABELS[type]}</span></SelectTrigger>
+        <Select value={type} onValueChange={(v) => v && setType(v)}>
+          <SelectTrigger className="w-full"><span>{(INCOME_TYPE_LABELS as Record<string, string>)[type] ?? type}</span></SelectTrigger>
           <SelectContent>
             {TYPES.map((t) => (
               <SelectItem key={t} value={t}>{INCOME_TYPE_LABELS[t]}</SelectItem>

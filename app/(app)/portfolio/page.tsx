@@ -329,7 +329,7 @@ export default function PortfolioPage() {
             amountInvested: h.amountInvested + tx.totalAmount,
           };
         }
-        const fraction = tx.units / h.units;
+        const fraction = h.units > 0 ? tx.units / h.units : 1;
         return {
           ...h,
           units: h.units - tx.units,
