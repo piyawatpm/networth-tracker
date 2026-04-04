@@ -199,19 +199,33 @@ export default function DashboardPage() {
     return { owedToMe, iOwe };
   }, [debtRecords, debtTransactions, convert]);
 
-  const activePortfolioTotal = includeSuper ? portfolioTotal : normalTotal;
-  const totalAssets = activePortfolioTotal + cryptoTotal + owedToMe;
-  const netWorth = totalAssets - iOwe;
+  const netWorthWithSuper = portfolioTotal + cryptoTotal + owedToMe - iOwe;
+  const netWorthNoSuper = normalTotal + cryptoTotal + owedToMe - iOwe;
+  const netWorth = includeSuper ? netWorthWithSuper : netWorthNoSuper;
+  const totalAssets = (includeSuper ? portfolioTotal : normalTotal) + cryptoTotal + owedToMe;
 
-  // Net worth snapshots
+  // Net worth snapshots — store both with and without super
   useEffect(() => {
-    if (netWorth === 0) return; // skip before hydration
+    if (netWorthWithSuper === 0 && netWorthNoSuper === 0) return;
     const today = getSydneyDateString();
     if (nwSnapshots.some((s) => s.date === today)) return;
-    setNwSnapshots((prev) => [...prev.slice(-89), { date: today, value: netWorth }]);
-  }, [netWorth, nwSnapshots, setNwSnapshots]);
+    setNwSnapshots((prev) => [
+      ...prev.slice(-89),
+      { date: today, value: netWorthWithSuper, valueNoSuper: netWorthNoSuper },
+    ]);
+  }, [netWorthWithSuper, netWorthNoSuper, nwSnapshots, setNwSnapshots]);
 
-  const nwTrendData = useMemo(() => nwSnapshots.map((s) => ({ date: s.date.slice(5), value: s.value })), [nwSnapshots]);
+  // Pick the right value based on includeSuper toggle
+  const nwTrendData = useMemo(
+    () =>
+      nwSnapshots.map((s) => ({
+        date: s.date.slice(5),
+        value: includeSuper
+          ? s.value
+          : ((s as { valueNoSuper?: number }).valueNoSuper ?? s.value),
+      })),
+    [nwSnapshots, includeSuper],
+  );
 
   // ---- Period-filtered income/expenses ------------------------------------
 
@@ -444,6 +458,7 @@ export default function DashboardPage() {
 
   // ---- Asset breakdown rows -----------------------------------------------
 
+  const activePortfolioTotal = includeSuper ? portfolioTotal : normalTotal;
   const assetRows = useMemo(() => [
     { key: "portfolio", label: "Portfolio", value: activePortfolioTotal, negative: false },
     { key: "crypto", label: "Crypto", value: cryptoTotal, negative: false },
@@ -515,7 +530,7 @@ export default function DashboardPage() {
       {/* 3. ASSET BREAKDOWN + NET WORTH TREND */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
         <AssetBreakdown rows={assetRows} hiddenSections={hiddenSections} onToggleSection={toggleSection} format={format} delay={D * 0.5} />
-        <NetWorthChart nwTrendData={nwTrendData} format={format} delay={D} />
+        <NetWorthChart nwTrendData={nwTrendData} format={format} includeSuper={includeSuper} delay={D} />
       </div>
 
       {/* 3b. WORLD DISTRIBUTION + MONEY FLOW */}

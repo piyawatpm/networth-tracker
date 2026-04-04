@@ -17,6 +17,7 @@ type Range = "7d" | "30d" | "90d" | "all";
 export interface NetWorthChartProps {
   nwTrendData: { date: string; value: number }[];
   format: (amount: number, from?: string, compact?: boolean) => string;
+  includeSuper?: boolean;
   delay: number;
 }
 
@@ -24,7 +25,7 @@ export interface NetWorthChartProps {
 // Component
 // ---------------------------------------------------------------------------
 
-export function NetWorthChart({ nwTrendData, format, delay }: NetWorthChartProps) {
+export function NetWorthChart({ nwTrendData, format, includeSuper = true, delay }: NetWorthChartProps) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
   const [range, setRange] = useState<Range>("all");
@@ -128,7 +129,14 @@ export function NetWorthChart({ nwTrendData, format, delay }: NetWorthChartProps
         {/* Header row */}
         <div className="flex items-start justify-between mb-1">
           <div>
-            <p className="label-mono">Net Worth Trend</p>
+            <div className="flex items-center gap-2">
+              <p className="label-mono">Net Worth Trend</p>
+              {!includeSuper && (
+                <span className="text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-secondary text-muted-foreground">
+                  excl. super
+                </span>
+              )}
+            </div>
             {stats && (
               <div className="flex items-center gap-2 mt-1">
                 <span className={cn(
