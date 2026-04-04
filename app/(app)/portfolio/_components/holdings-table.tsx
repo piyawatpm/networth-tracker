@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { PortfolioHolding } from "@/lib/utils/types";
+import type { PortfolioHolding, PortfolioTransaction } from "@/lib/utils/types";
 import { HOLDING_TYPE_LABELS } from "@/lib/utils/constants";
 import { canAutoUpdate, formatTimeAgo, type PriceCache } from "@/lib/utils/prices";
 import { cn } from "@/lib/utils";
@@ -17,6 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { HoldingDialog } from "@/components/portfolio/holding-dialog";
+import { TransactionDialog } from "@/components/portfolio/transaction-dialog";
 import { FundBreakdown, type FundAllocations } from "@/components/portfolio/fund-breakdown";
 import {
   Plus,
@@ -30,6 +31,7 @@ import {
   Hand,
   History,
   Search,
+  ArrowRightLeft,
 } from "lucide-react";
 import {
   HOLDING_TYPES,
@@ -72,6 +74,9 @@ interface HoldingsTableProps {
   setEditingValue: (v: string) => void;
   setEditingValueId: (id: string | null) => void;
   onShowLog: (id: string) => void;
+  onTransaction: (tx: PortfolioTransaction) => void;
+  transactions: PortfolioTransaction[];
+  onShowTxHistory: (holdingId: string) => void;
   baseDelay: number;
 }
 
@@ -108,6 +113,9 @@ export function HoldingsTable({
   setEditingValue,
   setEditingValueId,
   onShowLog,
+  onTransaction,
+  transactions,
+  onShowTxHistory,
   baseDelay,
 }: HoldingsTableProps) {
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
@@ -379,9 +387,27 @@ export function HoldingsTable({
                           </div>
 
                           <div className="flex items-center gap-0.5">
+                            <TransactionDialog
+                              holding={h}
+                              onSave={onTransaction}
+                              trigger={
+                                <Button variant="ghost" size="icon-xs" title="Log Buy/Sell">
+                                  <ArrowRightLeft className="h-3.5 w-3.5" />
+                                </Button>
+                              }
+                            />
                             <Button
                               variant="ghost"
                               size="icon-xs"
+                              title="Transaction History"
+                              onClick={() => onShowTxHistory(h.id)}
+                            >
+                              <History className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon-xs"
+                              title="Price Update Log"
                               onClick={() => onShowLog(h.id)}
                             >
                               <History className="h-3.5 w-3.5" />

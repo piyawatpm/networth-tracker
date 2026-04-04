@@ -3,8 +3,10 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 import { useCurrency } from "@/components/providers/currency-provider";
-import type { PortfolioHolding, HoldingType, AccountType } from "@/lib/utils/types";
+import type { PortfolioHolding, HoldingType, AccountType, PortfolioTransaction } from "@/lib/utils/types";
 import { getSydneyDateString } from "@/lib/utils/timezone";
+import { addTransaction, getTransactions } from "@/lib/utils/portfolio-transactions";
+import { TransactionHistory } from "@/components/portfolio/transaction-history";
 import {
   getPriceCache,
   setPriceCache,
@@ -62,10 +64,13 @@ export default function PortfolioPage() {
   const [lastFetchStatus, setLastFetchStatus] = useState<string | null>(null);
   const [updateLog, setUpdateLog] = useState<PriceUpdateLog[]>([]);
   const [logHoldingId, setLogHoldingId] = useState<string | null>(null);
+  const [transactions, setTransactions] = useState<PortfolioTransaction[]>([]);
+  const [txHistoryHoldingId, setTxHistoryHoldingId] = useState<string | null>(null);
 
   useEffect(() => {
     setPriceCacheState(getPriceCache());
     setUpdateLog(getUpdateLog());
+    setTransactions(getTransactions());
   }, []);
 
   const fetchPrices = useCallback(
@@ -311,7 +316,31 @@ export default function PortfolioPage() {
     }));
   }, [snapshots, includeSuper, trendPeriod]);
 
+  function handleTransaction(tx: PortfolioTransaction) {
+    addTransaction(tx);
+    setTransactions(getTransactions());
+    setHoldings((prev) =>
+      prev.map((h) => {
+        if (h.id !== tx.holdingId) return h;
+        if (tx.type === "buy") {
+          return {
+            ...h,
+            units: h.units + tx.units,
+            amountInvested: h.amountInvested + tx.totalAmount,
+          };
+        }
+        const fraction = tx.units / h.units;
+        return {
+          ...h,
+          units: h.units - tx.units,
+          amountInvested: h.amountInvested * (1 - fraction),
+        };
+      }),
+    );
+  }
+
   function handleSave(h: PortfolioHolding) {
+    const isNew = !holdings.some((p) => p.id === h.id);
     setHoldings((prev) => {
       const idx = prev.findIndex((p) => p.id === h.id);
       if (idx >= 0) {
@@ -321,6 +350,23 @@ export default function PortfolioPage() {
       }
       return [...prev, h];
     });
+    if (isNew && h.units > 0 && h.amountInvested > 0) {
+      const tx: PortfolioTransaction = {
+        id: crypto.randomUUID(),
+        holdingId: h.id,
+        holdingName: h.name,
+        type: "buy",
+        units: h.units,
+        pricePerUnit: h.amountInvested / h.units,
+        totalAmount: h.amountInvested,
+        currency: h.currency,
+        date: getSydneyDateString(),
+        notes: "Initial holding",
+        createdAt: Date.now(),
+      };
+      addTransaction(tx);
+      setTransactions(getTransactions());
+    }
   }
 
   function handleDelete(id: string) {
@@ -487,6 +533,9 @@ export default function PortfolioPage() {
         setEditingValue={setEditingValue}
         setEditingValueId={setEditingValueId}
         onShowLog={setLogHoldingId}
+        onTransaction={handleTransaction}
+        transactions={transactions}
+        onShowTxHistory={setTxHistoryHoldingId}
         baseDelay={DELAY}
       />
 
@@ -496,6 +545,15 @@ export default function PortfolioPage() {
         updateLog={updateLog}
         logHoldingId={logHoldingId}
         setLogHoldingId={setLogHoldingId}
+        format={format}
+      />
+
+      {/* ── Transaction History Dialog ── */}
+      <TransactionHistory
+        holdings={holdings}
+        transactions={transactions}
+        holdingId={txHistoryHoldingId}
+        setHoldingId={setTxHistoryHoldingId}
         format={format}
       />
     </div>
