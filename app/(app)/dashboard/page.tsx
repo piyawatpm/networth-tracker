@@ -355,14 +355,17 @@ export default function DashboardPage() {
   const allocationData = useMemo(() => {
     const slices: { name: string; value: number; color: string }[] = [];
     let ci = 0;
-    for (const h of portfolioHoldings) {
+    const filteredPortfolio = includeSuper
+      ? portfolioHoldings
+      : portfolioHoldings.filter((h) => h.accountType !== "super");
+    for (const h of filteredPortfolio) {
       slices.push({ name: h.ticker || h.name, value: convert(h.currentValue, h.currency), color: CHART_COLORS[ci++ % CHART_COLORS.length] });
     }
     for (const h of cryptoHoldings) {
       slices.push({ name: h.token, value: convert(h.currentValueUsd, "USD"), color: CHART_COLORS[ci++ % CHART_COLORS.length] });
     }
     return slices.filter((s) => s.value > 0).sort((a, b) => b.value - a.value);
-  }, [portfolioHoldings, cryptoHoldings, convert]);
+  }, [portfolioHoldings, cryptoHoldings, convert, includeSuper]);
 
   // ---- Income vs Expenses bar chart data ----------------------------------
 
@@ -442,11 +445,11 @@ export default function DashboardPage() {
   // ---- Asset breakdown rows -----------------------------------------------
 
   const assetRows = useMemo(() => [
-    { key: "portfolio", label: "Portfolio", value: portfolioTotal, negative: false },
+    { key: "portfolio", label: "Portfolio", value: activePortfolioTotal, negative: false },
     { key: "crypto", label: "Crypto", value: cryptoTotal, negative: false },
     { key: "owed_to_me", label: "Owed to Me", value: owedToMe, negative: false },
     { key: "i_owe", label: "I Owe", value: -iOwe, negative: true },
-  ], [portfolioTotal, cryptoTotal, owedToMe, iOwe]);
+  ], [activePortfolioTotal, cryptoTotal, owedToMe, iOwe]);
 
   // ---- Render -------------------------------------------------------------
 
@@ -512,7 +515,7 @@ export default function DashboardPage() {
       {/* 3. ASSET BREAKDOWN + NET WORTH TREND */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
         <AssetBreakdown rows={assetRows} hiddenSections={hiddenSections} onToggleSection={toggleSection} format={format} delay={D * 0.5} />
-        <NetWorthChart nwTrendData={nwTrendData} delay={D} />
+        <NetWorthChart nwTrendData={nwTrendData} format={format} delay={D} />
       </div>
 
       {/* 3b. WORLD DISTRIBUTION + MONEY FLOW */}
