@@ -31,7 +31,7 @@ export async function fetchCryptoPrices(
   // Build CoinGecko IDs list from token symbols
   const idMap: Record<string, string> = {}; // coingecko_id → token symbol
   for (const token of tokens) {
-    if (token === "CASH") continue; // stablecoins are $1
+    if (token === "Stablecoin") continue; // stablecoins are $1
     const geckoId = COINGECKO_IDS[token] ?? token.toLowerCase();
     idMap[geckoId] = token;
   }
@@ -70,7 +70,7 @@ export function applyLivePrices(
   prices: Record<string, number>,
 ): CryptoHolding[] {
   return holdings.map((h) => {
-    if (h.token === "CASH") return h; // stablecoins stay at amount = value
+    if (h.token === "Stablecoin") return h; // stablecoins stay at amount = value
     const livePrice = prices[h.token];
     if (livePrice == null) return h; // no price found, keep cost basis
     return {

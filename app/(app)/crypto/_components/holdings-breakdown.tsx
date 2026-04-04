@@ -472,7 +472,7 @@ export function HoldingsBreakdown({
           </DialogHeader>
           <div className="space-y-2 max-h-60 overflow-y-auto py-2">
             {holdings
-              .filter((h) => h.token !== "CASH")
+              .filter((h) => h.token !== "Stablecoin")
               .map((h) => (
                 <label
                   key={h.token}

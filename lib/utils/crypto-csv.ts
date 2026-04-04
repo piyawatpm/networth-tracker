@@ -73,7 +73,7 @@ function parsePortfolioOverview(csvText: string): CryptoHolding[] {
       : (pnlUsd !== null ? currentValue - pnlUsd : currentValue);
 
     // Group stablecoins as CASH
-    const token = isStablecoin(name) ? "CASH" : name;
+    const token = isStablecoin(name) ? "Stablecoin" : name;
 
     holdings.push({
       token,
@@ -234,7 +234,7 @@ export function computeHoldings(transactions: CryptoTransaction[]): CryptoHoldin
 
   for (const tx of transactions) {
     // Group stablecoins as CASH
-    const token = STABLECOINS.has(tx.token) || isStablecoin(tx.token) ? "CASH" : tx.token;
+    const token = STABLECOINS.has(tx.token) || isStablecoin(tx.token) ? "Stablecoin" : tx.token;
 
     if (!holdingsMap.has(token)) {
       holdingsMap.set(token, { amount: 0, totalCostUsd: 0, exchanges: new Set() });
@@ -263,7 +263,7 @@ export function computeHoldings(transactions: CryptoTransaction[]): CryptoHoldin
   const holdings: CryptoHolding[] = [];
   for (const [token, data] of holdingsMap) {
     if (Math.abs(data.amount) < 0.0001) continue;
-    const estimatedValue = token === "CASH" ? data.amount : data.totalCostUsd;
+    const estimatedValue = token === "Stablecoin" ? data.amount : data.totalCostUsd;
     holdings.push({
       token,
       amount: data.amount,
@@ -361,7 +361,7 @@ export function getTotalCryptoCostUsd(holdings: CryptoHolding[]): number {
 }
 
 export function getCashValueUsd(holdings: CryptoHolding[]): number {
-  return holdings.find((h) => h.token === "CASH")?.currentValueUsd ?? 0;
+  return holdings.find((h) => h.token === "Stablecoin")?.currentValueUsd ?? 0;
 }
 
 /** Merge user-tagged stablecoins into a single CASH holding */
@@ -376,7 +376,7 @@ export function applyStablecoinTags(
   if (stableTokens.length === 0) return holdings;
 
   const cashHolding: CryptoHolding = {
-    token: "CASH",
+    token: "Stablecoin",
     amount: 0,
     totalCostUsd: 0,
     currentValueUsd: 0,
@@ -385,7 +385,7 @@ export function applyStablecoinTags(
   const result: CryptoHolding[] = [];
 
   for (const h of holdings) {
-    if (h.token === "CASH" || stableTokens.includes(h.token)) {
+    if (h.token === "Stablecoin" || stableTokens.includes(h.token)) {
       cashHolding.amount += h.amount;
       cashHolding.totalCostUsd += h.totalCostUsd;
       cashHolding.currentValueUsd += h.currentValueUsd;

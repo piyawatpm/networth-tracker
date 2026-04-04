@@ -265,7 +265,7 @@ export default function DashboardPage() {
       .filter((h) => h.type === "bond" || h.type === "other")
       .reduce((s, h) => s + convert(h.currentValue, h.currency), 0);
     const stablecoinValue = cryptoHoldings
-      .filter((h) => h.token === "CASH" || ["USDC", "USDT", "DAI", "BUSD", "FDUSD", "PYUSD", "TUSD", "USD1"].includes(h.token.toUpperCase()))
+      .filter((h) => h.token === "Stablecoin" || ["USDC", "USDT", "DAI", "BUSD", "FDUSD", "PYUSD", "TUSD", "USD1"].includes(h.token.toUpperCase()))
       .reduce((s, h) => s + convert(h.currentValueUsd, "USD"), 0);
     return cashLikePortfolio + stablecoinValue;
   }, [portfolioHoldings, cryptoHoldings, convert]);
