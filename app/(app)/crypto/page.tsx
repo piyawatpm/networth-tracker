@@ -10,6 +10,7 @@ import {
   getTotalCryptoCostUsd,
   getCashValueUsd,
   computePortfolioHistory,
+  applyStablecoinTags,
 } from "@/lib/utils/crypto-csv";
 import {
   fetchCryptoPrices,
@@ -92,43 +93,10 @@ export default function CryptoPage() {
   );
 
   // Apply stablecoin tags: merge user-tagged stablecoins into CASH
-  const taggedHoldings = useMemo(() => {
-    const stableTokens = Object.entries(stablecoinTags)
-      .filter(([, isStable]) => isStable)
-      .map(([token]) => token);
-
-    if (stableTokens.length === 0) return holdings;
-
-    const cashHolding: CryptoHolding = {
-      token: "CASH",
-      amount: 0,
-      totalCostUsd: 0,
-      currentValueUsd: 0,
-      exchange: undefined,
-    };
-    const result: CryptoHolding[] = [];
-
-    for (const h of holdings) {
-      if (h.token === "CASH" || stableTokens.includes(h.token)) {
-        cashHolding.amount += h.amount;
-        cashHolding.totalCostUsd += h.totalCostUsd;
-        cashHolding.currentValueUsd += h.currentValueUsd;
-        if (h.exchange) {
-          cashHolding.exchange = cashHolding.exchange
-            ? `${cashHolding.exchange}, ${h.exchange}`
-            : h.exchange;
-        }
-      } else {
-        result.push(h);
-      }
-    }
-
-    if (cashHolding.amount > 0.0001) {
-      result.push(cashHolding);
-    }
-
-    return result.sort((a, b) => b.currentValueUsd - a.currentValueUsd);
-  }, [holdings, stablecoinTags]);
+  const taggedHoldings = useMemo(
+    () => applyStablecoinTags(holdings, stablecoinTags),
+    [holdings, stablecoinTags],
+  );
 
   // Fetch live prices on mount (if stale) and after CSV upload
   useEffect(() => {

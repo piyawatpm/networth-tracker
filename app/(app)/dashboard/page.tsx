@@ -12,6 +12,7 @@ import { GoalSection } from "@/components/dashboard/goal-section";
 import {
   parseAndComputeHoldings,
   getTotalCryptoValueUsd,
+  applyStablecoinTags,
 } from "@/lib/utils/crypto-csv";
 import {
   getSydneyDateString,
@@ -149,6 +150,7 @@ export default function DashboardPage() {
   const [recurringIncomes] = useCloudStorage<RecurringIncome[]>("recurring_income_templates", []);
   const [portfolioTransactions] = useCloudStorage<PortfolioTransaction[]>("portfolio_transactions", []);
   const [nwSnapshots, setNwSnapshots] = useCloudStorage<{ date: string; value: number }[]>("networth_snapshots", []);
+  const [stablecoinTags] = useCloudStorage<Record<string, boolean>>("crypto_stablecoin_tags", {});
 
   const { convert, format, symbol } = useCurrency();
   const [period, setPeriod] = useState<Period>("M");
@@ -162,7 +164,8 @@ export default function DashboardPage() {
 
   // ---- Derived data -------------------------------------------------------
 
-  const cryptoHoldings = useMemo(() => (cryptoCsvText ? parseAndComputeHoldings(cryptoCsvText) : []), [cryptoCsvText]);
+  const rawCryptoHoldings = useMemo(() => (cryptoCsvText ? parseAndComputeHoldings(cryptoCsvText) : []), [cryptoCsvText]);
+  const cryptoHoldings = useMemo(() => applyStablecoinTags(rawCryptoHoldings, stablecoinTags), [rawCryptoHoldings, stablecoinTags]);
   const last6Keys = getLast6MonthKeys();
 
   const portfolioTotal = useMemo(() => portfolioHoldings.reduce((s, h) => s + convert(h.currentValue, h.currency), 0), [portfolioHoldings, convert]);

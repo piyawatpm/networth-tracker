@@ -363,3 +363,45 @@ export function getTotalCryptoCostUsd(holdings: CryptoHolding[]): number {
 export function getCashValueUsd(holdings: CryptoHolding[]): number {
   return holdings.find((h) => h.token === "CASH")?.currentValueUsd ?? 0;
 }
+
+/** Merge user-tagged stablecoins into a single CASH holding */
+export function applyStablecoinTags(
+  holdings: CryptoHolding[],
+  stablecoinTags: Record<string, boolean>,
+): CryptoHolding[] {
+  const stableTokens = Object.entries(stablecoinTags)
+    .filter(([, isStable]) => isStable)
+    .map(([token]) => token);
+
+  if (stableTokens.length === 0) return holdings;
+
+  const cashHolding: CryptoHolding = {
+    token: "CASH",
+    amount: 0,
+    totalCostUsd: 0,
+    currentValueUsd: 0,
+    exchange: undefined,
+  };
+  const result: CryptoHolding[] = [];
+
+  for (const h of holdings) {
+    if (h.token === "CASH" || stableTokens.includes(h.token)) {
+      cashHolding.amount += h.amount;
+      cashHolding.totalCostUsd += h.totalCostUsd;
+      cashHolding.currentValueUsd += h.currentValueUsd;
+      if (h.exchange) {
+        cashHolding.exchange = cashHolding.exchange
+          ? `${cashHolding.exchange}, ${h.exchange}`
+          : h.exchange;
+      }
+    } else {
+      result.push(h);
+    }
+  }
+
+  if (cashHolding.amount > 0.0001) {
+    result.push(cashHolding);
+  }
+
+  return result.sort((a, b) => b.currentValueUsd - a.currentValueUsd);
+}
