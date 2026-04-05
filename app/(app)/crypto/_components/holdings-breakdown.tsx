@@ -467,12 +467,11 @@ export function HoldingsBreakdown({
           <DialogHeader>
             <DialogTitle>Tag as Stablecoin</DialogTitle>
             <DialogDescription>
-              Tokens tagged as stablecoin will be grouped into CASH.
+              Tokens tagged as stablecoin will be grouped into &quot;Stablecoin&quot; on the dashboard.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2 max-h-60 overflow-y-auto py-2">
             {holdings
-              .filter((h) => h.token !== "Stablecoin")
               .map((h) => (
                 <label
                   key={h.token}

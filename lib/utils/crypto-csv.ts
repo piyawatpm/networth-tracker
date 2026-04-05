@@ -72,11 +72,8 @@ function parsePortfolioOverview(csvText: string): CryptoHolding[] {
       ? avgBuyPrice * amount
       : (pnlUsd !== null ? currentValue - pnlUsd : currentValue);
 
-    // Group stablecoins as CASH
-    const token = isStablecoin(name) ? "Stablecoin" : name;
-
     holdings.push({
-      token,
+      token: name,
       amount,
       totalCostUsd: Math.max(0, costBasis),
       currentValueUsd: currentValue,
@@ -233,8 +230,7 @@ export function computeHoldings(transactions: CryptoTransaction[]): CryptoHoldin
   const holdingsMap = new Map<string, { amount: number; totalCostUsd: number; exchanges: Set<string> }>();
 
   for (const tx of transactions) {
-    // Group stablecoins as CASH
-    const token = STABLECOINS.has(tx.token) || isStablecoin(tx.token) ? "Stablecoin" : tx.token;
+    const token = tx.token;
 
     if (!holdingsMap.has(token)) {
       holdingsMap.set(token, { amount: 0, totalCostUsd: 0, exchanges: new Set() });
@@ -263,7 +259,7 @@ export function computeHoldings(transactions: CryptoTransaction[]): CryptoHoldin
   const holdings: CryptoHolding[] = [];
   for (const [token, data] of holdingsMap) {
     if (Math.abs(data.amount) < 0.0001) continue;
-    const estimatedValue = token === "Stablecoin" ? data.amount : data.totalCostUsd;
+    const estimatedValue = isStablecoin(token) ? data.amount : data.totalCostUsd;
     holdings.push({
       token,
       amount: data.amount,
@@ -361,7 +357,9 @@ export function getTotalCryptoCostUsd(holdings: CryptoHolding[]): number {
 }
 
 export function getCashValueUsd(holdings: CryptoHolding[]): number {
-  return holdings.find((h) => h.token === "Stablecoin")?.currentValueUsd ?? 0;
+  return holdings
+    .filter((h) => h.token === "Stablecoin" || isStablecoin(h.token))
+    .reduce((sum, h) => sum + h.currentValueUsd, 0);
 }
 
 /** Merge user-tagged stablecoins into a single CASH holding */
