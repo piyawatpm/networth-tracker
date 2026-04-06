@@ -256,7 +256,7 @@ export default function CryptoPage() {
 
   // ── Portfolio view ────────────────────────────────────────
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 overflow-x-hidden">
       <PriceStatus
         filteredValueUsd={filteredValueUsd}
         filteredCostUsd={filteredCostUsd}

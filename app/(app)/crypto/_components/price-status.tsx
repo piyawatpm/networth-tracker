@@ -101,7 +101,7 @@ export function PriceStatus({
 
       {/* Metrics tile */}
       <BlurFade delay={0.06}>
-        <div className="finance-card flex flex-col divide-y divide-border/60 sm:flex-row sm:divide-x sm:divide-y-0">
+        <div className="finance-card grid grid-cols-2 divide-y divide-border/60 sm:grid-cols-5 sm:divide-y-0 sm:divide-x">
           <MetricCell label="Total Value" value={format(filteredValueUsd, "USD")} />
           <MetricCell label="Total Cost" value={format(filteredCostUsd, "USD")} />
           <MetricCell
@@ -110,7 +110,7 @@ export function PriceStatus({
             prefix={filteredPnlUsd >= 0 ? "+" : "-"}
             className={filteredPnlUsd >= 0 ? "text-income" : "text-expense"}
           />
-          <MetricCell label="Cash" value={format(filteredCashUsd, "USD")} />
+          <MetricCell label="Stablecoin" value={format(filteredCashUsd, "USD")} />
           <MetricCell label="Holdings" value={String(pricedHoldings.length)} />
         </div>
       </BlurFade>

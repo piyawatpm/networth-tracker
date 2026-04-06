@@ -242,7 +242,7 @@ export function HoldingsBreakdown({
                       </span>
                     </th>
                     <th
-                      className="px-4 pb-2 text-right font-mono text-[10px] uppercase tracking-wider text-muted-foreground font-medium cursor-pointer select-none"
+                      className="hidden sm:table-cell px-4 pb-2 text-right font-mono text-[10px] uppercase tracking-wider text-muted-foreground font-medium cursor-pointer select-none"
                       onClick={() => toggleSort("amount")}
                     >
                       <span className="inline-flex items-center justify-end gap-1">
@@ -260,7 +260,7 @@ export function HoldingsBreakdown({
                       </span>
                     </th>
                     <th
-                      className="px-4 pb-2 text-right font-mono text-[10px] uppercase tracking-wider text-muted-foreground font-medium cursor-pointer select-none"
+                      className="hidden md:table-cell px-4 pb-2 text-right font-mono text-[10px] uppercase tracking-wider text-muted-foreground font-medium cursor-pointer select-none"
                       onClick={() => toggleSort("cost")}
                     >
                       <span className="inline-flex items-center justify-end gap-1">
@@ -278,7 +278,7 @@ export function HoldingsBreakdown({
                       </span>
                     </th>
                     <th
-                      className="px-4 pb-2 text-right font-mono text-[10px] uppercase tracking-wider text-muted-foreground font-medium cursor-pointer select-none"
+                      className="hidden lg:table-cell px-4 pb-2 text-right font-mono text-[10px] uppercase tracking-wider text-muted-foreground font-medium cursor-pointer select-none"
                       onClick={() => toggleSort("exchange")}
                     >
                       <span className="inline-flex items-center justify-end gap-1">
@@ -287,7 +287,7 @@ export function HoldingsBreakdown({
                       </span>
                     </th>
                     <th
-                      className="px-6 pb-2 text-right font-mono text-[10px] uppercase tracking-wider text-muted-foreground font-medium cursor-pointer select-none"
+                      className="hidden md:table-cell px-6 pb-2 text-right font-mono text-[10px] uppercase tracking-wider text-muted-foreground font-medium cursor-pointer select-none"
                       onClick={() => toggleSort("pct")}
                     >
                       <span className="inline-flex items-center justify-end gap-1">
@@ -335,13 +335,13 @@ export function HoldingsBreakdown({
                             <span className="font-medium">{h.token}</span>
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-right tabular-nums font-mono text-xs text-muted-foreground">
+                        <td className="hidden sm:table-cell px-4 py-3 text-right tabular-nums font-mono text-xs text-muted-foreground">
                           {formatCryptoAmount(h.amount)}
                         </td>
                         <td className="px-4 py-3 text-right tabular-nums font-mono text-sm">
                           {format(h.currentValueUsd, "USD")}
                         </td>
-                        <td className="px-4 py-3 text-right tabular-nums font-mono text-xs text-muted-foreground">
+                        <td className="hidden md:table-cell px-4 py-3 text-right tabular-nums font-mono text-xs text-muted-foreground">
                           {format(h.totalCostUsd, "USD")}
                         </td>
                         <td
@@ -357,7 +357,7 @@ export function HoldingsBreakdown({
                             </span>
                           )}
                         </td>
-                        <td className="px-4 py-3 text-right text-xs text-muted-foreground">
+                        <td className="hidden lg:table-cell px-4 py-3 text-right text-xs text-muted-foreground">
                           {editingExchange === h.token ? (
                             <input
                               autoFocus
@@ -382,7 +382,7 @@ export function HoldingsBreakdown({
                             </button>
                           )}
                         </td>
-                        <td className="px-6 py-3 text-right tabular-nums font-mono text-xs text-muted-foreground">
+                        <td className="hidden md:table-cell px-6 py-3 text-right tabular-nums font-mono text-xs text-muted-foreground">
                           {pctOfPort.toFixed(1)}%
                         </td>
                       </tr>
