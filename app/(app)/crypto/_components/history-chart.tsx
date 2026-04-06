@@ -35,6 +35,53 @@ export function HistoryChart({
     return portfolioHistory.filter((s) => s.date >= cutoffStr);
   }, [portfolioHistory, trendRange]);
 
+  const chartOption = useMemo(() => {
+    const base = getCartesianBaseOption(isDark);
+    return {
+      ...base,
+      grid: { ...base.grid, left: 48, right: 8 },
+      xAxis: {
+        ...base.xAxis,
+        type: "category" as const,
+        data: filteredHistory.map((s) => {
+          const d = new Date(s.date + "T00:00:00");
+          return d.toLocaleDateString("en-AU", { day: "numeric", month: "short" });
+        }),
+        axisLabel: {
+          ...base.xAxis.axisLabel,
+          interval: Math.max(0, Math.floor(filteredHistory.length / 6) - 1),
+        },
+      },
+      yAxis: {
+        ...base.yAxis,
+        type: "value" as const,
+        axisLabel: {
+          ...base.yAxis.axisLabel,
+          formatter: (v: number) => `$${v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0)}`,
+        },
+      },
+      series: [
+        {
+          name: "Value",
+          type: "line" as const,
+          data: filteredHistory.map((s) => Math.round(s.totalValueUsd * 100) / 100),
+          smooth: true,
+          showSymbol: false,
+          lineStyle: { width: 2, color: ECHARTS_COLORS[0] },
+          areaStyle: { color: ECHARTS_COLORS[0], opacity: 0.08 },
+        },
+        {
+          name: "Cost",
+          type: "line" as const,
+          data: filteredHistory.map((s) => Math.round(s.totalCostUsd * 100) / 100),
+          smooth: true,
+          showSymbol: false,
+          lineStyle: { width: 1.5, color: ECHARTS_COLORS[3], type: "dashed" as const },
+        },
+      ],
+    };
+  }, [filteredHistory, isDark]);
+
   if (portfolioHistory.length <= 1) return null;
 
   return (
@@ -60,47 +107,13 @@ export function HistoryChart({
           </div>
         </div>
         {filteredHistory.length > 1 ? (
-          <ReactECharts
-            option={{
-              ...getCartesianBaseOption(isDark),
-              xAxis: {
-                ...getCartesianBaseOption(isDark).xAxis,
-                type: "category" as const,
-                data: filteredHistory.map((s) => {
-                  const d = new Date(s.date + "T00:00:00");
-                  return d.toLocaleDateString("en-AU", { day: "numeric", month: "short" });
-                }),
-              },
-              yAxis: {
-                ...getCartesianBaseOption(isDark).yAxis,
-                type: "value" as const,
-                axisLabel: {
-                  ...getCartesianBaseOption(isDark).yAxis.axisLabel,
-                  formatter: (v: number) => `$${v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0)}`,
-                },
-              },
-              series: [
-                {
-                  name: "Value",
-                  type: "line" as const,
-                  data: filteredHistory.map((s) => Math.round(s.totalValueUsd * 100) / 100),
-                  smooth: true,
-                  showSymbol: false,
-                  lineStyle: { width: 2, color: ECHARTS_COLORS[0] },
-                  areaStyle: { color: ECHARTS_COLORS[0], opacity: 0.08 },
-                },
-                {
-                  name: "Cost",
-                  type: "line" as const,
-                  data: filteredHistory.map((s) => Math.round(s.totalCostUsd * 100) / 100),
-                  smooth: true,
-                  showSymbol: false,
-                  lineStyle: { width: 1.5, color: ECHARTS_COLORS[3], type: "dashed" as const },
-                },
-              ],
-            }}
-            style={{ height: 240, width: "100%" }}
-          />
+          <div className="w-full overflow-hidden">
+            <ReactECharts
+              option={chartOption}
+              style={{ height: 240, width: "100%" }}
+              opts={{ renderer: "svg" }}
+            />
+          </div>
         ) : (
           <p className="text-sm text-muted-foreground text-center py-12">
             No data in this range.

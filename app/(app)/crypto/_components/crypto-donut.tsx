@@ -49,5 +49,14 @@ export function CryptoDonut({
     [base, chartData],
   );
 
-  return <ReactECharts ref={chartRef} option={option} style={{ height: 260, width: "100%" }} />;
+  return (
+    <div className="w-full overflow-hidden">
+      <ReactECharts
+        ref={chartRef}
+        option={option}
+        style={{ height: 260, width: "100%" }}
+        opts={{ renderer: "svg" }}
+      />
+    </div>
+  );
 }

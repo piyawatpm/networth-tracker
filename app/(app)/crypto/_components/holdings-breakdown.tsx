@@ -142,7 +142,7 @@ export function HoldingsBreakdown({
 
   return (
     <>
-      <div className="grid gap-8 lg:grid-cols-[320px_1fr]">
+      <div className="grid gap-6 lg:grid-cols-[minmax(280px,320px)_1fr]">
         {/* Donut chart + legend */}
         <BlurFade delay={0.12}>
           <div className="finance-card p-6">
