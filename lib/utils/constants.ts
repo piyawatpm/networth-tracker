@@ -37,6 +37,7 @@ export const HOLDING_TYPE_LABELS: Record<HoldingType, string> = {
   etf: "ETF",
   fund: "Fund",
   bond: "Bond",
+  savings: "Savings / Emergency",
   other: "Other",
 };
 

@@ -3,7 +3,7 @@ import { CHART_COLORS, HOLDING_TYPE_LABELS } from "@/lib/utils/constants";
 import { getSydneyDateString } from "@/lib/utils/timezone";
 import * as XLSX from "xlsx";
 
-export const HOLDING_TYPES: HoldingType[] = ["stock", "etf", "fund", "bond", "other"];
+export const HOLDING_TYPES: HoldingType[] = ["stock", "etf", "fund", "bond", "savings", "other"];
 export const ACCOUNT_TYPES: AccountType[] = ["normal", "super"];
 
 export const HOLDING_TYPE_COLOR_MAP: Record<HoldingType, string> = {
@@ -11,8 +11,12 @@ export const HOLDING_TYPE_COLOR_MAP: Record<HoldingType, string> = {
   etf: CHART_COLORS[1],
   fund: CHART_COLORS[2],
   bond: CHART_COLORS[3],
+  savings: CHART_COLORS[7],
   other: CHART_COLORS[4],
 };
+
+/** Types that don't need price fetching (value = balance, not units * price) */
+export const BALANCE_TYPES = new Set<HoldingType>(["savings"]);
 
 export type SortKey = "value" | "pnl" | "name" | "invested";
 

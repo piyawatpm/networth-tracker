@@ -25,7 +25,7 @@ import { useCurrency } from "@/components/providers/currency-provider";
 import { cn } from "@/lib/utils";
 import { getCurrencySymbol } from "@/lib/utils/types";
 
-import { useSaveToCloud } from "@/components/providers/data-provider";
+import { useSaveToCloud, useCloudStorage } from "@/components/providers/data-provider";
 
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -263,12 +263,42 @@ function SaveButton() {
 
 
 function SnapshotButton() {
-  const [status, setStatus] = useState<"idle" | "taking" | "done" | "error">("idle");
+  const [status, setStatus] = useState<"idle" | "taking" | "done" | "error" | "prompt">("idle");
+  const [manualHoldings, setManualHoldings] = useState<{ id: string; name: string; ticker: string; currentValue: number }[]>([]);
+  const [manualValues, setManualValues] = useState<Record<string, string>>({});
 
-  async function takeSnapshot() {
+  // Read holdings to check which need manual input
+  const [holdings] = useCloudStorage<{ id: string; name: string; ticker: string; type: string; currentValue: number }[]>("portfolio_holdings", []);
+
+  const BALANCE_TYPES = new Set(["savings"]);
+
+  function startSnapshot() {
+    // Find holdings that can't auto-update and aren't savings/emergency
+    const needsManual = (holdings ?? []).filter((h: { ticker: string; type: string }) => {
+      if (BALANCE_TYPES.has(h.type)) return false; // savings/emergency don't need updates
+      if (!h.ticker || h.ticker === "SUPER" || h.ticker.startsWith("IFM-")) return true; // can't auto-fetch
+      return false;
+    });
+
+    if (needsManual.length > 0) {
+      setManualHoldings(needsManual);
+      const initial: Record<string, string> = {};
+      for (const h of needsManual) initial[h.id] = h.currentValue.toString();
+      setManualValues(initial);
+      setStatus("prompt");
+    } else {
+      doSnapshot();
+    }
+  }
+
+  async function doSnapshot(updatedValues?: Record<string, number>) {
     setStatus("taking");
     try {
-      const res = await fetch("/api/snapshot", { method: "POST" });
+      const res = await fetch("/api/snapshot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ manualUpdates: updatedValues }),
+      });
       if (res.ok) {
         setStatus("done");
         setTimeout(() => setStatus("idle"), 2000);
@@ -282,26 +312,82 @@ function SnapshotButton() {
     }
   }
 
+  function submitManualValues() {
+    const updates: Record<string, number> = {};
+    for (const [id, val] of Object.entries(manualValues)) {
+      const parsed = parseFloat(val);
+      if (!isNaN(parsed) && parsed >= 0) updates[id] = parsed;
+    }
+    setManualHoldings([]);
+    doSnapshot(updates);
+  }
+
   return (
-    <button
-      onClick={takeSnapshot}
-      disabled={status === "taking"}
-      title="Take snapshot now"
-      className={cn(
-        "flex items-center justify-center h-8 w-8 rounded-full transition-colors",
-        status === "done" ? "bg-income/10 text-income" :
-        status === "error" ? "bg-expense/10 text-expense" :
-        "bg-secondary text-secondary-foreground hover:bg-secondary/80",
+    <>
+      <button
+        onClick={startSnapshot}
+        disabled={status === "taking"}
+        title="Take snapshot now"
+        className={cn(
+          "flex items-center justify-center h-8 w-8 rounded-full transition-colors",
+          status === "done" ? "bg-income/10 text-income" :
+          status === "error" ? "bg-expense/10 text-expense" :
+          "bg-secondary text-secondary-foreground hover:bg-secondary/80",
+        )}
+      >
+        {status === "taking" ? (
+          <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+        ) : status === "done" ? (
+          <Check className="h-3.5 w-3.5" />
+        ) : (
+          <Camera className="h-3.5 w-3.5" />
+        )}
+      </button>
+
+      {/* Manual value prompt dialog */}
+      {status === "prompt" && manualHoldings.length > 0 && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm" onClick={() => setStatus("idle")}>
+          <div className="bg-popover rounded-xl shadow-xl ring-1 ring-border/50 p-5 w-full max-w-sm mx-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-sm font-semibold mb-1">Update Values</h3>
+            <p className="text-xs text-muted-foreground mb-4">
+              Enter current values for holdings that can&apos;t auto-fetch.
+            </p>
+            <div className="space-y-3 max-h-64 overflow-y-auto">
+              {manualHoldings.map((h) => (
+                <div key={h.id} className="flex items-center gap-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium truncate">{h.name}</p>
+                    {h.ticker && <p className="text-[10px] text-muted-foreground font-mono">{h.ticker}</p>}
+                  </div>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={manualValues[h.id] ?? ""}
+                    onChange={(e) => setManualValues((prev) => ({ ...prev, [h.id]: e.target.value }))}
+                    className="w-28 h-8 rounded-md border border-border bg-background px-2 text-xs tabular-nums text-right"
+                  />
+                </div>
+              ))}
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                onClick={() => { setStatus("idle"); setManualHoldings([]); }}
+                className="px-3 py-1.5 rounded-full text-xs font-medium bg-secondary text-secondary-foreground hover:bg-secondary/80 transition-colors"
+              >
+                Skip
+              </button>
+              <button
+                onClick={submitManualValues}
+                className="px-3 py-1.5 rounded-full text-xs font-medium bg-foreground text-background hover:bg-foreground/90 transition-colors"
+              >
+                Save & Snapshot
+              </button>
+            </div>
+          </div>
+        </div>
       )}
-    >
-      {status === "taking" ? (
-        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-      ) : status === "done" ? (
-        <Check className="h-3.5 w-3.5" />
-      ) : (
-        <Camera className="h-3.5 w-3.5" />
-      )}
-    </button>
+    </>
   );
 }
 

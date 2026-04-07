@@ -276,7 +276,7 @@ export default function DashboardPage() {
 
   const liquidAssets = useMemo(() => {
     const cashLikePortfolio = portfolioHoldings
-      .filter((h) => h.type === "bond" || h.type === "other")
+      .filter((h) => h.type === "bond" || h.type === "savings" || h.type === "other")
       .reduce((s, h) => s + convert(h.currentValue, h.currency), 0);
     const stablecoinValue = cryptoHoldings
       .filter((h) => h.token === "Stablecoin" || ["USDC", "USDT", "DAI", "BUSD", "FDUSD", "PYUSD", "TUSD", "USD1"].includes(h.token.toUpperCase()))

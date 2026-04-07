@@ -71,7 +71,7 @@ export type PaymentMethod = "cash" | "debit_card" | "credit_card" | "bank_transf
 
 export type RecurringFrequency = "weekly" | "fortnightly" | "monthly" | "yearly";
 
-export type HoldingType = "stock" | "etf" | "fund" | "bond" | "other";
+export type HoldingType = "stock" | "etf" | "fund" | "bond" | "savings" | "other";
 export type AccountType = "normal" | "super";
 export type DebtDirection = "i_owe" | "owed_to_me";
 
