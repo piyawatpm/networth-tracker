@@ -340,8 +340,8 @@ export default function DebugPage() {
                 <thead>
                   <tr className="border-b border-border/60 text-left">
                     <th className="px-2 py-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Date / Time</th>
-                    <th className="px-2 py-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground text-right">Value (no Super)</th>
                     <th className="px-2 py-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground text-right">Value (w/ Super)</th>
+                    <th className="px-2 py-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground text-right">Value (no Super)</th>
                     <th className="px-2 py-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground text-right">Actions</th>
                   </tr>
                 </thead>
@@ -356,18 +356,18 @@ export default function DebugPage() {
                         </td>
                         <td className="px-2 py-1.5 text-right tabular-nums">
                           {isEditing ? <Input type="number" value={editValue} onChange={(e) => setEditValue(e.target.value)} className="h-6 w-24 text-xs tabular-nums px-1.5 ml-auto" />
-                            : s.value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            : (s.valueWithSuper ?? s.value ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </td>
                         <td className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">
                           {isEditing ? <Input type="number" value={editValue2} onChange={(e) => setEditValue2(e.target.value)} className="h-6 w-24 text-xs tabular-nums px-1.5 ml-auto" />
-                            : (s.valueWithSuper ?? s.value ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            : s.value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </td>
                         <td className="px-2 py-1.5 text-right">
                           {isEditing ? (
                             <div className="flex items-center justify-end gap-1">
                               <Button variant="ghost" size="icon-xs" onClick={() => {
                                 const v = parseFloat(editValue); const v2 = parseFloat(editValue2);
-                                if (!isNaN(v)) setPortfolioSnapshots((prev) => prev.map((snap, i) => i === idx ? { ...snap, date: editDate || snap.date, value: v, valueWithSuper: isNaN(v2) ? v : v2 } : snap));
+                                if (!isNaN(v)) setPortfolioSnapshots((prev) => prev.map((snap, i) => i === idx ? { ...snap, date: editDate || snap.date, valueWithSuper: v, value: isNaN(v2) ? v : v2 } : snap));
                                 setEditingSnapshot(null);
                               }}><Check className="h-3 w-3 text-income" /></Button>
                               <Button variant="ghost" size="icon-xs" onClick={() => setEditingSnapshot(null)}><X className="h-3 w-3" /></Button>
@@ -375,7 +375,7 @@ export default function DebugPage() {
                           ) : (
                             <div className="flex items-center justify-end gap-1">
                               <Button variant="ghost" size="icon-xs" onClick={() => {
-                                setEditingSnapshot({ type: "portfolio", idx }); setEditDate(s.date); setEditValue(s.value.toString()); setEditValue2(s.valueWithSuper.toString());
+                                setEditingSnapshot({ type: "portfolio", idx }); setEditDate(s.date); setEditValue((s.valueWithSuper ?? s.value ?? 0).toString()); setEditValue2(s.value.toString());
                               }}><Pencil className="h-3 w-3" /></Button>
                               <Button variant="ghost" size="icon-xs" className="text-destructive" onClick={() => setPortfolioSnapshots((prev) => prev.filter((_, i) => i !== idx))}>
                                 <Trash2 className="h-3 w-3" /></Button>
