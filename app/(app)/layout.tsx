@@ -18,6 +18,7 @@ import {
   CloudOff,
   RefreshCw,
   Check,
+  Camera,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useCurrency } from "@/components/providers/currency-provider";
@@ -261,6 +262,49 @@ function SaveButton() {
 }
 
 
+function SnapshotButton() {
+  const [status, setStatus] = useState<"idle" | "taking" | "done" | "error">("idle");
+
+  async function takeSnapshot() {
+    setStatus("taking");
+    try {
+      const res = await fetch("/api/snapshot", { method: "POST" });
+      if (res.ok) {
+        setStatus("done");
+        setTimeout(() => setStatus("idle"), 2000);
+      } else {
+        setStatus("error");
+        setTimeout(() => setStatus("idle"), 3000);
+      }
+    } catch {
+      setStatus("error");
+      setTimeout(() => setStatus("idle"), 3000);
+    }
+  }
+
+  return (
+    <button
+      onClick={takeSnapshot}
+      disabled={status === "taking"}
+      title="Take snapshot now"
+      className={cn(
+        "flex items-center justify-center h-8 w-8 rounded-full transition-colors",
+        status === "done" ? "bg-income/10 text-income" :
+        status === "error" ? "bg-expense/10 text-expense" :
+        "bg-secondary text-secondary-foreground hover:bg-secondary/80",
+      )}
+    >
+      {status === "taking" ? (
+        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+      ) : status === "done" ? (
+        <Check className="h-3.5 w-3.5" />
+      ) : (
+        <Camera className="h-3.5 w-3.5" />
+      )}
+    </button>
+  );
+}
+
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
 
@@ -298,6 +342,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </nav>
           </div>
           <div className="flex items-center gap-1.5">
+            <SnapshotButton />
             <SaveButton />
             <Link
               href="/settings"
