@@ -75,7 +75,7 @@ export function MonthlyTrendChart({
       };
     }
 
-    // Stacked by category (top 5 + other)
+    // Stacked bar by category (top 5 + other)
     const categoryTotals: Record<string, number> = {};
     for (const e of entries) {
       categoryTotals[e.type] = (categoryTotals[e.type] ?? 0) + convert(e.amount, e.currency);
@@ -84,17 +84,18 @@ export function MonthlyTrendChart({
     const top5 = sorted.slice(0, 5).map(([t]) => t);
     const hasOther = sorted.length > 5;
 
-    const series = top5.map((t) => ({
+    const series = top5.map((t, idx) => ({
       name: getLabel(t),
-      type: "line" as const,
+      type: "bar" as const,
       stack: "total",
-      areaStyle: { opacity: 0.3 },
-      lineStyle: { width: 1.5 },
-      itemStyle: { color: getColor(t) },
+      barMaxWidth: 28,
+      itemStyle: { color: getColor(t), borderRadius: idx === top5.length - 1 && !hasOther ? [4, 4, 0, 0] : [0, 0, 0, 0] },
       data: monthKeys.map((mk) =>
-        entries
-          .filter((e) => getMonthKey(e.date) === mk && e.type === t)
-          .reduce((sum, e) => sum + convert(e.amount, e.currency), 0),
+        Math.round(
+          entries
+            .filter((e) => getMonthKey(e.date) === mk && e.type === t)
+            .reduce((sum, e) => sum + convert(e.amount, e.currency), 0) * 100,
+        ) / 100,
       ),
     }));
 
@@ -102,15 +103,16 @@ export function MonthlyTrendChart({
       const otherTypes = new Set(sorted.slice(5).map(([t]) => t));
       series.push({
         name: "Other",
-        type: "line" as const,
+        type: "bar" as const,
         stack: "total",
-        areaStyle: { opacity: 0.2 },
-        lineStyle: { width: 1 },
-        itemStyle: { color: "#708090" },
+        barMaxWidth: 28,
+        itemStyle: { color: "#708090", borderRadius: [4, 4, 0, 0] },
         data: monthKeys.map((mk) =>
-          entries
-            .filter((e) => getMonthKey(e.date) === mk && otherTypes.has(e.type))
-            .reduce((sum, e) => sum + convert(e.amount, e.currency), 0),
+          Math.round(
+            entries
+              .filter((e) => getMonthKey(e.date) === mk && otherTypes.has(e.type))
+              .reduce((sum, e) => sum + convert(e.amount, e.currency), 0) * 100,
+          ) / 100,
         ),
       });
     }
