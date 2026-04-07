@@ -243,6 +243,7 @@ export function normalizeIncomeEntry(e: Record<string, unknown>): IncomeEntry {
     date: (e.date as string) ?? "",
     source: (e.source as string) ?? "",
     notes: (e.notes as string) ?? "",
+    isPassive: e.isPassive as boolean | undefined,
     isRecurring: (e.isRecurring as boolean) ?? false,
     recurringId: e.recurringId as string | undefined,
     createdAt: (e.createdAt as number) ?? Date.now(),
