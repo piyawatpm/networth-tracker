@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Dialog,
   DialogContent,
@@ -37,11 +37,24 @@ interface HoldingDialogProps {
   trigger: React.ReactNode;
 }
 
+interface TickerResult {
+  symbol: string;
+  name: string;
+  type: string;
+  exchange: string;
+  country: string;
+}
+
 export function HoldingDialog({ holding, onSave, trigger }: HoldingDialogProps) {
   const { enabledCurrencies } = useCurrency();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState(holding?.name ?? "");
   const [ticker, setTicker] = useState(holding?.ticker ?? "");
+  const [tickerResults, setTickerResults] = useState<TickerResult[]>([]);
+  const [showResults, setShowResults] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const resultsRef = useRef<HTMLDivElement>(null);
   const [type, setType] = useState<HoldingType>(holding?.type ?? "stock");
   const [accountType, setAccountType] = useState<AccountType>(
     holding?.accountType ?? "normal"
@@ -76,6 +89,37 @@ export function HoldingDialog({ holding, onSave, trigger }: HoldingDialogProps) 
       setNotes(holding?.notes ?? "");
     }
   }, [open, holding]);
+
+  // Ticker search with debounce
+  const searchTicker = useCallback((query: string) => {
+    if (searchTimeout.current) clearTimeout(searchTimeout.current);
+    if (query.length < 1) { setTickerResults([]); setShowResults(false); return; }
+    setSearching(true);
+    searchTimeout.current = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/ticker-search?q=${encodeURIComponent(query)}`);
+        if (res.ok) {
+          const data = await res.json();
+          setTickerResults(data.results ?? []);
+          setShowResults(true);
+        }
+      } catch { /* silent */ }
+      setSearching(false);
+    }, 300);
+  }, []);
+
+  function selectTicker(result: TickerResult) {
+    setTicker(result.symbol);
+    setName(result.name);
+    setCountry(result.country);
+    // Auto-set type based on Yahoo's quoteType
+    if (result.type === "ETF") setType("etf");
+    else if (result.type === "MUTUALFUND") setType("fund");
+    else if (result.type === "BOND") setType("bond");
+    else setType("stock");
+    setShowResults(false);
+    setTickerResults([]);
+  }
 
   function handleSave() {
     const parsedUnits = parseFloat(units);
@@ -131,27 +175,71 @@ export function HoldingDialog({ holding, onSave, trigger }: HoldingDialogProps) 
         </DialogHeader>
 
         <div className="grid gap-4 py-2">
-          {/* Name + Ticker row */}
-          <div className="grid grid-cols-[1fr_auto] gap-3">
-            <div className="grid gap-1.5">
-              <Label htmlFor="holding-name">Name</Label>
-              <Input
-                id="holding-name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Vanguard S&P 500"
-              />
+          {/* Ticker search */}
+          <div className="grid gap-1.5 relative">
+            <Label htmlFor="holding-ticker">Search Ticker / Name</Label>
+            <div className="flex gap-2">
+              <div className="flex-1 relative">
+                <Input
+                  id="holding-ticker"
+                  value={ticker}
+                  onChange={(e) => {
+                    const val = e.target.value.toUpperCase();
+                    setTicker(val);
+                    searchTicker(val);
+                  }}
+                  onFocus={() => { if (tickerResults.length > 0) setShowResults(true); }}
+                  placeholder="Search: VAS, AAPL, VOO..."
+                  className="uppercase"
+                  autoComplete="off"
+                />
+                {searching && (
+                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">
+                    searching...
+                  </span>
+                )}
+              </div>
             </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="holding-ticker">Ticker</Label>
-              <Input
-                id="holding-ticker"
-                value={ticker}
-                onChange={(e) => setTicker(e.target.value)}
-                placeholder="VOO"
-                className="w-24 uppercase"
-              />
-            </div>
+
+            {/* Search results dropdown */}
+            {showResults && tickerResults.length > 0 && (
+              <div
+                ref={resultsRef}
+                className="absolute top-full left-0 right-0 z-50 mt-1 rounded-lg border border-border bg-popover shadow-lg overflow-hidden"
+              >
+                {tickerResults.map((r) => (
+                  <button
+                    key={`${r.symbol}-${r.exchange}`}
+                    type="button"
+                    onClick={() => selectTicker(r)}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-secondary/60 transition-colors"
+                  >
+                    <span className="font-mono text-xs font-semibold w-16 shrink-0">{r.symbol}</span>
+                    <span className="text-xs truncate flex-1">{r.name}</span>
+                    <span className="text-[10px] text-muted-foreground shrink-0">{r.type}</span>
+                    <span className="text-[10px] text-muted-foreground/50 shrink-0">{r.exchange}</span>
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setShowResults(false)}
+                  className="w-full px-3 py-1.5 text-[10px] text-muted-foreground hover:bg-secondary/30 transition-colors border-t border-border/50"
+                >
+                  Close
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Name (auto-filled from search or manual) */}
+          <div className="grid gap-1.5">
+            <Label htmlFor="holding-name">Name</Label>
+            <Input
+              id="holding-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Vanguard S&P 500 ETF"
+            />
           </div>
 
           {/* Type + Account Type row */}
