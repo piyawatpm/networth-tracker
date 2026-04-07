@@ -255,138 +255,42 @@ export function HoldingsTable({
 
                 return (
                   <BlurFade key={h.id} delay={baseDelay * 6 + i * 0.03}>
-                    <div className="finance-card p-4">
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="min-w-0 flex-1 space-y-1.5">
-                          <div className="flex items-center gap-2">
-                            <h3 className="truncate text-sm font-semibold">
+                    <div className="finance-card p-4 space-y-3">
+                      {/* Row 1: Name + Actions */}
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <h3 className="text-sm font-semibold truncate max-w-[200px]">
                               {h.name}
                             </h3>
                             {h.ticker && (
-                              <span className="shrink-0 font-mono text-xs text-muted-foreground">
+                              <span className="font-mono text-[10px] text-muted-foreground">
                                 {h.ticker}
                               </span>
                             )}
-                            {/* Source currency badge */}
-                            <Badge
-                              variant="outline"
-                              className="shrink-0 px-1.5 py-0 text-[10px] font-mono"
-                            >
+                            <Badge variant="outline" className="px-1 py-0 text-[9px] font-mono">
                               {h.currency}
                             </Badge>
                             {h.link && (
-                              <a
-                                href={h.link}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
-                              >
-                                <ExternalLink className="h-3.5 w-3.5" />
+                              <a href={h.link} target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground transition-colors">
+                                <ExternalLink className="h-3 w-3" />
                               </a>
                             )}
                           </div>
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <Badge variant="secondary">
+                          <div className="flex flex-wrap items-center gap-1 mt-1">
+                            <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
                               {HOLDING_TYPE_LABELS[h.type]}
                             </Badge>
                             {h.accountType === "super" && (
-                              <Badge variant="outline">Super</Badge>
+                              <Badge variant="outline" className="text-[10px] px-1.5 py-0">Super</Badge>
                             )}
                             {h.broker && (
-                              <span className="text-xs text-muted-foreground">
-                                {h.broker}
-                              </span>
+                              <span className="text-[10px] text-muted-foreground">{h.broker}</span>
                             )}
                           </div>
                         </div>
-
-                        <div className="flex shrink-0 items-start gap-6 text-right">
-                          <div className="hidden sm:block">
-                            <p className="label-mono mb-0.5">Units</p>
-                            <p className="text-sm tabular-nums">
-                              {h.units.toLocaleString("en-US", {
-                                maximumFractionDigits: 4,
-                              })}
-                            </p>
-                          </div>
-                          <div className="hidden sm:block">
-                            <p className="label-mono mb-0.5">Invested</p>
-                            <p className="text-sm tabular-nums">
-                              {format(h.amountInvested, h.currency)}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="label-mono mb-0.5 flex items-center gap-1">
-                              Value
-                              {canAutoUpdate(h.ticker) ? (
-                                <span title="Auto-updated">
-                                  <Zap className="h-2.5 w-2.5 text-accent" />
-                                </span>
-                              ) : (
-                                <span title="Manual update">
-                                  <Hand className="h-2.5 w-2.5 text-muted-foreground/50" />
-                                </span>
-                              )}
-                            </p>
-                            {editingValueId === h.id ? (
-                              <div className="flex items-center gap-1">
-                                <Input
-                                  type="number"
-                                  value={editingValue}
-                                  onChange={(e) =>
-                                    setEditingValue(e.target.value)
-                                  }
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter") onSaveEditValue(h);
-                                    if (e.key === "Escape")
-                                      setEditingValueId(null);
-                                  }}
-                                  className="h-6 w-24 text-xs tabular-nums px-1.5"
-                                  autoFocus
-                                />
-                                <Button
-                                  variant="ghost"
-                                  size="icon-xs"
-                                  onClick={() => onSaveEditValue(h)}
-                                >
-                                  <Check className="h-3 w-3" />
-                                </Button>
-                              </div>
-                            ) : (
-                              <p
-                                className="text-sm font-semibold tabular-nums cursor-pointer hover:text-accent transition-colors"
-                                onClick={() => onStartEditValue(h)}
-                                role="button"
-                              >
-                                {format(h.currentValue, h.currency)}
-                              </p>
-                            )}
-                            {priceCache[h.ticker?.toUpperCase()] && (
-                              <p className="text-[9px] text-muted-foreground/50 mt-0.5">
-                                {formatTimeAgo(
-                                  priceCache[h.ticker.toUpperCase()].updatedAt
-                                )}
-                              </p>
-                            )}
-                          </div>
-                          <div>
-                            <p className="label-mono mb-0.5">P&L</p>
-                            <p
-                              className={cn(
-                                "text-sm font-semibold tabular-nums",
-                                pnl >= 0 ? "text-income" : "text-expense"
-                              )}
-                            >
-                              {pnl >= 0 ? "+" : ""}
-                              {format(pnl)}
-                              <span className="ml-1 text-xs font-normal">
-                                {pnl >= 0 ? "+" : ""}
-                                {pnlPct.toFixed(1)}%
-                              </span>
-                            </p>
-                          </div>
-
-                          <div className="flex items-center gap-0.5">
+                        {/* Action buttons — top right */}
+                        <div className="flex items-center gap-0.5 shrink-0">
                             <TransactionDialog
                               holding={h}
                               onSave={onTransaction}
@@ -448,6 +352,63 @@ export function HoldingsTable({
                               </Button>
                             )}
                           </div>
+                        </div>
+
+                      {/* Row 2: Value metrics */}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-right">
+                        <div className="text-left sm:text-right">
+                          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Value</p>
+                          {editingValueId === h.id ? (
+                            <div className="flex items-center gap-1">
+                              <Input
+                                type="number"
+                                value={editingValue}
+                                onChange={(e) => setEditingValue(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") onSaveEditValue(h);
+                                  if (e.key === "Escape") setEditingValueId(null);
+                                }}
+                                className="h-6 w-24 text-xs tabular-nums px-1.5"
+                                autoFocus
+                              />
+                              <Button variant="ghost" size="icon-xs" onClick={() => onSaveEditValue(h)}>
+                                <Check className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          ) : (
+                            <p
+                              className="text-sm font-semibold tabular-nums cursor-pointer hover:text-accent transition-colors inline-flex items-center gap-1"
+                              onClick={() => onStartEditValue(h)}
+                              role="button"
+                            >
+                              {format(h.currentValue, h.currency)}
+                              {canAutoUpdate(h.ticker) ? (
+                                <Zap className="h-2.5 w-2.5 text-accent" />
+                              ) : (
+                                <Hand className="h-2.5 w-2.5 text-muted-foreground/30" />
+                              )}
+                            </p>
+                          )}
+                          {priceCache[h.ticker?.toUpperCase()] && (
+                            <p className="text-[9px] text-muted-foreground/40">
+                              {formatTimeAgo(priceCache[h.ticker.toUpperCase()].updatedAt)}
+                            </p>
+                          )}
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Invested</p>
+                          <p className="text-sm tabular-nums">{format(h.amountInvested, h.currency)}</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">P&L</p>
+                          <p className={cn("text-sm font-semibold tabular-nums", pnl >= 0 ? "text-income" : "text-expense")}>
+                            {pnl >= 0 ? "+" : ""}{format(pnl)}
+                            <span className="ml-1 text-xs font-normal">{pnl >= 0 ? "+" : ""}{pnlPct.toFixed(1)}%</span>
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Units</p>
+                          <p className="text-sm tabular-nums">{h.units.toLocaleString("en-US", { maximumFractionDigits: 4 })}</p>
                         </div>
                       </div>
 
