@@ -5,7 +5,7 @@ import { useCurrency } from "@/components/providers/currency-provider";
 import { getCachedCryptoPrices } from "@/lib/utils/crypto-prices";
 import { BlurFade } from "@/components/ui/blur-fade";
 import { NumberTicker } from "@/components/ui/number-ticker";
-import { FileText } from "lucide-react";
+import { FileText, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { CryptoHolding } from "@/lib/utils/types";
 
@@ -43,6 +43,8 @@ export function PriceStatus({
   selectedTokens,
   setSelectedTokens,
   onFileSelect,
+  onRefreshPrices,
+  isRefreshing,
 }: {
   filteredValueUsd: number;
   filteredCostUsd: number;
@@ -55,6 +57,8 @@ export function PriceStatus({
   selectedTokens: Record<string, boolean>;
   setSelectedTokens: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
   onFileSelect: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onRefreshPrices?: () => void;
+  isRefreshing?: boolean;
 }) {
   const { format, convert, symbol } = useCurrency();
   const replaceInputRef = useRef<HTMLInputElement>(null);
@@ -82,13 +86,25 @@ export function PriceStatus({
               </p>
             )}
           </div>
-          <button
-            onClick={() => replaceInputRef.current?.click()}
-            className="flex items-center gap-1.5 rounded-full bg-secondary px-3 py-1.5 text-xs font-medium text-secondary-foreground transition-colors hover:bg-secondary/80"
-          >
-            <FileText className="h-3.5 w-3.5" />
-            Replace CSV
-          </button>
+          <div className="flex items-center gap-2">
+            {onRefreshPrices && (
+              <button
+                onClick={onRefreshPrices}
+                disabled={isRefreshing}
+                className="flex items-center gap-1.5 rounded-full bg-secondary px-3 py-1.5 text-xs font-medium text-secondary-foreground transition-colors hover:bg-secondary/80 disabled:opacity-50"
+              >
+                <RefreshCw className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")} />
+                {isRefreshing ? "Fetching..." : "Refresh Prices"}
+              </button>
+            )}
+            <button
+              onClick={() => replaceInputRef.current?.click()}
+              className="flex items-center gap-1.5 rounded-full bg-secondary px-3 py-1.5 text-xs font-medium text-secondary-foreground transition-colors hover:bg-secondary/80"
+            >
+              <FileText className="h-3.5 w-3.5" />
+              Replace CSV
+            </button>
+          </div>
           <input
             ref={replaceInputRef}
             type="file"

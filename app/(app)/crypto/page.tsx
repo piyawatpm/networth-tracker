@@ -145,6 +145,26 @@ export default function CryptoPage() {
     });
   }, [taggedHoldings]);
 
+  // Manual refresh prices
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const refreshPrices = useCallback(async () => {
+    if (taggedHoldings.length === 0) return;
+    setIsRefreshing(true);
+    try {
+      const mappedTokens = taggedHoldings.map((h) => getMappedTicker(h.token));
+      const prices = await fetchCryptoPrices(mappedTokens);
+      const mapped: Record<string, number> = {};
+      for (const h of taggedHoldings) {
+        const ticker = getMappedTicker(h.token);
+        if (prices[ticker]) mapped[h.token] = prices[ticker];
+      }
+      if (Object.keys(mapped).length > 0) {
+        setLivePrices(mapped);
+      }
+    } catch { /* silent */ }
+    setIsRefreshing(false);
+  }, [taggedHoldings, getMappedTicker]);
+
   // Apply live prices to holdings
   const pricedHoldings = useMemo(
     () => applyLivePrices(taggedHoldings, livePrices),
@@ -324,6 +344,8 @@ export default function CryptoPage() {
         selectedTokens={selectedTokens}
         setSelectedTokens={setSelectedTokens}
         onFileSelect={onFileSelect}
+        onRefreshPrices={refreshPrices}
+        isRefreshing={isRefreshing}
       />
 
       {/* Ticker Mapping button */}
