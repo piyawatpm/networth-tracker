@@ -71,6 +71,7 @@ import {
 import { PaymentMethodBreakdown } from "@/components/expenses/payment-method-breakdown";
 import { MonthlyTrendChart } from "@/components/shared/monthly-trend-chart";
 import { ComparisonView } from "@/components/expenses/comparison-view";
+import { ExpenseInsights } from "@/components/expenses/expense-insights";
 import { CumulativePaceChart } from "@/components/shared/cumulative-pace-chart";
 import { ManageCategoriesDialog } from "@/components/shared/manage-categories-dialog";
 
@@ -792,6 +793,8 @@ export default function ExpensesPage() {
             <div className="finance-card p-6">
               <MonthlyTrendChart entries={entries} title="Monthly Spending (12 months)" getLabel={getLabel} getColor={getColor} />
             </div>
+
+            <ExpenseInsights entries={entries} getLabel={getLabel} getColor={getColor} />
 
             <div className="finance-card p-6">
               <CumulativePaceChart entries={entries} title="Cumulative Spending" currentColor={{ dark: "#e09770", light: "#c95f3f" }} />
