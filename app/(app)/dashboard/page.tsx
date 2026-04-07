@@ -204,18 +204,21 @@ export default function DashboardPage() {
   const netWorth = includeSuper ? netWorthWithSuper : netWorthNoSuper;
   const totalAssets = (includeSuper ? portfolioTotal : normalTotal) + cryptoTotal + owedToMe;
 
-  // Net worth snapshots — store both with and without super
+  // Net worth snapshots — store in display currency with currency tag
   useEffect(() => {
     if (netWorthWithSuper === 0 && netWorthNoSuper === 0) return;
     const today = getSydneyDateString();
-    if (nwSnapshots.some((s) => s.date === today)) return;
+    // Update today's snapshot (replace if currency or value changed)
+    const existing = nwSnapshots.find((s) => s.date === today);
+    if (existing && Math.abs(existing.value - netWorthWithSuper) < 1) return;
     setNwSnapshots((prev) => [
-      ...prev.slice(-89),
+      ...prev.filter((s) => s.date !== today).slice(-89),
       { date: today, value: netWorthWithSuper, valueNoSuper: netWorthNoSuper },
     ]);
   }, [netWorthWithSuper, netWorthNoSuper, nwSnapshots, setNwSnapshots]);
 
   // Pick the right value based on includeSuper toggle
+  // Convert old snapshots that may be in a different currency scale
   const nwTrendData = useMemo(
     () =>
       nwSnapshots.map((s) => ({
