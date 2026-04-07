@@ -295,15 +295,16 @@ export default function PortfolioPage() {
       .filter((h) => h.type !== "savings")
       .reduce((s, h) => s + convert(h.currentValue, h.currency), 0);
 
-    // Update today's snapshot if value changed significantly
+    // Update today's snapshot if value or currency changed significantly
     const existing = snapshots.find((s) => s.date === today);
-    if (existing && Math.abs(existing.valueWithSuper - valueAll) < 1) return;
+    const snapCur = (existing as { currency?: string } | undefined)?.currency;
+    if (existing && snapCur === currency && Math.abs(existing.valueWithSuper - valueAll) < 1) return;
 
     setSnapshots((prev) => [
       ...prev.filter((s) => s.date !== today).slice(-89),
-      { date: today, value: valueNoSuper, valueWithSuper: valueAll },
+      { date: today, value: valueNoSuper, valueWithSuper: valueAll, currency } as PortfolioSnapshot,
     ]);
-  }, [holdings, snapshots, setSnapshots, convert]);
+  }, [holdings, snapshots, setSnapshots, convert, currency]);
 
   const trendData = useMemo(() => {
     let filtered = snapshots;
@@ -328,11 +329,15 @@ export default function PortfolioPage() {
       filtered = snapshots.filter((s) => s.date >= cutoffStr);
     }
 
-    return filtered.map((s) => ({
-      date: s.date.slice(5),
-      value: includeSuper ? s.valueWithSuper : s.value,
-    }));
-  }, [snapshots, includeSuper, trendPeriod]);
+    return filtered.map((s) => {
+      const rawValue = includeSuper ? s.valueWithSuper : s.value;
+      const snapCurrency = (s as { currency?: string }).currency ?? "AUD";
+      if (snapCurrency !== currency) {
+        return { date: s.date.slice(5), value: Math.round(convert(rawValue, snapCurrency) * 100) / 100 };
+      }
+      return { date: s.date.slice(5), value: rawValue };
+    });
+  }, [snapshots, includeSuper, trendPeriod, currency, convert]);
 
   function handleTransaction(tx: PortfolioTransaction) {
     setTransactions((prev) => [tx, ...prev]);

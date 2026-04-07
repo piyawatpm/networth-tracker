@@ -152,7 +152,7 @@ export default function DashboardPage() {
   const [nwSnapshots, setNwSnapshots] = useCloudStorage<{ date: string; value: number }[]>("networth_snapshots", []);
   const [stablecoinTags] = useCloudStorage<Record<string, boolean>>("crypto_stablecoin_tags", {});
 
-  const { convert, format, symbol } = useCurrency();
+  const { convert, format, symbol, currency } = useCurrency();
   const [period, setPeriod] = useState<Period>("M");
   const [includeSuper, setIncludeSuper] = useState(true);
 
@@ -204,31 +204,37 @@ export default function DashboardPage() {
   const netWorth = includeSuper ? netWorthWithSuper : netWorthNoSuper;
   const totalAssets = (includeSuper ? portfolioTotal : normalTotal) + cryptoTotal + owedToMe;
 
-  // Net worth snapshots — store in display currency with currency tag
+  // Net worth snapshots — store with currency tag for proper FX conversion
   useEffect(() => {
     if (netWorthWithSuper === 0 && netWorthNoSuper === 0) return;
     const today = getSydneyDateString();
-    // Update today's snapshot (replace if currency or value changed)
     const existing = nwSnapshots.find((s) => s.date === today);
-    if (existing && Math.abs(existing.value - netWorthWithSuper) < 1) return;
+    // Update if value changed significantly OR currency changed
+    const snap = existing as { currency?: string } | undefined;
+    if (existing && snap?.currency === currency && Math.abs(existing.value - netWorthWithSuper) < 1) return;
     setNwSnapshots((prev) => [
       ...prev.filter((s) => s.date !== today).slice(-89),
-      { date: today, value: netWorthWithSuper, valueNoSuper: netWorthNoSuper },
+      { date: today, value: netWorthWithSuper, valueNoSuper: netWorthNoSuper, currency },
     ]);
-  }, [netWorthWithSuper, netWorthNoSuper, nwSnapshots, setNwSnapshots]);
+  }, [netWorthWithSuper, netWorthNoSuper, nwSnapshots, setNwSnapshots, currency]);
 
-  // Pick the right value based on includeSuper toggle
-  // Convert old snapshots that may be in a different currency scale
-  const nwTrendData = useMemo(
-    () =>
-      nwSnapshots.map((s) => ({
-        date: s.date.slice(5),
-        value: includeSuper
-          ? s.value
-          : ((s as { valueNoSuper?: number }).valueNoSuper ?? s.value),
-      })),
-    [nwSnapshots, includeSuper],
-  );
+  // Convert all snapshots to current display currency at render time
+  const nwTrendData = useMemo(() => {
+    return nwSnapshots.map((s) => {
+      const rawValue = includeSuper
+        ? s.value
+        : ((s as { valueNoSuper?: number }).valueNoSuper ?? s.value);
+      const snapCurrency = (s as { currency?: string }).currency ?? "AUD"; // assume AUD for old snapshots
+      // If snapshot was saved in a different currency, convert
+      if (snapCurrency !== currency) {
+        // Convert: rawValue in snapCurrency → display currency
+        // convert(amount, from) returns value in display currency
+        const converted = convert(rawValue, snapCurrency);
+        return { date: s.date.slice(5), value: Math.round(converted * 100) / 100 };
+      }
+      return { date: s.date.slice(5), value: rawValue };
+    });
+  }, [nwSnapshots, includeSuper, currency, convert]);
 
   // ---- Period-filtered income/expenses ------------------------------------
 
