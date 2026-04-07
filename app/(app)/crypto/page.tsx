@@ -22,12 +22,15 @@ import type { CryptoHolding } from "@/lib/utils/types";
 import { ECHARTS_COLORS } from "@/lib/utils/echarts";
 import ReactECharts from "echarts-for-react";
 
+import { Settings2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { UploadSection } from "./_components/upload-section";
 import { PriceStatus } from "./_components/price-status";
 import { HistoryChart } from "./_components/history-chart";
 import { CryptoDonut } from "./_components/crypto-donut";
 import { HoldingsBreakdown } from "./_components/holdings-breakdown";
 import { CryptoValueTrend } from "./_components/crypto-value-trend";
+import { TickerMappingDialog } from "./_components/ticker-mapping-dialog";
 
 export default function CryptoPage() {
   const [csvText, setCsvText] = useCloudStorage<string>("crypto_csv_text", "");
@@ -67,6 +70,12 @@ export default function CryptoPage() {
     {},
   );
 
+  // Ticker mappings: CSV token name → Binance ticker symbol
+  const [tickerMappings, setTickerMappings] = useCloudStorage<Record<string, string>>(
+    "crypto_ticker_mappings",
+    {},
+  );
+
   const getExchange = useCallback(
     (holding: CryptoHolding) => exchangeOverrides[holding.token] ?? holding.exchange ?? "",
     [exchangeOverrides],
@@ -99,20 +108,39 @@ export default function CryptoPage() {
     [holdings, stablecoinTags],
   );
 
+  // Map token names to Binance tickers for price fetching
+  const getMappedTicker = useCallback(
+    (token: string) => tickerMappings[token] ?? token,
+    [tickerMappings],
+  );
+
   // Fetch live prices on mount (if stale) and after CSV upload
   useEffect(() => {
     if (taggedHoldings.length === 0) return;
-    const tokens = taggedHoldings.map((h) => h.token);
+    // Use mapped tickers for price fetching
+    const mappedTokens = taggedHoldings.map((h) => getMappedTicker(h.token));
 
     const cached = getCachedCryptoPrices();
     if (cached && !isCryptoPricesCacheStale()) {
-      setLivePrices(cached.prices);
+      // Map cached prices back to original token names
+      const mapped: Record<string, number> = {};
+      for (const h of taggedHoldings) {
+        const ticker = getMappedTicker(h.token);
+        if (cached.prices[ticker]) mapped[h.token] = cached.prices[ticker];
+      }
+      setLivePrices(mapped);
       return;
     }
 
-    fetchCryptoPrices(tokens).then((prices) => {
-      if (Object.keys(prices).length > 0) {
-        setLivePrices(prices);
+    fetchCryptoPrices(mappedTokens).then((prices) => {
+      // Map prices back to original token names
+      const mapped: Record<string, number> = {};
+      for (const h of taggedHoldings) {
+        const ticker = getMappedTicker(h.token);
+        if (prices[ticker]) mapped[h.token] = prices[ticker];
+      }
+      if (Object.keys(mapped).length > 0) {
+        setLivePrices(mapped);
       }
     });
   }, [taggedHoldings]);
@@ -297,6 +325,21 @@ export default function CryptoPage() {
         setSelectedTokens={setSelectedTokens}
         onFileSelect={onFileSelect}
       />
+
+      {/* Ticker Mapping button */}
+      <div className="flex justify-end">
+        <TickerMappingDialog
+          tokens={taggedHoldings.map((h) => h.token)}
+          mappings={tickerMappings}
+          onSave={setTickerMappings}
+          trigger={
+            <Button variant="outline" size="sm" className="gap-1.5 text-xs">
+              <Settings2 className="h-3.5 w-3.5" />
+              Ticker Mapping
+            </Button>
+          }
+        />
+      </div>
 
       {/* Value Trend — daily snapshots */}
       {cryptoTrendData.length > 0 && (
