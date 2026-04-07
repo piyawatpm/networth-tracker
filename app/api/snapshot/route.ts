@@ -67,9 +67,11 @@ export async function POST(request: NextRequest) {
     const rates = fxCache.rates;
     const displayCurrency = parse<string>("preferred_currency", "AUD");
 
-    // Helper: convert any amount to display currency
-    const toDisplay = (amount: number, fromCurrency: string) =>
-      Math.round(convertCurrency(amount, fromCurrency, displayCurrency, rates) * 100) / 100;
+    // Always store snapshots in USD — the universal base currency.
+    // Charts convert from USD to display currency at render time.
+    const SNAPSHOT_CURRENCY = "USD";
+    const toUsd = (amount: number, fromCurrency: string) =>
+      Math.round(convertCurrency(amount, fromCurrency, "USD", rates) * 100) / 100;
 
     let holdings = parse<{ id: string; type: string; currentValue: number; currency: string; accountType: string }[]>("portfolio_holdings", []);
     const portfolioSnapshots = parse<{ date: string; value: number }[]>("portfolio_snapshots", []);
@@ -94,11 +96,11 @@ export async function POST(request: NextRequest) {
     // Portfolio totals — convert each holding to display currency
     const portfolioTotal = holdings
       .filter((h) => h.type !== "savings")
-      .reduce((s, h) => s + toDisplay(h.currentValue ?? 0, h.currency ?? "AUD"), 0);
+      .reduce((s, h) => s + toUsd(h.currentValue ?? 0, h.currency ?? "AUD"), 0);
 
     const portfolioNoSuper = holdings
       .filter((h) => h.type !== "savings" && h.accountType !== "super")
-      .reduce((s, h) => s + toDisplay(h.currentValue ?? 0, h.currency ?? "AUD"), 0);
+      .reduce((s, h) => s + toUsd(h.currentValue ?? 0, h.currency ?? "AUD"), 0);
 
     // Crypto total
     let cryptoTotalUsd = 0;
@@ -118,7 +120,7 @@ export async function POST(request: NextRequest) {
         cryptoTotalUsd = getTotalCryptoValueUsd(cryptoHoldings);
       } catch { /* silent */ }
     }
-    const cryptoInDisplay = toDisplay(cryptoTotalUsd, "USD");
+    const cryptoInUsd = toUsd(cryptoTotalUsd, "USD");
 
     // Debts — convert each to display currency
     const debtRecords = parse<{ id: string; direction: string; originalAmount: number; currency: string }[]>("debt_records", []);
@@ -128,13 +130,13 @@ export async function POST(request: NextRequest) {
     for (const d of debtRecords) {
       const paid = debtTransactions.filter((t) => t.debtId === d.id).reduce((s, t) => s + t.amount, 0);
       const remaining = Math.max(0, d.originalAmount - paid);
-      const converted = toDisplay(remaining, d.currency ?? "AUD");
+      const converted = toUsd(remaining, d.currency ?? "AUD");
       if (d.direction === "owed_to_me") owedToMe += converted;
       else iOwe += converted;
     }
 
-    const netWorth = portfolioTotal + cryptoInDisplay + owedToMe - iOwe;
-    const netWorthNoSuper = portfolioNoSuper + cryptoInDisplay + owedToMe - iOwe;
+    const netWorth = portfolioTotal + cryptoInUsd + owedToMe - iOwe;
+    const netWorthNoSuper = portfolioNoSuper + cryptoInUsd + owedToMe - iOwe;
 
     const updates: { key: string; value: string; updated_at: string }[] = [];
     const now = new Date().toISOString();
@@ -142,22 +144,22 @@ export async function POST(request: NextRequest) {
     // Portfolio snapshot
     updates.push({
       key: "portfolio_snapshots",
-      value: JSON.stringify([...portfolioSnapshots.slice(-89), { date: today, value: portfolioNoSuper, valueWithSuper: portfolioTotal, currency: displayCurrency }]),
+      value: JSON.stringify([...portfolioSnapshots.slice(-89), { date: today, value: portfolioNoSuper, valueWithSuper: portfolioTotal, currency: SNAPSHOT_CURRENCY }]),
       updated_at: now,
     });
 
     // Net worth snapshot
     updates.push({
       key: "networth_snapshots",
-      value: JSON.stringify([...nwSnapshots.slice(-89), { date: today, value: netWorth, valueNoSuper: netWorthNoSuper, currency: displayCurrency, portfolio: portfolioTotal, crypto: cryptoInDisplay }]),
+      value: JSON.stringify([...nwSnapshots.slice(-89), { date: today, value: netWorth, valueNoSuper: netWorthNoSuper, currency: SNAPSHOT_CURRENCY, portfolio: portfolioTotal, crypto: cryptoInUsd }]),
       updated_at: now,
     });
 
     // Crypto snapshot
-    if (cryptoInDisplay > 0) {
+    if (cryptoInUsd > 0) {
       updates.push({
         key: "crypto_snapshots",
-        value: JSON.stringify([...cryptoSnapshots.slice(-89), { date: today, value: cryptoInDisplay, currency: displayCurrency }]),
+        value: JSON.stringify([...cryptoSnapshots.slice(-89), { date: today, value: cryptoInUsd, currency: SNAPSHOT_CURRENCY }]),
         updated_at: now,
       });
     }
@@ -170,9 +172,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       ok: true,
       date: today,
-      currency: displayCurrency,
+      currency: SNAPSHOT_CURRENCY,
       portfolioTotal: Math.round(portfolioTotal * 100) / 100,
-      cryptoTotal: Math.round(cryptoInDisplay * 100) / 100,
+      cryptoTotal: Math.round(cryptoInUsd * 100) / 100,
       netWorth: Math.round(netWorth * 100) / 100,
       owedToMe: Math.round(owedToMe * 100) / 100,
       iOwe: Math.round(iOwe * 100) / 100,
