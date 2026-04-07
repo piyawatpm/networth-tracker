@@ -204,35 +204,40 @@ export default function DashboardPage() {
   const netWorth = includeSuper ? netWorthWithSuper : netWorthNoSuper;
   const totalAssets = (includeSuper ? portfolioTotal : normalTotal) + cryptoTotal + owedToMe;
 
-  // Net worth snapshots — store with currency tag for proper FX conversion
+  // Net worth snapshots — store with currency tag + breakdown for multi-line chart
   useEffect(() => {
     if (netWorthWithSuper === 0 && netWorthNoSuper === 0) return;
     const today = getSydneyDateString();
     const existing = nwSnapshots.find((s) => s.date === today);
-    // Update if value changed significantly OR currency changed
     const snap = existing as { currency?: string } | undefined;
     if (existing && snap?.currency === currency && Math.abs(existing.value - netWorthWithSuper) < 1) return;
     setNwSnapshots((prev) => [
       ...prev.filter((s) => s.date !== today).slice(-89),
-      { date: today, value: netWorthWithSuper, valueNoSuper: netWorthNoSuper, currency },
+      {
+        date: today,
+        value: netWorthWithSuper,
+        valueNoSuper: netWorthNoSuper,
+        currency,
+        portfolio: includeSuper ? portfolioTotal : normalTotal,
+        crypto: cryptoTotal,
+      },
     ]);
-  }, [netWorthWithSuper, netWorthNoSuper, nwSnapshots, setNwSnapshots, currency]);
+  }, [netWorthWithSuper, netWorthNoSuper, nwSnapshots, setNwSnapshots, currency, portfolioTotal, normalTotal, cryptoTotal, includeSuper]);
 
   // Convert all snapshots to current display currency at render time
   const nwTrendData = useMemo(() => {
     return nwSnapshots.map((s) => {
-      const rawValue = includeSuper
-        ? s.value
-        : ((s as { valueNoSuper?: number }).valueNoSuper ?? s.value);
-      const snapCurrency = (s as { currency?: string }).currency ?? "AUD"; // assume AUD for old snapshots
-      // If snapshot was saved in a different currency, convert
-      if (snapCurrency !== currency) {
-        // Convert: rawValue in snapCurrency → display currency
-        // convert(amount, from) returns value in display currency
-        const converted = convert(rawValue, snapCurrency);
-        return { date: s.date.slice(5), value: Math.round(converted * 100) / 100 };
-      }
-      return { date: s.date.slice(5), value: rawValue };
+      const ext = s as { valueNoSuper?: number; currency?: string; portfolio?: number; crypto?: number };
+      const snapCur = ext.currency ?? "AUD";
+      const fx = (v: number) => snapCur !== currency ? Math.round(convert(v, snapCur) * 100) / 100 : v;
+
+      const rawNw = includeSuper ? s.value : (ext.valueNoSuper ?? s.value);
+      return {
+        date: s.date.slice(5),
+        value: fx(rawNw),
+        portfolio: ext.portfolio != null ? fx(ext.portfolio) : undefined,
+        crypto: ext.crypto != null ? fx(ext.crypto) : undefined,
+      };
     });
   }, [nwSnapshots, includeSuper, currency, convert]);
 
@@ -573,15 +578,13 @@ export default function DashboardPage() {
         </div>
       </BlurFade>
 
-      {/* 3. ASSET BREAKDOWN + NET WORTH TREND */}
+      {/* 3. NET WORTH TREND — full width with multi-line */}
+      <NetWorthChart nwTrendData={nwTrendData} format={format} includeSuper={includeSuper} delay={D} />
+
+      {/* 3b. ASSET BREAKDOWN + WORLD DISTRIBUTION + MONEY FLOW */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
         <AssetBreakdown rows={assetRows} hiddenSections={hiddenSections} onToggleSection={toggleSection} format={format} delay={D * 0.5} />
-        <NetWorthChart nwTrendData={nwTrendData} format={format} includeSuper={includeSuper} delay={D} />
-      </div>
-
-      {/* 3b. WORLD DISTRIBUTION + MONEY FLOW */}
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
-        <div className="md:col-span-5">
+        <div className="md:col-span-3">
           <WorldDistributionChart
             normalTotal={normalTotal}
             cryptoTotal={cryptoTotal}
@@ -590,7 +593,7 @@ export default function DashboardPage() {
             delay={0.15}
           />
         </div>
-        <div className="md:col-span-7">
+        <div className="md:col-span-5">
           <MoneyFlowCard
             periodLabel={period === "W" ? "This Week" : period === "M" ? "This Month" : "This Year"}
             periodIncome={periodIncomeTotal}

@@ -16,7 +16,7 @@ import { TrendingUp, TrendingDown } from "lucide-react";
 type Range = "7d" | "30d" | "90d" | "all";
 
 export interface NetWorthChartProps {
-  nwTrendData: { date: string; value: number }[];
+  nwTrendData: { date: string; value: number; portfolio?: number; crypto?: number }[];
   format: (amount: number, from?: string, compact?: boolean) => string;
   includeSuper?: boolean;
   delay: number;
@@ -31,6 +31,7 @@ export function NetWorthChart({ nwTrendData, format, includeSuper = true, delay 
   const isDark = resolvedTheme === "dark";
   const { symbol } = useCurrency();
   const [range, setRange] = useState<Range>("all");
+  const [showBreakdown, setShowBreakdown] = useState(false);
 
   const ranges: { key: Range; label: string }[] = [
     { key: "7d", label: "1W" },
@@ -65,12 +66,64 @@ export function NetWorthChart({ nwTrendData, format, includeSuper = true, delay 
     ? (isDark ? "#4ade80" : "#2e8b57")
     : (isDark ? "#f87171" : "#c95f3f");
 
+  // Check if we have breakdown data
+  const hasBreakdownData = filteredData.some((d) => d.portfolio != null || d.crypto != null);
+
+  const portfolioColor = isDark ? "#4d7cc7" : "#2e5ea5";
+  const cryptoColor = isDark ? "#d4a033" : "#b8860b";
+
   const option = useMemo(() => {
     const base = getCartesianBaseOption(isDark, symbol);
 
+    const series: Record<string, unknown>[] = [
+      {
+        name: "Net Worth",
+        type: "line" as const,
+        data: filteredData.map((d) => d.value),
+        smooth: 0.3,
+        showSymbol: filteredData.length <= 14,
+        symbolSize: 4,
+        lineStyle: { color: lineColor, width: 2.5 },
+        itemStyle: { color: lineColor, borderWidth: 0 },
+        areaStyle: {
+          color: {
+            type: "linear" as const,
+            x: 0, y: 0, x2: 0, y2: 1,
+            colorStops: [
+              { offset: 0, color: lineColor + "20" },
+              { offset: 1, color: lineColor + "00" },
+            ],
+          },
+        },
+      },
+    ];
+
+    if (showBreakdown && hasBreakdownData) {
+      series.push(
+        {
+          name: "Portfolio",
+          type: "line" as const,
+          data: filteredData.map((d) => d.portfolio ?? null),
+          smooth: 0.3,
+          showSymbol: false,
+          lineStyle: { color: portfolioColor, width: 1.5, type: "dashed" as const },
+          itemStyle: { color: portfolioColor },
+        },
+        {
+          name: "Crypto",
+          type: "line" as const,
+          data: filteredData.map((d) => d.crypto ?? null),
+          smooth: 0.3,
+          showSymbol: false,
+          lineStyle: { color: cryptoColor, width: 1.5, type: "dashed" as const },
+          itemStyle: { color: cryptoColor },
+        },
+      );
+    }
+
     return {
       ...base,
-      grid: { top: 16, right: 12, bottom: 28, left: 50, containLabel: false },
+      grid: { top: showBreakdown ? 12 : 16, right: 12, bottom: showBreakdown ? 40 : 28, left: 50, containLabel: false },
       xAxis: {
         ...base.xAxis,
         type: "category" as const,
@@ -88,45 +141,22 @@ export function NetWorthChart({ nwTrendData, format, includeSuper = true, delay 
           ...base.yAxis.axisLabel,
           formatter: (v: number) => formatAxisValue(v),
         },
-        min: (value: { min: number }) => Math.floor(value.min * 0.98),
+        min: (value: { min: number }) => Math.floor(value.min * 0.95),
       },
-      tooltip: {
-        ...base.tooltip,
-        formatter: (params: { name: string; value: number }[]) => {
-          const p = Array.isArray(params) ? params[0] : params;
-          if (!p) return "";
-          const val = typeof p.value === "number" ? p.value : 0;
-          return `<div style="font-size:11px;opacity:0.6">${p.name}</div>
-                  <div style="font-size:14px;font-weight:600;margin-top:2px">${format(val, undefined, false)}</div>`;
-        },
-      },
-      series: [
-        {
-          type: "line" as const,
-          data: filteredData.map((d) => d.value),
-          smooth: 0.3,
-          showSymbol: filteredData.length <= 14,
-          symbolSize: 4,
-          lineStyle: { color: lineColor, width: 2.5 },
-          itemStyle: { color: lineColor, borderWidth: 0 },
-          areaStyle: {
-            color: {
-              type: "linear" as const,
-              x: 0, y: 0, x2: 0, y2: 1,
-              colorStops: [
-                { offset: 0, color: lineColor + "30" },
-                { offset: 0.7, color: lineColor + "08" },
-                { offset: 1, color: lineColor + "00" },
-              ],
-            },
-          },
-        },
-      ],
+      legend: showBreakdown ? {
+        show: true,
+        bottom: 0,
+        textStyle: { color: isDark ? "#888" : "#968360", fontSize: 10 },
+        icon: "roundRect",
+        itemWidth: 12,
+        itemHeight: 3,
+      } : { show: false },
+      series,
     };
-  }, [filteredData, isDark, lineColor, format]);
+  }, [filteredData, isDark, lineColor, format, showBreakdown, hasBreakdownData, portfolioColor, cryptoColor, symbol]);
 
   return (
-    <BlurFade delay={delay} className="md:col-span-7">
+    <BlurFade delay={delay}>
       <div className="finance-card p-5">
         {/* Header row */}
         <div className="flex items-start justify-between mb-1">
@@ -137,6 +167,19 @@ export function NetWorthChart({ nwTrendData, format, includeSuper = true, delay 
                 <span className="text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-secondary text-muted-foreground">
                   excl. super
                 </span>
+              )}
+              {hasBreakdownData && (
+                <button
+                  onClick={() => setShowBreakdown((v) => !v)}
+                  className={cn(
+                    "text-[9px] font-medium px-1.5 py-0.5 rounded transition-colors",
+                    showBreakdown
+                      ? "bg-foreground text-background"
+                      : "bg-secondary text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  Breakdown
+                </button>
               )}
             </div>
             {stats && (
@@ -195,7 +238,7 @@ export function NetWorthChart({ nwTrendData, format, includeSuper = true, delay 
         {filteredData.length > 1 ? (
           <ReactECharts
             option={option}
-            style={{ height: 180, width: "100%" }}
+            style={{ height: 220, width: "100%" }}
             opts={{ renderer: "svg" }}
           />
         ) : (

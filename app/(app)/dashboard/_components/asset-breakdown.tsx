@@ -40,7 +40,7 @@ export function AssetBreakdown({
   const isVisible = (key: string) => !hiddenSections.includes(key);
 
   return (
-    <BlurFade delay={delay} className="md:col-span-5">
+    <BlurFade delay={delay} className="md:col-span-4">
       <div className="relative">
         {/* Settings toggle */}
         <button
