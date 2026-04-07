@@ -8,12 +8,29 @@ const supabase = createClient(
 
 export const dynamic = "force-dynamic";
 
+/**
+ * Convert amount from one currency to target using USD-based cross rates.
+ * rates = { AUD: 1.58, THB: 33.5, EUR: 0.92, ... } (all vs USD)
+ */
+function convertCurrency(
+  amount: number,
+  from: string,
+  to: string,
+  rates: Record<string, number>,
+): number {
+  if (from === to || !rates) return amount;
+  // Convert to USD first, then to target
+  const fromRate = rates[from] ?? 1; // 1 USD = X from-currency
+  const toRate = rates[to] ?? 1;     // 1 USD = X to-currency
+  const amountInUsd = amount / fromRate;
+  return amountInUsd * toRate;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json().catch(() => ({}));
     const manualUpdates: Record<string, number> | undefined = body.manualUpdates;
 
-    // Use datetime for manual snapshots (allows multiple per day)
     const sydneyNow = new Date().toLocaleString("en-CA", {
       timeZone: "Australia/Sydney",
       year: "numeric", month: "2-digit", day: "2-digit",
@@ -21,7 +38,6 @@ export async function POST(request: NextRequest) {
     }).replace(",", "");
     const today = sydneyNow;
 
-    // Read all needed data
     const { data: rows } = await supabase
       .from("app_data")
       .select("key, value")
@@ -35,6 +51,8 @@ export async function POST(request: NextRequest) {
         "crypto_ticker_mappings",
         "debt_records",
         "debt_transactions",
+        "fx_rates_cache",
+        "preferred_currency",
       ]);
 
     const dataMap: Record<string, string> = {};
@@ -44,12 +62,21 @@ export async function POST(request: NextRequest) {
       try { return dataMap[key] ? JSON.parse(dataMap[key]) : fallback; } catch { return fallback; }
     };
 
-    let holdings = parse<{ id: string; type: string; currentValue: number; accountType: string }[]>("portfolio_holdings", []);
+    // FX rates (USD-based) and preferred display currency
+    const fxCache = parse<{ rates: Record<string, number> }>("fx_rates_cache", { rates: {} });
+    const rates = fxCache.rates;
+    const displayCurrency = parse<string>("preferred_currency", "AUD");
+
+    // Helper: convert any amount to display currency
+    const toDisplay = (amount: number, fromCurrency: string) =>
+      Math.round(convertCurrency(amount, fromCurrency, displayCurrency, rates) * 100) / 100;
+
+    let holdings = parse<{ id: string; type: string; currentValue: number; currency: string; accountType: string }[]>("portfolio_holdings", []);
     const portfolioSnapshots = parse<{ date: string; value: number }[]>("portfolio_snapshots", []);
     const nwSnapshots = parse<{ date: string; value: number }[]>("networth_snapshots", []);
     const cryptoSnapshots = parse<{ date: string; value: number; currency: string }[]>("crypto_snapshots", []);
 
-    // Apply manual value updates to holdings
+    // Apply manual value updates
     if (manualUpdates && Object.keys(manualUpdates).length > 0) {
       holdings = holdings.map((h) => {
         if (manualUpdates[h.id] !== undefined) {
@@ -64,41 +91,36 @@ export async function POST(request: NextRequest) {
       }, { onConflict: "key" });
     }
 
-    // Portfolio total (excluding savings)
+    // Portfolio totals — convert each holding to display currency
     const portfolioTotal = holdings
       .filter((h) => h.type !== "savings")
-      .reduce((s, h) => s + (h.currentValue ?? 0), 0);
+      .reduce((s, h) => s + toDisplay(h.currentValue ?? 0, h.currency ?? "AUD"), 0);
 
     const portfolioNoSuper = holdings
       .filter((h) => h.type !== "savings" && h.accountType !== "super")
-      .reduce((s, h) => s + (h.currentValue ?? 0), 0);
+      .reduce((s, h) => s + toDisplay(h.currentValue ?? 0, h.currency ?? "AUD"), 0);
 
-    // Crypto total — parse CSV + apply cached prices
-    let cryptoTotal = 0;
+    // Crypto total
+    let cryptoTotalUsd = 0;
     const csvText = parse<string>("crypto_csv_text", "");
     if (csvText) {
       try {
         const { parseAndComputeHoldings, getTotalCryptoValueUsd } = await import("@/lib/utils/crypto-csv");
         const cryptoHoldings = parseAndComputeHoldings(csvText);
-
-        // Apply cached prices
         const cachedPrices = parse<{ prices: Record<string, number> }>("crypto_prices", { prices: {} });
         const tickerMappings = parse<Record<string, string>>("crypto_ticker_mappings", {});
 
         for (const h of cryptoHoldings) {
           const mappedTicker = tickerMappings[h.token] ?? h.token;
           const price = cachedPrices.prices[mappedTicker];
-          if (price != null) {
-            h.currentValueUsd = price * h.amount;
-          }
+          if (price != null) h.currentValueUsd = price * h.amount;
         }
-        cryptoTotal = getTotalCryptoValueUsd(cryptoHoldings);
-      } catch {
-        // silent — crypto total stays 0
-      }
+        cryptoTotalUsd = getTotalCryptoValueUsd(cryptoHoldings);
+      } catch { /* silent */ }
     }
+    const cryptoInDisplay = toDisplay(cryptoTotalUsd, "USD");
 
-    // Debts
+    // Debts — convert each to display currency
     const debtRecords = parse<{ id: string; direction: string; originalAmount: number; currency: string }[]>("debt_records", []);
     const debtTransactions = parse<{ debtId: string; amount: number }[]>("debt_transactions", []);
     let owedToMe = 0;
@@ -106,14 +128,13 @@ export async function POST(request: NextRequest) {
     for (const d of debtRecords) {
       const paid = debtTransactions.filter((t) => t.debtId === d.id).reduce((s, t) => s + t.amount, 0);
       const remaining = Math.max(0, d.originalAmount - paid);
-      if (d.direction === "owed_to_me") owedToMe += remaining;
-      else iOwe += remaining;
+      const converted = toDisplay(remaining, d.currency ?? "AUD");
+      if (d.direction === "owed_to_me") owedToMe += converted;
+      else iOwe += converted;
     }
 
-    // Net worth = portfolio + crypto + owed to me - I owe
-    // Note: stored in raw currency (no FX conversion — server doesn't have FX rates)
-    const netWorth = portfolioTotal + cryptoTotal + owedToMe - iOwe;
-    const netWorthNoSuper = portfolioNoSuper + cryptoTotal + owedToMe - iOwe;
+    const netWorth = portfolioTotal + cryptoInDisplay + owedToMe - iOwe;
+    const netWorthNoSuper = portfolioNoSuper + cryptoInDisplay + owedToMe - iOwe;
 
     const updates: { key: string; value: string; updated_at: string }[] = [];
     const now = new Date().toISOString();
@@ -121,22 +142,22 @@ export async function POST(request: NextRequest) {
     // Portfolio snapshot
     updates.push({
       key: "portfolio_snapshots",
-      value: JSON.stringify([...portfolioSnapshots.slice(-89), { date: today, value: portfolioNoSuper, valueWithSuper: portfolioTotal }]),
+      value: JSON.stringify([...portfolioSnapshots.slice(-89), { date: today, value: portfolioNoSuper, valueWithSuper: portfolioTotal, currency: displayCurrency }]),
       updated_at: now,
     });
 
     // Net worth snapshot
     updates.push({
       key: "networth_snapshots",
-      value: JSON.stringify([...nwSnapshots.slice(-89), { date: today, value: netWorth, valueNoSuper: netWorthNoSuper }]),
+      value: JSON.stringify([...nwSnapshots.slice(-89), { date: today, value: netWorth, valueNoSuper: netWorthNoSuper, currency: displayCurrency, portfolio: portfolioTotal, crypto: cryptoInDisplay }]),
       updated_at: now,
     });
 
     // Crypto snapshot
-    if (cryptoTotal > 0) {
+    if (cryptoInDisplay > 0) {
       updates.push({
         key: "crypto_snapshots",
-        value: JSON.stringify([...cryptoSnapshots.slice(-89), { date: today, value: cryptoTotal, currency: "USD" }]),
+        value: JSON.stringify([...cryptoSnapshots.slice(-89), { date: today, value: cryptoInDisplay, currency: displayCurrency }]),
         updated_at: now,
       });
     }
@@ -149,11 +170,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       ok: true,
       date: today,
-      portfolioTotal,
-      cryptoTotal,
-      netWorth,
-      owedToMe,
-      iOwe,
+      currency: displayCurrency,
+      portfolioTotal: Math.round(portfolioTotal * 100) / 100,
+      cryptoTotal: Math.round(cryptoInDisplay * 100) / 100,
+      netWorth: Math.round(netWorth * 100) / 100,
+      owedToMe: Math.round(owedToMe * 100) / 100,
+      iOwe: Math.round(iOwe * 100) / 100,
       manualUpdatesApplied: manualUpdates ? Object.keys(manualUpdates).length : 0,
     });
   } catch (e) {
