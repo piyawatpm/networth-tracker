@@ -38,6 +38,7 @@ export default function DebugPage() {
 
   const [nwSnapshots, setNwSnapshots] = useCloudStorage<{ date: string; value: number; valueNoSuper?: number }[]>("networth_snapshots", []);
   const [portfolioSnapshots, setPortfolioSnapshots] = useCloudStorage<{ date: string; value: number; valueWithSuper: number }[]>("portfolio_snapshots", []);
+  const [cryptoSnapshots, setCryptoSnapshots] = useCloudStorage<{ date: string; value: number; currency: string }[]>("crypto_snapshots", []);
 
   const [triggerResult, setTriggerResult] = useState<string | null>(null);
   const [triggering, setTriggering] = useState(false);
@@ -414,6 +415,94 @@ export default function DebugPage() {
                               </Button>
                               <Button variant="ghost" size="icon-xs" className="text-destructive" onClick={() => {
                                 setPortfolioSnapshots((prev) => prev.filter((snap) => snap.date !== s.date));
+                              }}>
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </BlurFade>
+
+      {/* Crypto Snapshots */}
+      <BlurFade delay={0.25}>
+        <div className="finance-card p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Camera className="h-4 w-4 text-muted-foreground" />
+              <p className="label-mono">Crypto Snapshots ({cryptoSnapshots.length})</p>
+            </div>
+            <Button
+              variant="ghost"
+              size="xs"
+              className="text-destructive text-[10px]"
+              onClick={() => { if (confirm("Clear ALL crypto snapshots?")) setCryptoSnapshots([]); }}
+            >
+              Clear All
+            </Button>
+          </div>
+          {cryptoSnapshots.length === 0 ? (
+            <p className="text-xs text-muted-foreground text-center py-4">No snapshots</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border/60 text-left">
+                    <th className="px-2 py-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Date</th>
+                    <th className="px-2 py-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground text-right">Value</th>
+                    <th className="px-2 py-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Currency</th>
+                    <th className="px-2 py-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...cryptoSnapshots].reverse().map((s) => {
+                    const isEditing = editingSnapshot?.type === "portfolio" && editingSnapshot.date === `crypto-${s.date}`;
+                    return (
+                      <tr key={s.date} className="border-b border-border/30 last:border-0 hover:bg-muted/20">
+                        <td className="px-2 py-1.5 font-mono tabular-nums">{s.date}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">
+                          {isEditing ? (
+                            <Input type="number" value={editValue} onChange={(e) => setEditValue(e.target.value)} className="h-6 w-24 text-xs tabular-nums px-1.5 ml-auto" />
+                          ) : (
+                            s.value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                          )}
+                        </td>
+                        <td className="px-2 py-1.5 font-mono text-muted-foreground">{s.currency}</td>
+                        <td className="px-2 py-1.5 text-right">
+                          {isEditing ? (
+                            <div className="flex items-center justify-end gap-1">
+                              <Button variant="ghost" size="icon-xs" onClick={() => {
+                                const v = parseFloat(editValue);
+                                if (!isNaN(v)) {
+                                  setCryptoSnapshots((prev) => prev.map((snap) =>
+                                    snap.date === s.date ? { ...snap, value: v } : snap
+                                  ));
+                                }
+                                setEditingSnapshot(null);
+                              }}>
+                                <Check className="h-3 w-3 text-income" />
+                              </Button>
+                              <Button variant="ghost" size="icon-xs" onClick={() => setEditingSnapshot(null)}>
+                                <X className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          ) : (
+                            <div className="flex items-center justify-end gap-1">
+                              <Button variant="ghost" size="icon-xs" onClick={() => {
+                                setEditingSnapshot({ type: "portfolio", date: `crypto-${s.date}` });
+                                setEditValue(s.value.toString());
+                              }}>
+                                <Pencil className="h-3 w-3" />
+                              </Button>
+                              <Button variant="ghost" size="icon-xs" className="text-destructive" onClick={() => {
+                                setCryptoSnapshots((prev) => prev.filter((snap) => snap.date !== s.date));
                               }}>
                                 <Trash2 className="h-3 w-3" />
                               </Button>
