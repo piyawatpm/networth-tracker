@@ -58,6 +58,8 @@ import {
 // Feature components
 import { IncomeDialog } from "@/components/income/income-dialog";
 import { RecurringIncomeDialog } from "@/components/income/recurring-dialog";
+import { PassiveVsActiveChart } from "@/components/income/passive-vs-active-chart";
+import { IncomeInsights } from "@/components/income/income-insights";
 import { ManageCategoriesDialog } from "@/components/shared/manage-categories-dialog";
 import {
   DateRangeFilter,
@@ -776,7 +778,15 @@ export default function IncomePage() {
             </div>
 
             <div className="finance-card p-6">
-              <CumulativePaceChart entries={entries} title="Income Pace (This vs Last Month)" currentColor={{ dark: "#4ade80", light: "#2e8b57" }} />
+              <PassiveVsActiveChart entries={entries} />
+            </div>
+
+            <div className="finance-card p-6">
+              <CumulativePaceChart entries={entries} title="Cumulative Income" currentColor={{ dark: "#4ade80", light: "#2e8b57" }} />
+            </div>
+
+            <div className="finance-card p-6">
+              <IncomeInsights entries={entries} />
             </div>
 
             <div className="finance-card p-6">

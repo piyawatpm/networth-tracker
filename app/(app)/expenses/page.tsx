@@ -788,7 +788,7 @@ export default function ExpensesPage() {
             </div>
 
             <div className="finance-card p-6">
-              <CumulativePaceChart entries={entries} title="Spending Pace (This vs Last Month)" currentColor={{ dark: "#e09770", light: "#c95f3f" }} />
+              <CumulativePaceChart entries={entries} title="Cumulative Spending" currentColor={{ dark: "#e09770", light: "#c95f3f" }} />
             </div>
 
             <div className="finance-card p-6">
