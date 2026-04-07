@@ -20,6 +20,9 @@ import {
   RefreshCw,
   Check,
   Camera,
+  ChevronDown,
+  MoreHorizontal,
+  X,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useCurrency } from "@/components/providers/currency-provider";
@@ -28,15 +31,31 @@ import { getCurrencySymbol } from "@/lib/utils/types";
 
 import { useSaveToCloud, useCloudStorage } from "@/components/providers/data-provider";
 
-const NAV_ITEMS = [
+// Primary = always visible in top bar. Secondary = in "More" dropdown.
+const PRIMARY_NAV = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/income", label: "Income", icon: TrendingUp },
   { href: "/expenses", label: "Expenses", icon: Receipt },
-  { href: "/crypto", label: "Crypto", icon: Bitcoin },
   { href: "/portfolio", label: "Portfolio", icon: Briefcase },
+  { href: "/crypto", label: "Crypto", icon: Bitcoin },
+];
+
+const SECONDARY_NAV = [
   { href: "/liabilities", label: "Liabilities", icon: Handshake },
   { href: "/emergency-fund", label: "Safety Net", icon: Shield },
   { href: "/budget", label: "Budget", icon: FileSpreadsheet },
+  { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/debug", label: "Debug", icon: LayoutDashboard },
+];
+
+const ALL_NAV = [...PRIMARY_NAV, ...SECONDARY_NAV];
+
+// Mobile bottom bar: 4 primary + More
+const MOBILE_NAV = [
+  { href: "/dashboard", label: "Home", icon: LayoutDashboard },
+  { href: "/income", label: "Income", icon: TrendingUp },
+  { href: "/expenses", label: "Expenses", icon: Receipt },
+  { href: "/portfolio", label: "Portfolio", icon: Briefcase },
 ];
 
 function ThemeToggle() {
@@ -395,90 +414,180 @@ function SnapshotButton() {
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [mobileDrawer, setMobileDrawer] = useState(false);
+
+  // Check if current path is in secondary nav (to highlight "More")
+  const isSecondaryActive = SECONDARY_NAV.some((item) => pathname === item.href);
 
   return (
     <div className="flex min-h-screen flex-col">
-      {/* Desktop top nav */}
+      {/* ── Desktop top nav ── */}
       <header className="sticky top-0 z-50 border-b border-border/60 bg-background/80 backdrop-blur-md">
-        <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 lg:px-8">
+        <div className="mx-auto flex h-12 max-w-7xl items-center justify-between px-4 lg:px-8">
           <div className="flex items-center gap-1">
             <Link
               href="/dashboard"
-              className="mr-4 text-base font-semibold tracking-tight"
+              className="mr-3 text-sm font-bold tracking-tight"
             >
               Networth
             </Link>
-            <nav className="hidden md:flex items-center gap-0.5">
-              {NAV_ITEMS.map((item) => {
+
+            {/* Primary nav items */}
+            <nav className="hidden md:flex items-center">
+              {PRIMARY_NAV.map((item) => {
                 const isActive = pathname === item.href;
                 return (
                   <Link
                     key={item.href}
                     href={item.href}
                     className={cn(
-                      "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors",
+                      "flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors",
                       isActive
                         ? "bg-foreground/[0.06] text-foreground"
-                        : "text-muted-foreground hover:text-foreground hover:bg-foreground/[0.03]"
+                        : "text-muted-foreground hover:text-foreground hover:bg-foreground/[0.03]",
                     )}
                   >
-                    <item.icon className="h-4 w-4" />
+                    <item.icon className="h-3.5 w-3.5" />
                     <span>{item.label}</span>
                   </Link>
                 );
               })}
+
+              {/* "More" dropdown */}
+              <div className="relative">
+                <button
+                  onClick={() => setMoreOpen(!moreOpen)}
+                  className={cn(
+                    "flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition-colors",
+                    isSecondaryActive
+                      ? "bg-foreground/[0.06] text-foreground"
+                      : "text-muted-foreground hover:text-foreground hover:bg-foreground/[0.03]",
+                  )}
+                >
+                  <MoreHorizontal className="h-3.5 w-3.5" />
+                  <span>More</span>
+                  <ChevronDown className={cn("h-3 w-3 transition-transform", moreOpen && "rotate-180")} />
+                </button>
+
+                {moreOpen && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setMoreOpen(false)} />
+                    <div className="absolute left-0 top-full mt-1 w-48 rounded-lg bg-popover p-1 shadow-lg ring-1 ring-border/50 z-50">
+                      {SECONDARY_NAV.map((item) => {
+                        const isActive = pathname === item.href;
+                        return (
+                          <Link
+                            key={item.href}
+                            href={item.href}
+                            onClick={() => setMoreOpen(false)}
+                            className={cn(
+                              "flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors",
+                              isActive
+                                ? "bg-foreground/[0.06] text-foreground"
+                                : "text-muted-foreground hover:text-foreground hover:bg-foreground/[0.03]",
+                            )}
+                          >
+                            <item.icon className="h-4 w-4" />
+                            <span>{item.label}</span>
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </div>
             </nav>
           </div>
-          <div className="flex items-center gap-1.5">
+
+          {/* Right side actions */}
+          <div className="flex items-center gap-1">
             <SnapshotButton />
             <SaveButton />
-            <Link
-              href="/settings"
-              className="flex items-center justify-center h-8 w-8 rounded-full bg-secondary text-secondary-foreground transition-colors hover:bg-secondary/80"
-            >
-              <Settings className="h-3.5 w-3.5" />
-            </Link>
             <ThemeToggle />
             <CurrencyToggle />
           </div>
         </div>
       </header>
 
-      {/* Main content */}
+      {/* ── Main content ── */}
       <main className="flex-1">
         <div className="mx-auto max-w-7xl px-4 py-6 lg:px-8 lg:py-8">
           {children}
         </div>
       </main>
 
-      {/* Mobile bottom nav */}
+      {/* ── Mobile bottom nav ── */}
       <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-border/60 bg-background/90 backdrop-blur-md md:hidden">
-        <div className="flex items-center justify-around h-16 px-2">
-          {NAV_ITEMS.map((item) => {
+        <div className="flex items-center justify-around h-14 px-1">
+          {MOBILE_NAV.map((item) => {
             const isActive = pathname === item.href;
             return (
               <Link
                 key={item.href}
                 href={item.href}
                 className={cn(
-                  "flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg text-[10px] font-medium transition-colors",
-                  isActive
-                    ? "text-foreground"
-                    : "text-muted-foreground"
+                  "flex flex-col items-center gap-0.5 px-3 py-1 rounded-lg text-[9px] font-medium transition-colors",
+                  isActive ? "text-foreground" : "text-muted-foreground",
                 )}
               >
-                <item.icon
-                  className={cn("h-5 w-5", isActive && "text-accent")}
-                />
+                <item.icon className={cn("h-5 w-5", isActive && "text-accent")} />
                 <span>{item.label}</span>
               </Link>
             );
           })}
+          {/* More button */}
+          <button
+            onClick={() => setMobileDrawer(true)}
+            className={cn(
+              "flex flex-col items-center gap-0.5 px-3 py-1 rounded-lg text-[9px] font-medium transition-colors",
+              isSecondaryActive ? "text-foreground" : "text-muted-foreground",
+            )}
+          >
+            <MoreHorizontal className={cn("h-5 w-5", isSecondaryActive && "text-accent")} />
+            <span>More</span>
+          </button>
         </div>
       </nav>
 
+      {/* ── Mobile drawer ── */}
+      {mobileDrawer && (
+        <div className="fixed inset-0 z-50 md:hidden">
+          <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={() => setMobileDrawer(false)} />
+          <div className="absolute bottom-0 left-0 right-0 bg-background rounded-t-2xl shadow-xl ring-1 ring-border/50 pb-8 animate-in slide-in-from-bottom duration-200">
+            <div className="flex items-center justify-between px-5 pt-4 pb-2">
+              <span className="text-sm font-semibold">More</span>
+              <button onClick={() => setMobileDrawer(false)} className="p-1 rounded-full hover:bg-secondary transition-colors">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="px-3 pb-2">
+              {[...PRIMARY_NAV.slice(4), ...SECONDARY_NAV].map((item) => {
+                const isActive = pathname === item.href;
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    onClick={() => setMobileDrawer(false)}
+                    className={cn(
+                      "flex items-center gap-3 px-3 py-3 rounded-lg transition-colors",
+                      isActive
+                        ? "bg-foreground/[0.06] text-foreground"
+                        : "text-muted-foreground hover:text-foreground hover:bg-foreground/[0.03]",
+                    )}
+                  >
+                    <item.icon className="h-5 w-5" />
+                    <span className="text-sm font-medium">{item.label}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Bottom padding for mobile nav */}
-      <div className="h-16 md:hidden" />
+      <div className="h-14 md:hidden" />
     </div>
   );
 }
