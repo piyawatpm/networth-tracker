@@ -101,6 +101,8 @@ export function ExpenseDialog({ entry, onSave, onCreateRecurring, trigger, categ
       date,
       notes: notes.trim(),
       images,
+      isRecurring: makeRecurring || entry?.isRecurring,
+      recurringId: entry?.recurringId,
       createdAt: entry?.createdAt ?? Date.now(),
     };
 
