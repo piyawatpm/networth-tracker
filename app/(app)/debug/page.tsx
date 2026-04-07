@@ -360,7 +360,7 @@ export default function DebugPage() {
                         </td>
                         <td className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">
                           {isEditing ? <Input type="number" value={editValue2} onChange={(e) => setEditValue2(e.target.value)} className="h-6 w-24 text-xs tabular-nums px-1.5 ml-auto" />
-                            : s.valueWithSuper.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            : (s.valueWithSuper ?? s.value ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </td>
                         <td className="px-2 py-1.5 text-right">
                           {isEditing ? (
