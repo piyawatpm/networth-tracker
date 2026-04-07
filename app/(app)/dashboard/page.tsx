@@ -254,7 +254,8 @@ export default function DashboardPage() {
 
   const netCashFlow = periodIncomeTotal - periodExpenseTotal;
   const savingsRate = periodIncomeTotal > 0 ? ((periodIncomeTotal - periodExpenseTotal) / periodIncomeTotal) * 100 : 0;
-  const debtToAssetRatio = totalAssets > 0 ? (iOwe / totalAssets) * 100 : 0;
+  const netDebt = Math.max(0, iOwe - owedToMe);
+  const debtToAssetRatio = totalAssets > 0 ? (netDebt / totalAssets) * 100 : 0;
   const incomeChange = prevIncomeTotal > 0 ? ((periodIncomeTotal - prevIncomeTotal) / prevIncomeTotal) * 100 : 0;
   const expenseChange = prevExpenseTotal > 0 ? ((periodExpenseTotal - prevExpenseTotal) / prevExpenseTotal) * 100 : 0;
 
@@ -272,7 +273,7 @@ export default function DashboardPage() {
     return periodExpenseTotal * (52 / 12);
   }, [periodExpenseTotal, period]);
 
-  const debtToIncomeRatio = annualizedIncome > 0 ? (iOwe / annualizedIncome) * 100 : 0;
+  const debtToIncomeRatio = annualizedIncome > 0 ? (netDebt / annualizedIncome) * 100 : 0;
 
   const liquidAssets = useMemo(() => {
     const cashLikePortfolio = portfolioHoldings
@@ -315,14 +316,14 @@ export default function DashboardPage() {
   const indicators: FinancialIndicator[] = useMemo(() => [
     { label: "Debt / Assets", value: debtToAssetRatio, max: 100, thresholds: [30, 60] as [number, number], invert: true, suffix: "%",
       status: debtToAssetRatio <= 30 ? "Healthy" : debtToAssetRatio <= 60 ? "Moderate" : "High",
-      formula: "Total Liabilities \u00f7 Total Assets", detail: `${format(iOwe)} \u00f7 ${format(totalAssets)}`,
-      desc: "Measures how much of your assets are financed by debt. Lower is better \u2014 means you truly own more of what you have.",
+      formula: "(Liabilities \u2212 Owed to Me) \u00f7 Total Assets", detail: `(${format(iOwe)} \u2212 ${format(owedToMe)}) \u00f7 ${format(totalAssets)} = ${format(netDebt)}`,
+      desc: "Net debt (what you owe minus what others owe you) as a share of total assets. Lower is better.",
       tip: debtToAssetRatio <= 30 ? "You're in great shape. Keep debt low as you grow assets." : debtToAssetRatio <= 60 ? "Consider paying down debt before taking on more." : "Focus on debt reduction \u2014 pay off highest-interest debt first.",
     },
     { label: "Debt / Income", value: debtToIncomeRatio, max: 100, thresholds: [35, 50] as [number, number], invert: true, suffix: "%",
       status: debtToIncomeRatio <= 35 ? "Healthy" : debtToIncomeRatio <= 50 ? "Caution" : "High",
-      formula: "Total Debt \u00f7 Annual Income", detail: `${format(iOwe)} \u00f7 ${format(annualizedIncome)}`,
-      desc: "Shows your total debt burden relative to what you earn. Banks use this to assess lending risk \u2014 under 35% is ideal.",
+      formula: "Net Debt \u00f7 Annual Income", detail: `${format(netDebt)} \u00f7 ${format(annualizedIncome)}`,
+      desc: "Net debt (liabilities minus receivables) relative to income. Banks use this to assess risk \u2014 under 35% is ideal.",
       tip: debtToIncomeRatio <= 35 ? "Lenders see you as low risk. Good position for future borrowing if needed." : "Avoid new debt until this ratio drops. Focus on increasing income or paying down principal.",
     },
     { label: "Savings Rate", value: savingsRate, max: 100, thresholds: [10, 20] as [number, number], invert: false, suffix: "%",
