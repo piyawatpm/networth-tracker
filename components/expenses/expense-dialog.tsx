@@ -47,12 +47,14 @@ interface ExpenseDialogProps {
   categoryTypes?: string[];
   /** Map of type key → display label */
   categoryLabels?: Record<string, string>;
+  /** Previously used vendors for quick selection */
+  knownVendors?: string[];
 }
 
 const PAYMENT_METHODS = Object.keys(PAYMENT_METHOD_LABELS) as PaymentMethod[];
 const FREQUENCIES = Object.keys(FREQUENCY_LABELS) as RecurringFrequency[];
 
-export function ExpenseDialog({ entry, onSave, onCreateRecurring, trigger, categoryTypes, categoryLabels }: ExpenseDialogProps) {
+export function ExpenseDialog({ entry, onSave, onCreateRecurring, trigger, categoryTypes, categoryLabels, knownVendors }: ExpenseDialogProps) {
   const { enabledCurrencies } = useCurrency();
   const [open, setOpen] = useState(false);
   const [type, setType] = useState<string>(entry?.type ?? "food");
@@ -225,6 +227,23 @@ export function ExpenseDialog({ entry, onSave, onCreateRecurring, trigger, categ
               onChange={(e) => setVendor(e.target.value)}
               placeholder="e.g. Woolworths, Uber Eats"
             />
+            {knownVendors && knownVendors.length > 0 && !entry && (
+              <div className="flex flex-wrap gap-1">
+                {knownVendors
+                  .filter((v) => !vendor || v.toLowerCase().includes(vendor.toLowerCase()))
+                  .slice(0, 8)
+                  .map((v) => (
+                    <button
+                      key={v}
+                      type="button"
+                      onClick={() => setVendor(v)}
+                      className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-medium text-secondary-foreground hover:bg-secondary/80 transition-colors"
+                    >
+                      {v}
+                    </button>
+                  ))}
+              </div>
+            )}
           </div>
 
           {/* Payment Method */}

@@ -270,6 +270,18 @@ export default function ExpensesPage() {
   // Category ids that are in use (for manage dialog)
   const usedCategoryIds = useMemo(() => new Set(entries.map((e) => e.type)), [entries]);
 
+  // Known vendors sorted by frequency (most used first)
+  const knownVendors = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const e of entries) {
+      const v = (e.vendor ?? "").trim();
+      if (v) counts[v] = (counts[v] ?? 0) + 1;
+    }
+    return Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .map(([v]) => v);
+  }, [entries]);
+
   const methodsPresent = useMemo(() => {
     const set = new Set<PaymentMethod>();
     entries.forEach((e) => {
@@ -438,6 +450,7 @@ export default function ExpensesPage() {
                   onCreateRecurring={addTemplate}
                   categoryTypes={categoryTypes}
                   categoryLabels={categoryLabels}
+                  knownVendors={knownVendors}
                   trigger={
                     <Button size="sm">
                       <Plus className="mr-1 h-3.5 w-3.5" />
@@ -656,6 +669,7 @@ export default function ExpensesPage() {
                 onCreateRecurring={addTemplate}
                 categoryTypes={categoryTypes}
                 categoryLabels={categoryLabels}
+                knownVendors={knownVendors}
                 trigger={
                   <Button size="sm">
                     <Plus className="mr-1 h-3.5 w-3.5" />
