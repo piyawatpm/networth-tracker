@@ -39,9 +39,11 @@ export function MonthlyTrendChart({
 
     if (!byCategory) {
       const data = monthKeys.map((mk) =>
-        entries
-          .filter((e) => getMonthKey(e.date) === mk)
-          .reduce((sum, e) => sum + convert(e.amount, e.currency), 0),
+        Math.round(
+          entries
+            .filter((e) => getMonthKey(e.date) === mk)
+            .reduce((sum, e) => sum + convert(e.amount, e.currency), 0) * 100,
+        ) / 100,
       );
 
       if (defaultChartType === "bar") {
