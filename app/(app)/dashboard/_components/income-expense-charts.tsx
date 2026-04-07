@@ -91,6 +91,7 @@ export function IncomeExpenseCharts({
       textStyle: { color: CC.fg, fontSize: 12 },
       extraCssText:
         "border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);",
+      valueFormatter: (v: number) => format(Math.round(v * 100) / 100),
     },
     series: [
       {
