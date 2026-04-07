@@ -343,10 +343,16 @@ export default function IncomePage() {
       {/* ================================================================= */}
       <BlurFade delay={0}>
         <section className="space-y-4">
-          <p className="label-mono mb-2">This Month&rsquo;s Income</p>
+          <p className="label-mono mb-2">
+            {datePreset === "this_month" ? "This Month\u2019s Income"
+              : datePreset === "last_month" ? "Last Month\u2019s Income"
+              : datePreset === "last_90" ? "Last 90 Days Income"
+              : datePreset === "ytd" ? "Year to Date Income"
+              : "Custom Period Income"}
+          </p>
           <div className="display-number text-income">
             <NumberTicker
-              value={thisMonthTotal}
+              value={dateFilteredTotal}
               prefix={symbol}
               decimalPlaces={2}
             />
@@ -356,16 +362,16 @@ export default function IncomePage() {
           <div className="finance-card p-5">
             <div className="grid grid-cols-2 gap-4 md:grid-cols-4 md:gap-0 md:divide-x md:divide-border">
               <div className="md:pr-6">
+                <p className="label-mono mb-1">Selected Period</p>
+                <p className="text-lg font-semibold tabular-nums">{format(dateFilteredTotal)}</p>
+              </div>
+              <div className="md:px-6">
+                <p className="label-mono mb-1">Entries</p>
+                <p className="text-lg font-semibold tabular-nums">{dateFilteredEntries.length}</p>
+              </div>
+              <div className="md:px-6">
                 <p className="label-mono mb-1">This Month</p>
                 <p className="text-lg font-semibold tabular-nums">{format(thisMonthTotal)}</p>
-              </div>
-              <div className="md:px-6">
-                <p className="label-mono mb-1">Last Month</p>
-                <p className="text-lg font-semibold tabular-nums">{format(lastMonthTotal)}</p>
-              </div>
-              <div className="md:px-6">
-                <p className="label-mono mb-1">Weekly Avg</p>
-                <p className="text-lg font-semibold tabular-nums">{format(weeklyAvg)}/wk</p>
               </div>
               <div className="md:pl-6">
                 <p className="label-mono mb-1">Monthly Pace</p>
