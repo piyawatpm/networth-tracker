@@ -189,16 +189,8 @@ export default function CryptoPage() {
   const totalValueConverted = useMemo(() => convert(totalValueUsd, "USD"), [totalValueUsd, convert]);
   // currency, symbol, format already destructured above
 
-  useEffect(() => {
-    if (totalValueConverted <= 0) return;
-    const today = new Date().toLocaleDateString("en-CA", { timeZone: "Australia/Sydney" });
-    const existing = cryptoSnapshots.find((s) => s.date === today);
-    if (existing && existing.currency === currency && Math.abs(existing.value - totalValueConverted) < 1) return;
-    setCryptoSnapshots((prev) => [
-      ...prev.filter((s) => s.date !== today).slice(-89),
-      { date: today, value: totalValueConverted, currency },
-    ]);
-  }, [totalValueConverted, cryptoSnapshots, setCryptoSnapshots, currency]);
+  // Crypto snapshots — no longer auto-saved client-side.
+  // Snapshots are created by: manual snapshot button (📷) or daily cron.
 
   const cryptoTrendData = useMemo(() => {
     return cryptoSnapshots.map((s) => {

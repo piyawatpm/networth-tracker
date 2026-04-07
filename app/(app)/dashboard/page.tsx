@@ -204,25 +204,9 @@ export default function DashboardPage() {
   const netWorth = includeSuper ? netWorthWithSuper : netWorthNoSuper;
   const totalAssets = (includeSuper ? portfolioTotal : normalTotal) + cryptoTotal + owedToMe;
 
-  // Net worth snapshots — store with currency tag + breakdown for multi-line chart
-  useEffect(() => {
-    if (netWorthWithSuper === 0 && netWorthNoSuper === 0) return;
-    const today = getSydneyDateString();
-    const existing = nwSnapshots.find((s) => s.date === today);
-    const snap = existing as { currency?: string } | undefined;
-    if (existing && snap?.currency === currency && Math.abs(existing.value - netWorthWithSuper) < 1) return;
-    setNwSnapshots((prev) => [
-      ...prev.filter((s) => s.date !== today).slice(-89),
-      {
-        date: today,
-        value: netWorthWithSuper,
-        valueNoSuper: netWorthNoSuper,
-        currency,
-        portfolio: includeSuper ? portfolioTotal : normalTotal,
-        crypto: cryptoTotal,
-      },
-    ]);
-  }, [netWorthWithSuper, netWorthNoSuper, nwSnapshots, setNwSnapshots, currency, portfolioTotal, normalTotal, cryptoTotal, includeSuper]);
+  // Net worth snapshots — no longer auto-saved client-side.
+  // Snapshots are created by: manual snapshot button (📷) or daily cron.
+  // This avoids duplicates and currency mismatch issues.
 
   // Convert all snapshots to current display currency at render time
   const nwTrendData = useMemo(() => {

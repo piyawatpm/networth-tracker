@@ -284,27 +284,8 @@ export default function PortfolioPage() {
     };
   }, [filteredHoldings, convert]);
 
-  useEffect(() => {
-    if (holdings.length === 0) return;
-    const today = getSydneyDateString();
-
-    const valueNoSuper = holdings
-      .filter((h) => h.accountType !== "super" && h.type !== "savings")
-      .reduce((s, h) => s + convert(h.currentValue, h.currency), 0);
-    const valueAll = holdings
-      .filter((h) => h.type !== "savings")
-      .reduce((s, h) => s + convert(h.currentValue, h.currency), 0);
-
-    // Update today's snapshot if value or currency changed significantly
-    const existing = snapshots.find((s) => s.date === today);
-    const snapCur = (existing as { currency?: string } | undefined)?.currency;
-    if (existing && snapCur === currency && Math.abs(existing.valueWithSuper - valueAll) < 1) return;
-
-    setSnapshots((prev) => [
-      ...prev.filter((s) => s.date !== today).slice(-89),
-      { date: today, value: valueNoSuper, valueWithSuper: valueAll, currency } as PortfolioSnapshot,
-    ]);
-  }, [holdings, snapshots, setSnapshots, convert, currency]);
+  // Portfolio snapshots — no longer auto-saved client-side.
+  // Snapshots are created by: manual snapshot button (📷) or daily cron.
 
   const trendData = useMemo(() => {
     let filtered = snapshots;
