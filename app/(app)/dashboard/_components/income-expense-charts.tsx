@@ -56,7 +56,7 @@ export function IncomeExpenseCharts({
 }: IncomeExpenseChartsProps) {
   const incExpBarOption = {
     backgroundColor: "transparent",
-    grid: { top: 12, right: 8, bottom: 28, left: 48, containLabel: false },
+    grid: { top: 12, right: 8, bottom: 28, left: 8, containLabel: true },
     xAxis: {
       type: "category" as const,
       data: barData.map((d) => d.month),

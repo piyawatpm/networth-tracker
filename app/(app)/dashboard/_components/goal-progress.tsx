@@ -57,17 +57,17 @@ export function VitalsCard({
       <BlurFade delay={delayVitals} className="md:col-span-8">
         <div className="finance-card p-6 h-full flex flex-col justify-center">
           <p className="label-mono mb-4">{periodLabel}</p>
-          <div className="grid grid-cols-3 divide-x divide-border">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-0 sm:divide-x sm:divide-border">
             {/* Income */}
-            <div className="pr-5">
-              <p className="text-2xl md:text-3xl font-semibold tracking-tight tabular-nums text-income">
+            <div className="sm:pr-5">
+              <p className="text-xl sm:text-2xl md:text-3xl font-semibold tracking-tight tabular-nums text-income">
                 {format(periodIncomeTotal)}
               </p>
               <p className="label-mono mt-1">Income</p>
               {prevIncomeTotal > 0 && (
                 <div
                   className={cn(
-                    "flex items-center gap-1 mt-2 text-xs font-medium",
+                    "flex items-center gap-1 mt-1.5 text-xs font-medium",
                     incomeChange >= 0 ? "text-income" : "text-expense",
                   )}
                 >
@@ -84,15 +84,15 @@ export function VitalsCard({
               )}
             </div>
             {/* Expenses */}
-            <div className="px-5">
-              <p className="text-2xl md:text-3xl font-semibold tracking-tight tabular-nums text-expense">
+            <div className="sm:px-5">
+              <p className="text-xl sm:text-2xl md:text-3xl font-semibold tracking-tight tabular-nums text-expense">
                 {format(periodExpenseTotal)}
               </p>
               <p className="label-mono mt-1">Expenses</p>
               {prevExpenseTotal > 0 && (
                 <div
                   className={cn(
-                    "flex items-center gap-1 mt-2 text-xs font-medium",
+                    "flex items-center gap-1 mt-1.5 text-xs font-medium",
                     expenseChange <= 0 ? "text-income" : "text-expense",
                   )}
                 >
@@ -109,10 +109,10 @@ export function VitalsCard({
               )}
             </div>
             {/* Net */}
-            <div className="pl-5">
+            <div className="sm:pl-5">
               <p
                 className={cn(
-                  "text-2xl md:text-3xl font-semibold tracking-tight tabular-nums",
+                  "text-xl sm:text-2xl md:text-3xl font-semibold tracking-tight tabular-nums",
                   netCashFlow >= 0 ? "text-income" : "text-expense",
                 )}
               >
