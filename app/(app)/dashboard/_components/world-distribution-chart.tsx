@@ -56,7 +56,7 @@ export function WorldDistributionChart({
       { key: "normal", label: WORLD_LABELS.normal, value: normalTotal, color: WORLD_COLORS.normal },
       { key: "crypto", label: WORLD_LABELS.crypto, value: cryptoTotal, color: WORLD_COLORS.crypto },
       { key: "super", label: WORLD_LABELS.super, value: superTotal, color: WORLD_COLORS.super },
-    ],
+    ].filter((s) => s.value > 0) as WorldSegment[],
     [normalTotal, cryptoTotal, superTotal],
   );
 

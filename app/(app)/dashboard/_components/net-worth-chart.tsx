@@ -140,16 +140,16 @@ export function NetWorthChart({ nwTrendData, format, includeSuper = true, delay 
               )}
             </div>
             {stats && (
-              <div className="flex items-center gap-2 mt-1">
+              <div className="flex flex-wrap items-center gap-1.5 mt-1">
                 <span className={cn(
-                  "flex items-center gap-0.5 text-sm font-semibold tabular-nums",
+                  "flex items-center gap-0.5 text-xs font-semibold tabular-nums",
                   isPositive ? "text-income" : "text-expense",
                 )}>
-                  {isPositive ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
+                  {isPositive ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
                   {isPositive ? "+" : ""}{format(stats.change, undefined, true)}
                 </span>
                 <span className={cn(
-                  "text-xs font-mono tabular-nums px-1.5 py-0.5 rounded",
+                  "text-[10px] font-mono tabular-nums px-1.5 py-0.5 rounded",
                   isPositive ? "bg-income/10 text-income" : "bg-expense/10 text-expense",
                 )}>
                   {isPositive ? "+" : ""}{stats.changePct.toFixed(1)}%

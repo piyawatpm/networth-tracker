@@ -471,7 +471,7 @@ export default function DashboardPage() {
   const D = 0.05;
 
   return (
-    <div className="space-y-8 pb-12">
+    <div className="space-y-6 pb-12">
       {/* Floating period toggle */}
       <div className="fixed bottom-20 md:bottom-6 right-4 lg:right-8 z-40">
         <div className="flex items-center rounded-full bg-card/90 backdrop-blur-md p-0.5 gap-0.5 shadow-lg ring-1 ring-border/40">

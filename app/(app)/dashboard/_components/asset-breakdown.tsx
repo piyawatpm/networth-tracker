@@ -89,7 +89,7 @@ export function AssetBreakdown({
 
         <div className="divide-y divide-border">
           {rows
-            .filter((row) => isVisible(row.key))
+            .filter((row) => isVisible(row.key) && (row.value !== 0 || row.negative))
             .map((row) => (
               <div
                 key={row.key}
