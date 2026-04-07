@@ -169,16 +169,31 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
+    // Debug: list each holding for verification
+    const holdingsDebug = holdings
+      .filter((h) => h.type !== "savings")
+      .map((h) => ({
+        name: (h as { name?: string }).name ?? h.id,
+        type: h.type,
+        accountType: h.accountType,
+        currency: h.currency,
+        currentValue: h.currentValue,
+        inUsd: toUsd(h.currentValue ?? 0, h.currency ?? "AUD"),
+      }));
+
     return NextResponse.json({
       ok: true,
       date: today,
       currency: SNAPSHOT_CURRENCY,
       portfolioTotal: Math.round(portfolioTotal * 100) / 100,
+      portfolioNoSuper: Math.round(portfolioNoSuper * 100) / 100,
       cryptoTotal: Math.round(cryptoInUsd * 100) / 100,
       netWorth: Math.round(netWorth * 100) / 100,
+      netWorthNoSuper: Math.round(netWorthNoSuper * 100) / 100,
       owedToMe: Math.round(owedToMe * 100) / 100,
       iOwe: Math.round(iOwe * 100) / 100,
       manualUpdatesApplied: manualUpdates ? Object.keys(manualUpdates).length : 0,
+      holdingsBreakdown: holdingsDebug,
     });
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });
