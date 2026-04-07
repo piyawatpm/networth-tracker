@@ -287,19 +287,20 @@ export default function PortfolioPage() {
   useEffect(() => {
     if (holdings.length === 0) return;
     const today = getSydneyDateString();
-    const alreadyRecorded = snapshots.some((s) => s.date === today);
-    if (alreadyRecorded) return;
 
     const valueNoSuper = holdings
-      .filter((h) => h.accountType !== "super")
+      .filter((h) => h.accountType !== "super" && h.type !== "savings")
       .reduce((s, h) => s + convert(h.currentValue, h.currency), 0);
-    const valueAll = holdings.reduce(
-      (s, h) => s + convert(h.currentValue, h.currency),
-      0
-    );
+    const valueAll = holdings
+      .filter((h) => h.type !== "savings")
+      .reduce((s, h) => s + convert(h.currentValue, h.currency), 0);
+
+    // Update today's snapshot if value changed significantly
+    const existing = snapshots.find((s) => s.date === today);
+    if (existing && Math.abs(existing.valueWithSuper - valueAll) < 1) return;
 
     setSnapshots((prev) => [
-      ...prev.slice(-89),
+      ...prev.filter((s) => s.date !== today).slice(-89),
       { date: today, value: valueNoSuper, valueWithSuper: valueAll },
     ]);
   }, [holdings, snapshots, setSnapshots, convert]);
