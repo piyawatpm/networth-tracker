@@ -80,9 +80,17 @@ function generateRecurringEntries<T extends RecurringTemplate>(
 // ---------------------------------------------------------------------------
 
 export async function GET(request: Request) {
-  // Verify cron secret (Vercel sets this automatically)
+  // Verify cron secret — check multiple headers for compatibility
+  const secret = process.env.CRON_SECRET;
   const authHeader = request.headers.get("authorization");
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  const vercelHeader = request.headers.get("x-vercel-cron-secret");
+
+  const isAuthed =
+    (authHeader === `Bearer ${secret}`) ||
+    (vercelHeader === secret) ||
+    !secret; // allow if no secret is configured
+
+  if (!isAuthed) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
