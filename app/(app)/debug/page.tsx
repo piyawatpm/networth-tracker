@@ -51,6 +51,22 @@ export default function DebugPage() {
   const recurringExpenseEntries = expenseEntries.filter((e) => e.isRecurring);
   const recurringIncomeEntries = incomeEntries.filter((e) => e.isRecurring);
 
+  const [snapshotDebug, setSnapshotDebug] = useState<string | null>(null);
+  const [snapshotLoading, setSnapshotLoading] = useState(false);
+
+  async function testSnapshot() {
+    setSnapshotLoading(true);
+    setSnapshotDebug(null);
+    try {
+      const res = await fetch("/api/snapshot", { method: "POST" });
+      const data = await res.json();
+      setSnapshotDebug(JSON.stringify(data, null, 2));
+    } catch (e) {
+      setSnapshotDebug(`Error: ${e}`);
+    }
+    setSnapshotLoading(false);
+  }
+
   async function triggerCronManually() {
     setTriggering(true);
     setTriggerResult(null);
@@ -73,6 +89,24 @@ export default function DebugPage() {
         <div className="flex items-center gap-3">
           <Bug className="h-6 w-6 text-muted-foreground" />
           <h1 className="text-2xl font-semibold tracking-tight">Debug & Cron Status</h1>
+        </div>
+      </BlurFade>
+
+      {/* Snapshot Debug */}
+      <BlurFade delay={0.03}>
+        <div className="finance-card p-5">
+          <div className="flex items-center justify-between mb-4">
+            <p className="label-mono">Snapshot Debug</p>
+            <Button variant="outline" size="sm" onClick={testSnapshot} disabled={snapshotLoading} className="gap-1.5">
+              {snapshotLoading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Camera className="h-3.5 w-3.5" />}
+              Test Snapshot (dry run)
+            </Button>
+          </div>
+          {snapshotDebug && (
+            <pre className="text-[11px] font-mono whitespace-pre-wrap text-muted-foreground bg-secondary/30 rounded-lg p-3 overflow-x-auto max-h-96 overflow-y-auto">
+              {snapshotDebug}
+            </pre>
+          )}
         </div>
       </BlurFade>
 
