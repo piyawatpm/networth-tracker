@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useMemo } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import { useCloudStorage } from "@/components/providers/data-provider";
 import { getSydneyDateString, computeOccurrences } from "@/lib/utils/timezone";
 import { nextDay } from "@/lib/utils/entry-helpers";
@@ -28,14 +28,18 @@ export function useRecurringEntries<
 ) {
   const [templates, setTemplates] = useCloudStorage<T[]>(config.storageKey, []);
   const hasGenerated = useRef(false);
-
-  // Stabilize config reference to avoid re-triggering effect
   const createEntry = config.createEntry;
-  const storageKey = config.storageKey;
 
+  // Client-side generation: runs once on mount as fallback if cron missed
   useEffect(() => {
     if (hasGenerated.current) return;
     if (templates.length === 0) return;
+    // Wait for entries to be hydrated (non-empty or at least templates exist)
+    // Don't set hasGenerated if entries haven't loaded yet
+    if (entries.length === 0 && templates.some((t) => t.lastGeneratedDate)) {
+      // Templates have been used before but entries are empty = not hydrated yet
+      return;
+    }
 
     hasGenerated.current = true;
     const today = getSydneyDateString();
@@ -79,27 +83,28 @@ export function useRecurringEntries<
       setEntries((prev) => [...prev, ...newEntries]);
       setTemplates(updatedTemplates);
     }
-  }, [templates, entries, setEntries, setTemplates, createEntry, storageKey]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [templates.length, entries.length]);
 
-  function addTemplate(template: T) {
+  const addTemplate = useCallback((template: T) => {
     setTemplates((prev) => [...prev, template]);
-  }
+  }, [setTemplates]);
 
-  function updateTemplate(updated: T) {
+  const updateTemplate = useCallback((updated: T) => {
     setTemplates((prev) =>
       prev.map((t) => (t.id === updated.id ? updated : t)),
     );
-  }
+  }, [setTemplates]);
 
-  function deleteTemplate(id: string) {
+  const deleteTemplate = useCallback((id: string) => {
     setTemplates((prev) => prev.filter((t) => t.id !== id));
-  }
+  }, [setTemplates]);
 
-  function toggleTemplate(id: string) {
+  const toggleTemplate = useCallback((id: string) => {
     setTemplates((prev) =>
       prev.map((t) => (t.id === id ? { ...t, active: !t.active } : t)),
     );
-  }
+  }, [setTemplates]);
 
   return {
     templates,
