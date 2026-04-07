@@ -1,8 +1,8 @@
 import type { CryptoHolding } from "./types";
-import { COINGECKO_IDS, STABLECOINS } from "./constants";
+import { STABLECOINS } from "./constants";
 
 const PRICE_CACHE_KEY = "crypto_prices";
-const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours
+const CACHE_DURATION = 60 * 60 * 1000; // 1 hour (client-side re-fetch interval)
 
 interface CachedPrices {
   prices: Record<string, number>; // token symbol → USD price
@@ -25,37 +25,55 @@ export function isCryptoPricesCacheStale(): boolean {
   return Date.now() - cached.fetchedAt > CACHE_DURATION;
 }
 
+/**
+ * Fetch crypto prices from Binance API.
+ * Falls back to stale cache if fetch fails.
+ */
 export async function fetchCryptoPrices(
   tokens: string[],
 ): Promise<Record<string, number>> {
-  // Build CoinGecko IDs list from token symbols
-  const idMap: Record<string, string> = {}; // coingecko_id → token symbol
-  for (const token of tokens) {
-    if (token === "Stablecoin" || STABLECOINS.has(token.toUpperCase())) continue; // stablecoins are $1
-    const geckoId = COINGECKO_IDS[token] ?? token.toLowerCase();
-    idMap[geckoId] = token;
-  }
+  // Filter out stablecoins
+  const toFetch = tokens.filter((t) => {
+    const upper = t.toUpperCase();
+    return !STABLECOINS.has(upper) && upper !== "STABLECOIN" && upper !== "CASH";
+  });
 
-  const ids = Object.keys(idMap);
-  if (ids.length === 0) return {};
+  if (toFetch.length === 0) return {};
 
   try {
-    const url = `https://api.coingecko.com/api/v3/simple/price?ids=${ids.join(",")}&vs_currencies=usd`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`CoinGecko API error: ${res.status}`);
-    const data: Record<string, { usd?: number }> = await res.json();
+    // Fetch from Binance in parallel
+    const results = await Promise.all(
+      toFetch.map(async (token) => {
+        const symbol = `${token.toUpperCase()}USDT`;
+        try {
+          const res = await fetch(
+            `https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`,
+          );
+          if (!res.ok) return { token, price: null };
+          const data = await res.json();
+          return { token, price: parseFloat(data.price) };
+        } catch {
+          return { token, price: null };
+        }
+      }),
+    );
 
     const prices: Record<string, number> = {};
-    for (const [geckoId, priceData] of Object.entries(data)) {
-      const token = idMap[geckoId];
-      if (token && priceData.usd != null) {
-        prices[token] = priceData.usd;
+    for (const r of results) {
+      if (r.price !== null && !isNaN(r.price)) {
+        prices[r.token] = r.price;
       }
     }
 
     // Cache result
-    const cached: CachedPrices = { prices, fetchedAt: Date.now() };
-    localStorage.setItem(PRICE_CACHE_KEY, JSON.stringify(cached));
+    if (Object.keys(prices).length > 0) {
+      const cached: CachedPrices = { prices, fetchedAt: Date.now() };
+      try {
+        localStorage.setItem(PRICE_CACHE_KEY, JSON.stringify(cached));
+      } catch {
+        // localStorage not available
+      }
+    }
 
     return prices;
   } catch {
@@ -70,9 +88,9 @@ export function applyLivePrices(
   prices: Record<string, number>,
 ): CryptoHolding[] {
   return holdings.map((h) => {
-    if (h.token === "Stablecoin" || STABLECOINS.has(h.token.toUpperCase())) return h; // stablecoins stay at amount = value
+    if (h.token === "Stablecoin" || STABLECOINS.has(h.token.toUpperCase())) return h;
     const livePrice = prices[h.token];
-    if (livePrice == null) return h; // no price found, keep cost basis
+    if (livePrice == null) return h;
     return {
       ...h,
       currentValueUsd: livePrice * h.amount,

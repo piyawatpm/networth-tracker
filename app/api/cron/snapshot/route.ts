@@ -100,6 +100,8 @@ export async function GET(request: Request) {
       "expense_entries",
       "recurring_income_templates",
       "recurring_expense_templates",
+      "crypto_csv_text",
+      "crypto_prices",
     ];
 
     const { data: rows } = await supabase
@@ -220,6 +222,72 @@ export async function GET(request: Request) {
       }
     } else {
       log.push(`Recurring expenses: no templates`);
+    }
+
+    // ── 5. Crypto price update via Binance ──
+    const cryptoCsvText = parse<string>("crypto_csv_text", "");
+    if (cryptoCsvText) {
+      try {
+        // Parse CSV to get holdings with token + amount
+        // We import dynamically to keep the function pure
+        const { parseAndComputeHoldings } = await import("@/lib/utils/crypto-csv");
+        const { STABLECOINS, YIELD_PREFIXES } = await import("@/lib/utils/constants");
+
+        const holdings = parseAndComputeHoldings(cryptoCsvText);
+        const nonStableTokens = holdings.filter((h) => {
+          const upper = h.token.toUpperCase();
+          if (STABLECOINS.has(upper)) return false;
+          if (upper === "STABLECOIN" || upper === "CASH") return false;
+          if (YIELD_PREFIXES.some((p) => upper.toLowerCase().startsWith(p))) return false;
+          return h.amount > 0;
+        });
+
+        if (nonStableTokens.length > 0) {
+          // Fetch all prices from Binance in parallel
+          const pricePromises = nonStableTokens.map(async (h) => {
+            const symbol = `${h.token.toUpperCase()}USDT`;
+            try {
+              const res = await fetch(
+                `https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`,
+              );
+              if (!res.ok) return { token: h.token, price: null };
+              const data = await res.json();
+              return { token: h.token, price: parseFloat(data.price) };
+            } catch {
+              return { token: h.token, price: null };
+            }
+          });
+
+          const results = await Promise.all(pricePromises);
+          const prices: Record<string, number> = {};
+          let fetchedCount = 0;
+
+          for (const r of results) {
+            if (r.price !== null && !isNaN(r.price)) {
+              prices[r.token] = r.price;
+              fetchedCount++;
+            }
+          }
+
+          // Save prices to Supabase
+          if (fetchedCount > 0) {
+            updates.push({
+              key: "crypto_prices",
+              value: JSON.stringify({ prices, fetchedAt: Date.now() }),
+              updated_at: now,
+            });
+            log.push(`Crypto prices: fetched ${fetchedCount}/${nonStableTokens.length} from Binance — ${Object.entries(prices).map(([t, p]) => `${t}=$${p.toFixed(2)}`).join(", ")}`);
+          } else {
+            log.push(`Crypto prices: all fetches failed`);
+          }
+        } else {
+          log.push(`Crypto prices: no non-stable tokens to fetch`);
+        }
+      } catch (e) {
+        log.push(`Crypto prices error: ${String(e)}`);
+      }
+    } else {
+      log.push(`Crypto prices: no CSV data`);
     }
 
     // ── Write updates ──
