@@ -32,6 +32,7 @@ import {
   History,
   Search,
   ArrowRightLeft,
+  X,
 } from "lucide-react";
 import {
   HOLDING_TYPES,
@@ -368,26 +369,32 @@ export function HoldingsTable({
                                   if (e.key === "Enter") onSaveEditValue(h);
                                   if (e.key === "Escape") setEditingValueId(null);
                                 }}
-                                className="h-6 w-24 text-xs tabular-nums px-1.5"
+                                className="h-7 w-28 text-xs tabular-nums px-2"
                                 autoFocus
                               />
                               <Button variant="ghost" size="icon-xs" onClick={() => onSaveEditValue(h)}>
-                                <Check className="h-3 w-3" />
+                                <Check className="h-3 w-3 text-income" />
+                              </Button>
+                              <Button variant="ghost" size="icon-xs" onClick={() => setEditingValueId(null)}>
+                                <X className="h-3 w-3" />
                               </Button>
                             </div>
                           ) : (
-                            <p
-                              className="text-sm font-semibold tabular-nums cursor-pointer hover:text-accent transition-colors inline-flex items-center gap-1"
-                              onClick={() => onStartEditValue(h)}
-                              role="button"
-                            >
-                              {format(h.currentValue, h.currency)}
+                            <div className="inline-flex items-center gap-1.5">
+                              <span className="text-sm font-semibold tabular-nums">
+                                {format(h.currentValue, h.currency)}
+                              </span>
+                              <button
+                                onClick={() => onStartEditValue(h)}
+                                className="inline-flex items-center justify-center h-5 w-5 rounded-md bg-secondary hover:bg-secondary/80 transition-colors"
+                                title="Update value manually"
+                              >
+                                <Pencil className="h-2.5 w-2.5" />
+                              </button>
                               {canAutoUpdate(h.ticker) ? (
                                 <Zap className="h-2.5 w-2.5 text-accent" />
-                              ) : (
-                                <Hand className="h-2.5 w-2.5 text-muted-foreground/30" />
-                              )}
-                            </p>
+                              ) : null}
+                            </div>
                           )}
                           {priceCache[h.ticker?.toUpperCase()] && (
                             <p className="text-[9px] text-muted-foreground/40">

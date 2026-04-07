@@ -3,7 +3,8 @@ import { CHART_COLORS, HOLDING_TYPE_LABELS } from "@/lib/utils/constants";
 import { getSydneyDateString } from "@/lib/utils/timezone";
 import * as XLSX from "xlsx";
 
-export const HOLDING_TYPES: HoldingType[] = ["stock", "etf", "fund", "bond", "savings", "other"];
+// "savings" excluded — managed on the Emergency Fund page
+export const HOLDING_TYPES: HoldingType[] = ["stock", "etf", "fund", "bond", "other"];
 export const ACCOUNT_TYPES: AccountType[] = ["normal", "super"];
 
 export const HOLDING_TYPE_COLOR_MAP: Record<HoldingType, string> = {

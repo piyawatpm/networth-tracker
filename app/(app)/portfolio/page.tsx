@@ -199,7 +199,7 @@ export default function PortfolioPage() {
   }
 
   const filteredHoldings = useMemo(() => {
-    let result = holdings;
+    let result = holdings.filter((h) => h.type !== "savings"); // savings shown on Emergency page
     if (!includeSuper) result = result.filter((h) => h.accountType !== "super");
     if (typeFilter !== "all") result = result.filter((h) => h.type === typeFilter);
     if (accountFilter !== "all")
