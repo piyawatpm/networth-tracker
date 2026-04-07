@@ -13,7 +13,13 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}));
     const manualUpdates: Record<string, number> | undefined = body.manualUpdates;
 
-    const today = new Date().toLocaleDateString("en-CA", { timeZone: "Australia/Sydney" });
+    // Use datetime for manual snapshots (allows multiple per day)
+    const sydneyNow = new Date().toLocaleString("en-CA", {
+      timeZone: "Australia/Sydney",
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", hour12: false,
+    }).replace(",", "");
+    const today = sydneyNow; // "YYYY-MM-DD HH:mm"
 
     const { data: rows } = await supabase
       .from("app_data")
@@ -53,13 +59,13 @@ export async function POST(request: NextRequest) {
     const now = new Date().toISOString();
 
     const newPortfolio = [
-      ...portfolioSnapshots.filter((s) => s.date !== today).slice(-89),
+      ...portfolioSnapshots.slice(-89),
       { date: today, value: portfolioTotal },
     ];
     updates.push({ key: "portfolio_snapshots", value: JSON.stringify(newPortfolio), updated_at: now });
 
     const newNw = [
-      ...nwSnapshots.filter((s) => s.date !== today).slice(-89),
+      ...nwSnapshots.slice(-89),
       { date: today, value: portfolioTotal },
     ];
     updates.push({ key: "networth_snapshots", value: JSON.stringify(newNw), updated_at: now });

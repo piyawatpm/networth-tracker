@@ -42,7 +42,8 @@ export default function DebugPage() {
 
   const [triggerResult, setTriggerResult] = useState<string | null>(null);
   const [triggering, setTriggering] = useState(false);
-  const [editingSnapshot, setEditingSnapshot] = useState<{ type: "nw" | "portfolio"; date: string } | null>(null);
+  const [editingSnapshot, setEditingSnapshot] = useState<{ type: string; idx: number } | null>(null);
+  const [editDate, setEditDate] = useState("");
   const [editValue, setEditValue] = useState("");
   const [editValue2, setEditValue2] = useState("");
 
@@ -247,14 +248,8 @@ export default function DebugPage() {
               <Camera className="h-4 w-4 text-muted-foreground" />
               <p className="label-mono">Net Worth Snapshots ({nwSnapshots.length})</p>
             </div>
-            <Button
-              variant="ghost"
-              size="xs"
-              className="text-destructive text-[10px]"
-              onClick={() => { if (confirm("Clear ALL net worth snapshots?")) setNwSnapshots([]); }}
-            >
-              Clear All
-            </Button>
+            <Button variant="ghost" size="xs" className="text-destructive text-[10px]"
+              onClick={() => { if (confirm("Clear ALL net worth snapshots?")) setNwSnapshots([]); }}>Clear All</Button>
           </div>
           {nwSnapshots.length === 0 ? (
             <p className="text-xs text-muted-foreground text-center py-4">No snapshots</p>
@@ -263,65 +258,56 @@ export default function DebugPage() {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-border/60 text-left">
-                    <th className="px-2 py-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Date</th>
+                    <th className="px-2 py-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Date / Time</th>
                     <th className="px-2 py-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground text-right">Value (w/ Super)</th>
                     <th className="px-2 py-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground text-right">Value (no Super)</th>
                     <th className="px-2 py-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {[...nwSnapshots].reverse().map((s) => {
-                    const isEditing = editingSnapshot?.type === "nw" && editingSnapshot.date === s.date;
+                  {[...nwSnapshots].map((_, i) => nwSnapshots.length - 1 - i).map((idx) => {
+                    const s = nwSnapshots[idx];
+                    const isEditing = editingSnapshot?.type === "nw" && editingSnapshot.idx === idx;
                     return (
-                      <tr key={s.date} className="border-b border-border/30 last:border-0 hover:bg-muted/20">
-                        <td className="px-2 py-1.5 font-mono tabular-nums">{s.date}</td>
+                      <tr key={idx} className="border-b border-border/30 last:border-0 hover:bg-muted/20">
+                        <td className="px-2 py-1.5 font-mono tabular-nums">
+                          {isEditing ? (
+                            <Input value={editDate} onChange={(e) => setEditDate(e.target.value)} className="h-6 w-36 text-xs font-mono px-1.5" placeholder="YYYY-MM-DD HH:mm" />
+                          ) : s.date}
+                        </td>
                         <td className="px-2 py-1.5 text-right tabular-nums">
                           {isEditing ? (
                             <Input type="number" value={editValue} onChange={(e) => setEditValue(e.target.value)} className="h-6 w-24 text-xs tabular-nums px-1.5 ml-auto" />
-                          ) : (
-                            s.value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-                          )}
+                          ) : s.value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </td>
                         <td className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">
                           {isEditing ? (
                             <Input type="number" value={editValue2} onChange={(e) => setEditValue2(e.target.value)} className="h-6 w-24 text-xs tabular-nums px-1.5 ml-auto" />
-                          ) : (
-                            (s.valueNoSuper ?? s.value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-                          )}
+                          ) : (s.valueNoSuper ?? s.value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </td>
                         <td className="px-2 py-1.5 text-right">
                           {isEditing ? (
                             <div className="flex items-center justify-end gap-1">
                               <Button variant="ghost" size="icon-xs" onClick={() => {
-                                const v = parseFloat(editValue);
-                                const v2 = parseFloat(editValue2);
+                                const v = parseFloat(editValue); const v2 = parseFloat(editValue2);
                                 if (!isNaN(v)) {
-                                  setNwSnapshots((prev) => prev.map((snap) =>
-                                    snap.date === s.date ? { ...snap, value: v, valueNoSuper: isNaN(v2) ? v : v2 } : snap
+                                  setNwSnapshots((prev) => prev.map((snap, i) =>
+                                    i === idx ? { ...snap, date: editDate || snap.date, value: v, valueNoSuper: isNaN(v2) ? v : v2 } : snap
                                   ));
                                 }
                                 setEditingSnapshot(null);
-                              }}>
-                                <Check className="h-3 w-3 text-income" />
-                              </Button>
-                              <Button variant="ghost" size="icon-xs" onClick={() => setEditingSnapshot(null)}>
-                                <X className="h-3 w-3" />
-                              </Button>
+                              }}><Check className="h-3 w-3 text-income" /></Button>
+                              <Button variant="ghost" size="icon-xs" onClick={() => setEditingSnapshot(null)}><X className="h-3 w-3" /></Button>
                             </div>
                           ) : (
                             <div className="flex items-center justify-end gap-1">
                               <Button variant="ghost" size="icon-xs" onClick={() => {
-                                setEditingSnapshot({ type: "nw", date: s.date });
-                                setEditValue(s.value.toString());
-                                setEditValue2((s.valueNoSuper ?? s.value).toString());
-                              }}>
-                                <Pencil className="h-3 w-3" />
-                              </Button>
+                                setEditingSnapshot({ type: "nw", idx });
+                                setEditDate(s.date); setEditValue(s.value.toString()); setEditValue2((s.valueNoSuper ?? s.value).toString());
+                              }}><Pencil className="h-3 w-3" /></Button>
                               <Button variant="ghost" size="icon-xs" className="text-destructive" onClick={() => {
-                                setNwSnapshots((prev) => prev.filter((snap) => snap.date !== s.date));
-                              }}>
-                                <Trash2 className="h-3 w-3" />
-                              </Button>
+                                setNwSnapshots((prev) => prev.filter((_, i) => i !== idx));
+                              }}><Trash2 className="h-3 w-3" /></Button>
                             </div>
                           )}
                         </td>
@@ -343,14 +329,8 @@ export default function DebugPage() {
               <Camera className="h-4 w-4 text-muted-foreground" />
               <p className="label-mono">Portfolio Snapshots ({portfolioSnapshots.length})</p>
             </div>
-            <Button
-              variant="ghost"
-              size="xs"
-              className="text-destructive text-[10px]"
-              onClick={() => { if (confirm("Clear ALL portfolio snapshots?")) setPortfolioSnapshots([]); }}
-            >
-              Clear All
-            </Button>
+            <Button variant="ghost" size="xs" className="text-destructive text-[10px]"
+              onClick={() => { if (confirm("Clear ALL portfolio snapshots?")) setPortfolioSnapshots([]); }}>Clear All</Button>
           </div>
           {portfolioSnapshots.length === 0 ? (
             <p className="text-xs text-muted-foreground text-center py-4">No snapshots</p>
@@ -359,65 +339,46 @@ export default function DebugPage() {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-border/60 text-left">
-                    <th className="px-2 py-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Date</th>
+                    <th className="px-2 py-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Date / Time</th>
                     <th className="px-2 py-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground text-right">Value (no Super)</th>
                     <th className="px-2 py-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground text-right">Value (w/ Super)</th>
                     <th className="px-2 py-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {[...portfolioSnapshots].reverse().map((s) => {
-                    const isEditing = editingSnapshot?.type === "portfolio" && editingSnapshot.date === s.date;
+                  {[...portfolioSnapshots].map((_, i) => portfolioSnapshots.length - 1 - i).map((idx) => {
+                    const s = portfolioSnapshots[idx];
+                    const isEditing = editingSnapshot?.type === "portfolio" && editingSnapshot.idx === idx;
                     return (
-                      <tr key={s.date} className="border-b border-border/30 last:border-0 hover:bg-muted/20">
-                        <td className="px-2 py-1.5 font-mono tabular-nums">{s.date}</td>
+                      <tr key={idx} className="border-b border-border/30 last:border-0 hover:bg-muted/20">
+                        <td className="px-2 py-1.5 font-mono tabular-nums">
+                          {isEditing ? <Input value={editDate} onChange={(e) => setEditDate(e.target.value)} className="h-6 w-36 text-xs font-mono px-1.5" /> : s.date}
+                        </td>
                         <td className="px-2 py-1.5 text-right tabular-nums">
-                          {isEditing ? (
-                            <Input type="number" value={editValue} onChange={(e) => setEditValue(e.target.value)} className="h-6 w-24 text-xs tabular-nums px-1.5 ml-auto" />
-                          ) : (
-                            s.value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-                          )}
+                          {isEditing ? <Input type="number" value={editValue} onChange={(e) => setEditValue(e.target.value)} className="h-6 w-24 text-xs tabular-nums px-1.5 ml-auto" />
+                            : s.value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </td>
                         <td className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">
-                          {isEditing ? (
-                            <Input type="number" value={editValue2} onChange={(e) => setEditValue2(e.target.value)} className="h-6 w-24 text-xs tabular-nums px-1.5 ml-auto" />
-                          ) : (
-                            s.valueWithSuper.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-                          )}
+                          {isEditing ? <Input type="number" value={editValue2} onChange={(e) => setEditValue2(e.target.value)} className="h-6 w-24 text-xs tabular-nums px-1.5 ml-auto" />
+                            : s.valueWithSuper.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </td>
                         <td className="px-2 py-1.5 text-right">
                           {isEditing ? (
                             <div className="flex items-center justify-end gap-1">
                               <Button variant="ghost" size="icon-xs" onClick={() => {
-                                const v = parseFloat(editValue);
-                                const v2 = parseFloat(editValue2);
-                                if (!isNaN(v)) {
-                                  setPortfolioSnapshots((prev) => prev.map((snap) =>
-                                    snap.date === s.date ? { ...snap, value: v, valueWithSuper: isNaN(v2) ? v : v2 } : snap
-                                  ));
-                                }
+                                const v = parseFloat(editValue); const v2 = parseFloat(editValue2);
+                                if (!isNaN(v)) setPortfolioSnapshots((prev) => prev.map((snap, i) => i === idx ? { ...snap, date: editDate || snap.date, value: v, valueWithSuper: isNaN(v2) ? v : v2 } : snap));
                                 setEditingSnapshot(null);
-                              }}>
-                                <Check className="h-3 w-3 text-income" />
-                              </Button>
-                              <Button variant="ghost" size="icon-xs" onClick={() => setEditingSnapshot(null)}>
-                                <X className="h-3 w-3" />
-                              </Button>
+                              }}><Check className="h-3 w-3 text-income" /></Button>
+                              <Button variant="ghost" size="icon-xs" onClick={() => setEditingSnapshot(null)}><X className="h-3 w-3" /></Button>
                             </div>
                           ) : (
                             <div className="flex items-center justify-end gap-1">
                               <Button variant="ghost" size="icon-xs" onClick={() => {
-                                setEditingSnapshot({ type: "portfolio", date: s.date });
-                                setEditValue(s.value.toString());
-                                setEditValue2(s.valueWithSuper.toString());
-                              }}>
-                                <Pencil className="h-3 w-3" />
-                              </Button>
-                              <Button variant="ghost" size="icon-xs" className="text-destructive" onClick={() => {
-                                setPortfolioSnapshots((prev) => prev.filter((snap) => snap.date !== s.date));
-                              }}>
-                                <Trash2 className="h-3 w-3" />
-                              </Button>
+                                setEditingSnapshot({ type: "portfolio", idx }); setEditDate(s.date); setEditValue(s.value.toString()); setEditValue2(s.valueWithSuper.toString());
+                              }}><Pencil className="h-3 w-3" /></Button>
+                              <Button variant="ghost" size="icon-xs" className="text-destructive" onClick={() => setPortfolioSnapshots((prev) => prev.filter((_, i) => i !== idx))}>
+                                <Trash2 className="h-3 w-3" /></Button>
                             </div>
                           )}
                         </td>
@@ -439,14 +400,8 @@ export default function DebugPage() {
               <Camera className="h-4 w-4 text-muted-foreground" />
               <p className="label-mono">Crypto Snapshots ({cryptoSnapshots.length})</p>
             </div>
-            <Button
-              variant="ghost"
-              size="xs"
-              className="text-destructive text-[10px]"
-              onClick={() => { if (confirm("Clear ALL crypto snapshots?")) setCryptoSnapshots([]); }}
-            >
-              Clear All
-            </Button>
+            <Button variant="ghost" size="xs" className="text-destructive text-[10px]"
+              onClick={() => { if (confirm("Clear ALL crypto snapshots?")) setCryptoSnapshots([]); }}>Clear All</Button>
           </div>
           {cryptoSnapshots.length === 0 ? (
             <p className="text-xs text-muted-foreground text-center py-4">No snapshots</p>
@@ -455,24 +410,24 @@ export default function DebugPage() {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-border/60 text-left">
-                    <th className="px-2 py-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Date</th>
+                    <th className="px-2 py-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Date / Time</th>
                     <th className="px-2 py-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground text-right">Value</th>
                     <th className="px-2 py-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Currency</th>
                     <th className="px-2 py-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {[...cryptoSnapshots].reverse().map((s) => {
-                    const isEditing = editingSnapshot?.type === "portfolio" && editingSnapshot.date === `crypto-${s.date}`;
+                  {[...cryptoSnapshots].map((_, i) => cryptoSnapshots.length - 1 - i).map((idx) => {
+                    const s = cryptoSnapshots[idx];
+                    const isEditing = editingSnapshot?.type === "crypto" && editingSnapshot.idx === idx;
                     return (
-                      <tr key={s.date} className="border-b border-border/30 last:border-0 hover:bg-muted/20">
-                        <td className="px-2 py-1.5 font-mono tabular-nums">{s.date}</td>
+                      <tr key={idx} className="border-b border-border/30 last:border-0 hover:bg-muted/20">
+                        <td className="px-2 py-1.5 font-mono tabular-nums">
+                          {isEditing ? <Input value={editDate} onChange={(e) => setEditDate(e.target.value)} className="h-6 w-36 text-xs font-mono px-1.5" /> : s.date}
+                        </td>
                         <td className="px-2 py-1.5 text-right tabular-nums">
-                          {isEditing ? (
-                            <Input type="number" value={editValue} onChange={(e) => setEditValue(e.target.value)} className="h-6 w-24 text-xs tabular-nums px-1.5 ml-auto" />
-                          ) : (
-                            s.value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-                          )}
+                          {isEditing ? <Input type="number" value={editValue} onChange={(e) => setEditValue(e.target.value)} className="h-6 w-24 text-xs tabular-nums px-1.5 ml-auto" />
+                            : s.value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </td>
                         <td className="px-2 py-1.5 font-mono text-muted-foreground">{s.currency}</td>
                         <td className="px-2 py-1.5 text-right">
@@ -480,32 +435,18 @@ export default function DebugPage() {
                             <div className="flex items-center justify-end gap-1">
                               <Button variant="ghost" size="icon-xs" onClick={() => {
                                 const v = parseFloat(editValue);
-                                if (!isNaN(v)) {
-                                  setCryptoSnapshots((prev) => prev.map((snap) =>
-                                    snap.date === s.date ? { ...snap, value: v } : snap
-                                  ));
-                                }
+                                if (!isNaN(v)) setCryptoSnapshots((prev) => prev.map((snap, i) => i === idx ? { ...snap, date: editDate || snap.date, value: v } : snap));
                                 setEditingSnapshot(null);
-                              }}>
-                                <Check className="h-3 w-3 text-income" />
-                              </Button>
-                              <Button variant="ghost" size="icon-xs" onClick={() => setEditingSnapshot(null)}>
-                                <X className="h-3 w-3" />
-                              </Button>
+                              }}><Check className="h-3 w-3 text-income" /></Button>
+                              <Button variant="ghost" size="icon-xs" onClick={() => setEditingSnapshot(null)}><X className="h-3 w-3" /></Button>
                             </div>
                           ) : (
                             <div className="flex items-center justify-end gap-1">
                               <Button variant="ghost" size="icon-xs" onClick={() => {
-                                setEditingSnapshot({ type: "portfolio", date: `crypto-${s.date}` });
-                                setEditValue(s.value.toString());
-                              }}>
-                                <Pencil className="h-3 w-3" />
-                              </Button>
-                              <Button variant="ghost" size="icon-xs" className="text-destructive" onClick={() => {
-                                setCryptoSnapshots((prev) => prev.filter((snap) => snap.date !== s.date));
-                              }}>
-                                <Trash2 className="h-3 w-3" />
-                              </Button>
+                                setEditingSnapshot({ type: "crypto", idx }); setEditDate(s.date); setEditValue(s.value.toString());
+                              }}><Pencil className="h-3 w-3" /></Button>
+                              <Button variant="ghost" size="icon-xs" className="text-destructive" onClick={() => setCryptoSnapshots((prev) => prev.filter((_, i) => i !== idx))}>
+                                <Trash2 className="h-3 w-3" /></Button>
                             </div>
                           )}
                         </td>
