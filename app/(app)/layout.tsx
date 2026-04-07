@@ -42,7 +42,7 @@ const PRIMARY_NAV = [
 
 const SECONDARY_NAV = [
   { href: "/liabilities", label: "Liabilities", icon: Handshake },
-  { href: "/emergency-fund", label: "Safety Net", icon: Shield },
+  { href: "/emergency-fund", label: "Emergency", icon: Shield },
   { href: "/budget", label: "Budget", icon: FileSpreadsheet },
   { href: "/settings", label: "Settings", icon: Settings },
   { href: "/debug", label: "Debug", icon: LayoutDashboard },
