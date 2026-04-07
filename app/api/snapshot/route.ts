@@ -186,7 +186,7 @@ export async function POST(request: NextRequest) {
       date: today,
       currency: SNAPSHOT_CURRENCY,
       fxRatesLoaded: Object.keys(rates).length,
-      sampleRates: { AUD: rates["AUD"], THB: rates["THB"], USD: rates["USD"] },
+      fxRates: rates,
       portfolioTotal: Math.round(portfolioTotal * 100) / 100,
       portfolioNoSuper: Math.round(portfolioNoSuper * 100) / 100,
       cryptoTotal: Math.round(cryptoInUsd * 100) / 100,
