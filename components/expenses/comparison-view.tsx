@@ -51,7 +51,7 @@ export function ComparisonView({
 }: ComparisonViewProps) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
-  const { convert, format: formatCur } = useCurrency();
+  const { convert, format: formatCur, symbol } = useCurrency();
 
   const availableMonths = useMemo(() => getMonthKeysFromEntries(entries), [entries]);
   const [selectedMonths, setSelectedMonths] = useState<string[]>(initialMonths);
@@ -99,7 +99,7 @@ export function ComparisonView({
 
   // Bar chart option
   const barOption = useMemo(() => {
-    const base = getCartesianBaseOption(isDark);
+    const base = getCartesianBaseOption(isDark, symbol);
     const catLabels = categories.map((t) => getLabel(t));
 
     return {

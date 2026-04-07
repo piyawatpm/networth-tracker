@@ -33,7 +33,7 @@ export function CumulativePaceChart({
 }: CumulativePaceChartProps) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
-  const { convert } = useCurrency();
+  const { convert, symbol } = useCurrency();
   const [range, setRange] = useState<PaceRange>(defaultRange);
 
   const today = getSydneyDateString();
@@ -42,7 +42,7 @@ export function CumulativePaceChart({
   const lastMonth = getLastMonthKey();
 
   const option = useMemo(() => {
-    const base = getCartesianBaseOption(isDark);
+    const base = getCartesianBaseOption(isDark, symbol);
     const color = isDark ? currentColor.dark : currentColor.light;
     const prevColor = isDark ? "#666" : "#aaa";
 

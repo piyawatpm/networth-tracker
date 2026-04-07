@@ -43,8 +43,9 @@ function tooltipConfig(isDark: boolean) {
 }
 
 // For bar/line/area charts (has xAxis, yAxis, grid)
-export function getCartesianBaseOption(isDark: boolean) {
+export function getCartesianBaseOption(isDark: boolean, currencySymbol?: string) {
   const c = getColors(isDark);
+  const sym = currencySymbol ?? "";
   return {
     backgroundColor: "transparent",
     color: ECHARTS_COLORS,
@@ -70,16 +71,28 @@ export function getCartesianBaseOption(isDark: boolean) {
         lineStyle: { color: c.border, type: "dashed" as const, opacity: 0.5 },
       },
     },
-    tooltip: { ...tooltipConfig(isDark), trigger: "axis" as const },
+    tooltip: {
+      ...tooltipConfig(isDark),
+      trigger: "axis" as const,
+      ...(sym ? { valueFormatter: (v: number) => `${sym}${Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` } : {}),
+    },
   };
 }
 
 // For pie/donut charts (NO xAxis, yAxis, grid)
-export function getPieBaseOption(isDark: boolean) {
+export function getPieBaseOption(isDark: boolean, currencySymbol?: string) {
+  const sym = currencySymbol ?? "";
   return {
     backgroundColor: "transparent",
     color: ECHARTS_COLORS,
-    tooltip: { ...tooltipConfig(isDark), trigger: "item" as const },
+    tooltip: {
+      ...tooltipConfig(isDark),
+      trigger: "item" as const,
+      formatter: sym
+        ? (params: { name: string; value: number; percent: number }) =>
+            `${params.name}: ${sym}${Number(params.value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${params.percent}%)`
+        : "{b}: {c} ({d}%)",
+    },
   };
 }
 

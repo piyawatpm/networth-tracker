@@ -228,7 +228,7 @@ export default function ExpensesPage() {
 
   // Pie chart option (filtered by hidden categories)
   const pieOption = useMemo(() => {
-    const base = getPieBaseOption(isDark);
+    const base = getPieBaseOption(isDark, symbol);
     const visibleData = breakdownByType
       .filter((item) => !hiddenCategories.has(item.type))
       .map((item) => ({

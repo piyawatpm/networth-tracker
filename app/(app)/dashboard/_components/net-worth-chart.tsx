@@ -6,6 +6,7 @@ import { useTheme } from "next-themes";
 import { BlurFade } from "@/components/ui/blur-fade";
 import { getCartesianBaseOption, formatAxisValue } from "@/lib/utils/echarts";
 import { cn } from "@/lib/utils";
+import { useCurrency } from "@/components/providers/currency-provider";
 import { TrendingUp, TrendingDown } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -28,6 +29,7 @@ export interface NetWorthChartProps {
 export function NetWorthChart({ nwTrendData, format, includeSuper = true, delay }: NetWorthChartProps) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
+  const { symbol } = useCurrency();
   const [range, setRange] = useState<Range>("all");
 
   const ranges: { key: Range; label: string }[] = [
@@ -64,7 +66,7 @@ export function NetWorthChart({ nwTrendData, format, includeSuper = true, delay 
     : (isDark ? "#f87171" : "#c95f3f");
 
   const option = useMemo(() => {
-    const base = getCartesianBaseOption(isDark);
+    const base = getCartesianBaseOption(isDark, symbol);
 
     return {
       ...base,

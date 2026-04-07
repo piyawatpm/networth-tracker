@@ -5,6 +5,7 @@ import ReactECharts from "echarts-for-react";
 import { cn } from "@/lib/utils";
 import { ECHARTS_COLORS, getCartesianBaseOption } from "@/lib/utils/echarts";
 import { BlurFade } from "@/components/ui/blur-fade";
+import { useCurrency } from "@/components/providers/currency-provider";
 import type { PortfolioSnapshot } from "@/lib/utils/crypto-csv";
 
 export function HistoryChart({
@@ -14,6 +15,7 @@ export function HistoryChart({
   portfolioHistory: PortfolioSnapshot[];
   isDark: boolean;
 }) {
+  const { symbol } = useCurrency();
   const [trendRange, setTrendRange] = useState<"1W" | "1M" | "3M" | "All">("All");
 
   const filteredHistory = useMemo(() => {
@@ -36,7 +38,7 @@ export function HistoryChart({
   }, [portfolioHistory, trendRange]);
 
   const chartOption = useMemo(() => {
-    const base = getCartesianBaseOption(isDark);
+    const base = getCartesianBaseOption(isDark, symbol);
     return {
       ...base,
       grid: { ...base.grid, left: 48, right: 8 },

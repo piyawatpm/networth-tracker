@@ -13,6 +13,7 @@ import {
   getCartesianBaseOption,
 } from "@/lib/utils/echarts";
 import { cn } from "@/lib/utils";
+import { useCurrency } from "@/components/providers/currency-provider";
 import { LookThroughView } from "@/components/portfolio/look-through-view";
 import type { FundAllocations } from "@/components/portfolio/fund-breakdown";
 import { HOLDING_TYPE_COLOR_MAP, type TrendPeriod, type PortfolioTotals } from "./portfolio-constants";
@@ -50,10 +51,11 @@ export function PortfolioCharts({
 }: PortfolioChartsProps) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
+  const { symbol } = useCurrency();
 
   // ── Trend chart option ──
   const trendChartOption = useMemo(() => {
-    const base = getCartesianBaseOption(isDark);
+    const base = getCartesianBaseOption(isDark, symbol);
     return {
       ...base,
       grid: { ...base.grid, left: 56 },

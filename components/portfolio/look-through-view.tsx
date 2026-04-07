@@ -27,7 +27,7 @@ interface ExposureEntry {
 export function LookThroughView({ holdings, allocations }: LookThroughViewProps) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
-  const { convert, format: formatCur } = useCurrency();
+  const { convert, format: formatCur, symbol } = useCurrency();
 
   const totalPortfolioValue = useMemo(
     () => holdings.reduce((s, h) => s + convert(h.currentValue, h.currency), 0),
@@ -112,7 +112,7 @@ export function LookThroughView({ holdings, allocations }: LookThroughViewProps)
   }, [exposures]);
 
   const chartOption = useMemo(() => {
-    const base = getPieBaseOption(isDark);
+    const base = getPieBaseOption(isDark, symbol);
     return {
       ...base,
       color: ECHARTS_COLORS,

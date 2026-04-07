@@ -7,6 +7,7 @@ import { Eye, EyeOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BlurFade } from "@/components/ui/blur-fade";
 import { getPieBaseOption } from "@/lib/utils/echarts";
+import { useCurrency } from "@/components/providers/currency-provider";
 import {
   WORLD_COLORS,
   WORLD_LABELS,
@@ -45,6 +46,7 @@ export function WorldDistributionChart({
 }: WorldDistributionChartProps) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
+  const { symbol } = useCurrency();
   const chartRef = useRef<ReactECharts>(null);
   const [hidden, setHidden] = useState<Set<FinancialWorld>>(new Set());
   const [hoveredKey, setHoveredKey] = useState<FinancialWorld | null>(null);
@@ -83,7 +85,7 @@ export function WorldDistributionChart({
   );
 
   const chartOption = useMemo(() => {
-    const base = getPieBaseOption(isDark);
+    const base = getPieBaseOption(isDark, symbol);
     return {
       ...base,
       series: [

@@ -29,13 +29,13 @@ export function MonthlyTrendChart({
 }: MonthlyTrendChartProps) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
-  const { convert } = useCurrency();
+  const { convert, symbol } = useCurrency();
   const [byCategory, setByCategory] = useState(false);
 
   const monthKeys = useMemo(() => getLastNMonthKeys(12), []);
 
   const option = useMemo(() => {
-    const base = getCartesianBaseOption(isDark);
+    const base = getCartesianBaseOption(isDark, symbol);
 
     if (!byCategory) {
       const data = monthKeys.map((mk) =>

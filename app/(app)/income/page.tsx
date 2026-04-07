@@ -235,7 +235,7 @@ export default function IncomePage() {
 
   // Pie chart
   const pieOption = useMemo(() => {
-    const base = getPieBaseOption(isDark);
+    const base = getPieBaseOption(isDark, symbol);
     return {
       ...base,
       legend: { show: false },

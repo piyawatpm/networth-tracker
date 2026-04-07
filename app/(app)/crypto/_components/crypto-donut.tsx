@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import ReactECharts from "echarts-for-react";
 import { getPieBaseOption } from "@/lib/utils/echarts";
+import { useCurrency } from "@/components/providers/currency-provider";
 
 export interface DonutChartItem {
   token: string;
@@ -19,7 +20,8 @@ export function CryptoDonut({
   isDark: boolean;
   chartRef: React.RefObject<ReactECharts | null>;
 }) {
-  const base = getPieBaseOption(isDark);
+  const { symbol } = useCurrency();
+  const base = getPieBaseOption(isDark, symbol);
   const option = useMemo(
     () => ({
       ...base,

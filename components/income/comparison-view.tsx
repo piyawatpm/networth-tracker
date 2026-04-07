@@ -41,7 +41,7 @@ export function IncomeComparisonView({
 }: IncomeComparisonViewProps) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
-  const { convert, format: formatCur } = useCurrency();
+  const { convert, format: formatCur, symbol } = useCurrency();
 
   const monthKeys = useMemo(() => getMonthKeysFromEntries(entries), [entries]);
 
@@ -71,7 +71,7 @@ export function IncomeComparisonView({
   }, [entries, monthA, monthB, convert]);
 
   const chartOption = useMemo(() => {
-    const base = getCartesianBaseOption(isDark);
+    const base = getCartesianBaseOption(isDark, symbol);
     const categories = categoryData.map((d) => getLabel(d.type));
 
     return {
