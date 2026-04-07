@@ -27,10 +27,11 @@ import { PriceStatus } from "./_components/price-status";
 import { HistoryChart } from "./_components/history-chart";
 import { CryptoDonut } from "./_components/crypto-donut";
 import { HoldingsBreakdown } from "./_components/holdings-breakdown";
+import { CryptoValueTrend } from "./_components/crypto-value-trend";
 
 export default function CryptoPage() {
   const [csvText, setCsvText] = useCloudStorage<string>("crypto_csv_text", "");
-  const { convert } = useCurrency();
+  const { convert, currency, symbol, format } = useCurrency();
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
 
@@ -131,6 +132,32 @@ export default function CryptoPage() {
     [pricedHoldings],
   );
   const cashUsd = useMemo(() => getCashValueUsd(pricedHoldings), [pricedHoldings]);
+
+  // ── Crypto snapshots (daily value tracking, like portfolio) ──
+  const [cryptoSnapshots, setCryptoSnapshots] = useCloudStorage<
+    { date: string; value: number; currency: string }[]
+  >("crypto_snapshots", []);
+
+  const totalValueConverted = useMemo(() => convert(totalValueUsd, "USD"), [totalValueUsd, convert]);
+  // currency, symbol, format already destructured above
+
+  useEffect(() => {
+    if (totalValueConverted <= 0) return;
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: "Australia/Sydney" });
+    const existing = cryptoSnapshots.find((s) => s.date === today);
+    if (existing && existing.currency === currency && Math.abs(existing.value - totalValueConverted) < 1) return;
+    setCryptoSnapshots((prev) => [
+      ...prev.filter((s) => s.date !== today).slice(-89),
+      { date: today, value: totalValueConverted, currency },
+    ]);
+  }, [totalValueConverted, cryptoSnapshots, setCryptoSnapshots, currency]);
+
+  const cryptoTrendData = useMemo(() => {
+    return cryptoSnapshots.map((s) => {
+      const val = s.currency !== currency ? Math.round(convert(s.value, s.currency) * 100) / 100 : s.value;
+      return { date: s.date.slice(5), value: val };
+    });
+  }, [cryptoSnapshots, currency, convert]);
 
   // Interactive legend -- tracks which tokens are visible
   const [selectedTokens, setSelectedTokens] = useState<Record<string, boolean>>({});
@@ -270,6 +297,11 @@ export default function CryptoPage() {
         setSelectedTokens={setSelectedTokens}
         onFileSelect={onFileSelect}
       />
+
+      {/* Value Trend — daily snapshots */}
+      {cryptoTrendData.length > 0 && (
+        <CryptoValueTrend data={cryptoTrendData} isDark={isDark} symbol={symbol} format={format} />
+      )}
 
       <HistoryChart
         portfolioHistory={portfolioHistory}
