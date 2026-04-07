@@ -110,6 +110,10 @@ export async function GET(request: Request) {
       "recurring_expense_templates",
       "crypto_csv_text",
       "crypto_prices",
+      "crypto_snapshots",
+      "crypto_ticker_mappings",
+      "debt_records",
+      "debt_transactions",
     ];
 
     const { data: rows } = await supabase
@@ -130,38 +134,56 @@ export async function GET(request: Request) {
       }
     };
 
-    const holdings = parse<{ currentValue: number }[]>("portfolio_holdings", []);
+    const holdings = parse<{ currentValue: number; currency: string; type: string; accountType: string }[]>("portfolio_holdings", []);
     const portfolioSnapshots = parse<{ date: string }[]>("portfolio_snapshots", []);
     const nwSnapshots = parse<{ date: string; value: number }[]>("networth_snapshots", []);
+    const cryptoSnapshots = parse<{ date: string; value: number }[]>("crypto_snapshots", []);
     const incomeEntries = parse<{ id: string; date: string; recurringId?: string }[]>("income_entries", []);
     const expenseEntries = parse<{ id: string; date: string; recurringId?: string }[]>("expense_entries", []);
     const incomeTemplates = parse<RecurringTemplate[]>("recurring_income_templates", []);
     const expenseTemplates = parse<RecurringTemplate[]>("recurring_expense_templates", []);
+    const tickerMappings = parse<Record<string, string>>("crypto_ticker_mappings", {});
+
+    // ── Fetch FX rates live (same as manual snapshot API) ──
+    let rates: Record<string, number> = {};
+    try {
+      const fxRes = await fetch("https://open.er-api.com/v6/latest/USD");
+      if (fxRes.ok) {
+        const fxData = await fxRes.json();
+        rates = fxData.rates ?? {};
+      }
+      log.push(`FX rates: loaded ${Object.keys(rates).length} currencies`);
+    } catch {
+      log.push(`FX rates: fetch failed — conversions will be 1:1`);
+    }
+
+    const toUsd = (amount: number, fromCurrency: string): number => {
+      if (fromCurrency === "USD" || !rates[fromCurrency]) return amount;
+      return amount / rates[fromCurrency];
+    };
 
     const updates: { key: string; value: string; updated_at: string }[] = [];
     const now = new Date().toISOString();
 
-    // ── 1. Portfolio snapshot ──
-    const portfolioTotal = holdings.reduce((s, h) => s + (h.currentValue ?? 0), 0);
+    // ── 1. Portfolio snapshot (converted to USD) ──
+    const portfolioTotal = holdings
+      .filter((h) => h.type !== "savings")
+      .reduce((s, h) => s + toUsd(h.currentValue ?? 0, h.currency ?? "AUD"), 0);
+    const portfolioNoSuper = holdings
+      .filter((h) => h.type !== "savings" && h.accountType !== "super")
+      .reduce((s, h) => s + toUsd(h.currentValue ?? 0, h.currency ?? "AUD"), 0);
     const hasPortfolioToday = portfolioSnapshots.some((s) => s.date === today);
 
     if (!hasPortfolioToday && portfolioTotal > 0) {
-      const newSnapshots = [...portfolioSnapshots.slice(-89), { date: today, value: portfolioTotal }];
+      const newSnapshots = [...portfolioSnapshots.slice(-89), { date: today, value: portfolioNoSuper, valueWithSuper: portfolioTotal, currency: "USD" }];
       updates.push({ key: "portfolio_snapshots", value: JSON.stringify(newSnapshots), updated_at: now });
-      log.push(`Portfolio snapshot added: ${portfolioTotal}`);
+      log.push(`Portfolio snapshot: w/super=$${portfolioTotal.toFixed(0)} no-super=$${portfolioNoSuper.toFixed(0)} USD`);
     } else {
       log.push(`Portfolio snapshot: ${hasPortfolioToday ? "already exists" : "no holdings"}`);
     }
 
     // ── 2. Net worth snapshot ──
-    const hasNwToday = nwSnapshots.some((s) => s.date === today);
-    if (!hasNwToday && portfolioTotal > 0) {
-      const newNw = [...nwSnapshots.slice(-89), { date: today, value: portfolioTotal }];
-      updates.push({ key: "networth_snapshots", value: JSON.stringify(newNw), updated_at: now });
-      log.push(`Net worth snapshot added: ${portfolioTotal}`);
-    } else {
-      log.push(`Net worth snapshot: ${hasNwToday ? "already exists" : "no data"}`);
-    }
+    // Net worth snapshot — deferred until after crypto prices are fetched
 
     // ── 3. Recurring income entries ──
     if (incomeTemplates.length > 0) {
@@ -251,18 +273,19 @@ export async function GET(request: Request) {
         });
 
         if (nonStableTokens.length > 0) {
-          // Fetch all prices from Binance in parallel
+          // Fetch all prices from Binance using ticker mappings
           const pricePromises = nonStableTokens.map(async (h) => {
-            const symbol = `${h.token.toUpperCase()}USDT`;
+            const mappedTicker = (tickerMappings[h.token] ?? h.token).toUpperCase();
+            const symbol = `${mappedTicker}USDT`;
             try {
               const res = await fetch(
                 `https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`,
               );
-              if (!res.ok) return { token: h.token, price: null };
+              if (!res.ok) return { token: h.token, mappedTicker, price: null };
               const data = await res.json();
-              return { token: h.token, price: parseFloat(data.price) };
+              return { token: h.token, mappedTicker, price: parseFloat(data.price) };
             } catch {
-              return { token: h.token, price: null };
+              return { token: h.token, mappedTicker, price: null };
             }
           });
 
@@ -296,6 +319,66 @@ export async function GET(request: Request) {
       }
     } else {
       log.push(`Crypto prices: no CSV data`);
+    }
+
+    // ── 6. Crypto snapshot + Net worth snapshot ──
+    // Compute crypto total from CSV + live prices
+    let cryptoTotalUsd = 0;
+    if (cryptoCsvText) {
+      try {
+        const { parseAndComputeHoldings: parseCrypto, getTotalCryptoValueUsd } = await import("@/lib/utils/crypto-csv");
+        const cryptoHoldings = parseCrypto(cryptoCsvText);
+        // Apply prices we just fetched (stored in updates)
+        const latestPrices = parse<{ prices: Record<string, number> }>("crypto_prices", { prices: {} });
+        // Merge with any just-fetched prices
+        const priceUpdate = updates.find((u) => u.key === "crypto_prices");
+        const mergedPrices = priceUpdate ? { ...latestPrices.prices, ...JSON.parse(priceUpdate.value).prices } : latestPrices.prices;
+
+        for (const h of cryptoHoldings) {
+          const mappedTicker = tickerMappings[h.token] ?? h.token;
+          const price = mergedPrices[mappedTicker];
+          if (price != null) h.currentValueUsd = price * h.amount;
+        }
+        cryptoTotalUsd = getTotalCryptoValueUsd(cryptoHoldings);
+      } catch { /* silent */ }
+    }
+
+    // Crypto snapshot
+    const hasCryptoToday = cryptoSnapshots.some((s) => s.date === today);
+    if (!hasCryptoToday && cryptoTotalUsd > 0) {
+      updates.push({
+        key: "crypto_snapshots",
+        value: JSON.stringify([...cryptoSnapshots.slice(-89), { date: today, value: cryptoTotalUsd, currency: "USD" }]),
+        updated_at: now,
+      });
+      log.push(`Crypto snapshot: $${cryptoTotalUsd.toFixed(0)} USD`);
+    }
+
+    // Debts (converted to USD)
+    const debtRecords = parse<{ id: string; direction: string; originalAmount: number; currency: string }[]>("debt_records", []);
+    const debtTransactions = parse<{ debtId: string; amount: number }[]>("debt_transactions", []);
+    let owedToMe = 0;
+    let iOwe = 0;
+    for (const d of debtRecords) {
+      const paid = debtTransactions.filter((t) => t.debtId === d.id).reduce((s, t) => s + t.amount, 0);
+      const remaining = Math.max(0, d.originalAmount - paid);
+      const inUsd = toUsd(remaining, d.currency ?? "AUD");
+      if (d.direction === "owed_to_me") owedToMe += inUsd;
+      else iOwe += inUsd;
+    }
+
+    // Net worth = portfolio + crypto + owed - owe (all in USD)
+    const netWorth = portfolioTotal + cryptoTotalUsd + owedToMe - iOwe;
+    const netWorthNoSuper = portfolioNoSuper + cryptoTotalUsd + owedToMe - iOwe;
+
+    const hasNwToday = nwSnapshots.some((s) => s.date === today);
+    if (!hasNwToday) {
+      updates.push({
+        key: "networth_snapshots",
+        value: JSON.stringify([...nwSnapshots.slice(-89), { date: today, value: netWorth, valueNoSuper: netWorthNoSuper, currency: "USD", portfolio: portfolioTotal, crypto: cryptoTotalUsd }]),
+        updated_at: now,
+      });
+      log.push(`Net worth: $${netWorth.toFixed(0)} (portfolio=$${portfolioTotal.toFixed(0)} crypto=$${cryptoTotalUsd.toFixed(0)} owed=$${owedToMe.toFixed(0)} debt=$${iOwe.toFixed(0)}) USD`);
     }
 
     // ── Write updates ──
