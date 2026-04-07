@@ -76,7 +76,6 @@ export function PortfolioCharts({
       tooltip: {
         ...base.tooltip,
         trigger: "axis" as const,
-        formatter: "{b}: {c}",
       },
       series: [
         {
