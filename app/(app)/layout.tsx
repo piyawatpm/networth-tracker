@@ -14,6 +14,7 @@ import {
   Sun,
   Settings,
   FileSpreadsheet,
+  Shield,
   Cloud,
   CloudOff,
   RefreshCw,
@@ -34,6 +35,7 @@ const NAV_ITEMS = [
   { href: "/crypto", label: "Crypto", icon: Bitcoin },
   { href: "/portfolio", label: "Portfolio", icon: Briefcase },
   { href: "/liabilities", label: "Liabilities", icon: Handshake },
+  { href: "/emergency-fund", label: "Safety Net", icon: Shield },
   { href: "/budget", label: "Budget", icon: FileSpreadsheet },
 ];
 
