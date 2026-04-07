@@ -459,12 +459,25 @@ export default function DashboardPage() {
   // ---- Asset breakdown rows -----------------------------------------------
 
   const activePortfolioTotal = includeSuper ? portfolioTotal : normalTotal;
+
+  // Emergency fund = savings type holdings (excluding from portfolio total to avoid double-count)
+  const emergencyFundTotal = useMemo(
+    () => portfolioHoldings
+      .filter((h) => h.type === "savings")
+      .reduce((s, h) => s + convert(h.currentValue, h.currency), 0),
+    [portfolioHoldings, convert],
+  );
+
+  // Portfolio total for display excludes savings (shown separately)
+  const portfolioDisplayTotal = activePortfolioTotal - emergencyFundTotal;
+
   const assetRows = useMemo(() => [
-    { key: "portfolio", label: "Portfolio", value: activePortfolioTotal, negative: false },
+    { key: "portfolio", label: "Portfolio", value: portfolioDisplayTotal, negative: false },
     { key: "crypto", label: "Crypto", value: cryptoTotal, negative: false },
+    { key: "emergency", label: "Emergency Fund", value: emergencyFundTotal, negative: false },
     { key: "owed_to_me", label: "Owed to Me", value: owedToMe, negative: false },
     { key: "i_owe", label: "I Owe", value: -iOwe, negative: true },
-  ], [activePortfolioTotal, cryptoTotal, owedToMe, iOwe]);
+  ], [portfolioDisplayTotal, cryptoTotal, emergencyFundTotal, owedToMe, iOwe]);
 
   // ---- Render -------------------------------------------------------------
 
