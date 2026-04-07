@@ -62,10 +62,15 @@ export async function POST(request: NextRequest) {
       try { return dataMap[key] ? JSON.parse(dataMap[key]) : fallback; } catch { return fallback; }
     };
 
-    // FX rates (USD-based) and preferred display currency
-    const fxCache = parse<{ rates: Record<string, number> }>("fx_rates_cache", { rates: {} });
-    const rates = fxCache.rates;
-    const displayCurrency = parse<string>("preferred_currency", "AUD");
+    // FX rates — fetch live from open.er-api.com (same source as client)
+    let rates: Record<string, number> = {};
+    try {
+      const fxRes = await fetch("https://open.er-api.com/v6/latest/USD");
+      if (fxRes.ok) {
+        const fxData = await fxRes.json();
+        rates = fxData.rates ?? {};
+      }
+    } catch { /* rates stays empty — conversion will be 1:1 as fallback */ }
 
     // Always store snapshots in USD — the universal base currency.
     // Charts convert from USD to display currency at render time.
