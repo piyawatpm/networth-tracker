@@ -259,33 +259,62 @@ export default function DashboardPage() {
   const incomeChange = prevIncomeTotal > 0 ? ((periodIncomeTotal - prevIncomeTotal) / prevIncomeTotal) * 100 : 0;
   const expenseChange = prevExpenseTotal > 0 ? ((periodExpenseTotal - prevExpenseTotal) / prevExpenseTotal) * 100 : 0;
 
+  // Emergency fund = savings type holdings
+  const emergencyFundTotal = useMemo(
+    () => portfolioHoldings
+      .filter((h) => h.type === "savings")
+      .reduce((s, h) => s + convert(h.currentValue, h.currency), 0),
+    [portfolioHoldings, convert],
+  );
+
   // ---- Financial Health computed values -----------------------------------
 
-  const annualizedIncome = useMemo(() => {
-    if (period === "Y") return periodIncomeTotal;
-    if (period === "M") return periodIncomeTotal * 12;
-    return periodIncomeTotal * 52;
-  }, [periodIncomeTotal, period]);
+  // Weighted average monthly income: recent 3 months × 2, older 3 months × 1
+  const last6MonthKeys = last6Keys;
+  const { annualizedIncome, weightedMonthlyIncome } = useMemo(() => {
+    const monthlyTotals = last6MonthKeys.map((mk) =>
+      incomeEntries
+        .filter((e) => (e.date ?? "").startsWith(mk))
+        .reduce((s, e) => s + convert(e.amount, e.currency), 0),
+    );
+    const recent3 = monthlyTotals.slice(-3);
+    const older3 = monthlyTotals.slice(0, 3);
+    const recent3Avg = recent3.filter((v) => v > 0).length > 0
+      ? recent3.reduce((s, v) => s + v, 0) / Math.max(1, recent3.filter((v) => v > 0).length)
+      : 0;
+    const older3Avg = older3.filter((v) => v > 0).length > 0
+      ? older3.reduce((s, v) => s + v, 0) / Math.max(1, older3.filter((v) => v > 0).length)
+      : 0;
+    // Weighted: recent × 2, older × 1, divide by 3
+    const weighted = older3Avg > 0 ? (recent3Avg * 2 + older3Avg) / 3 : recent3Avg;
+    return { annualizedIncome: weighted * 12, weightedMonthlyIncome: weighted };
+  }, [incomeEntries, convert, last6MonthKeys]);
 
-  const monthlyExpenses = useMemo(() => {
-    if (period === "Y") return periodExpenseTotal / 12;
-    if (period === "M") return periodExpenseTotal;
-    return periodExpenseTotal * (52 / 12);
-  }, [periodExpenseTotal, period]);
+  // Weighted average monthly expenses (same approach)
+  const { weightedMonthlyExpenses } = useMemo(() => {
+    const monthlyTotals = last6MonthKeys.map((mk) =>
+      expenseEntries
+        .filter((e) => (e.date ?? "").startsWith(mk))
+        .reduce((s, e) => s + convert(e.amount, e.currency), 0),
+    );
+    const recent3 = monthlyTotals.slice(-3);
+    const older3 = monthlyTotals.slice(0, 3);
+    const recent3Avg = recent3.filter((v) => v > 0).length > 0
+      ? recent3.reduce((s, v) => s + v, 0) / Math.max(1, recent3.filter((v) => v > 0).length)
+      : 0;
+    const older3Avg = older3.filter((v) => v > 0).length > 0
+      ? older3.reduce((s, v) => s + v, 0) / Math.max(1, older3.filter((v) => v > 0).length)
+      : 0;
+    const weighted = older3Avg > 0 ? (recent3Avg * 2 + older3Avg) / 3 : recent3Avg;
+    return { weightedMonthlyExpenses: weighted };
+  }, [expenseEntries, convert, last6MonthKeys]);
+
+  const monthlyExpenses = weightedMonthlyExpenses;
 
   const debtToIncomeRatio = annualizedIncome > 0 ? (netDebt / annualizedIncome) * 100 : 0;
 
-  const liquidAssets = useMemo(() => {
-    const cashLikePortfolio = portfolioHoldings
-      .filter((h) => h.type === "bond" || h.type === "savings" || h.type === "other")
-      .reduce((s, h) => s + convert(h.currentValue, h.currency), 0);
-    const stablecoinValue = cryptoHoldings
-      .filter((h) => h.token === "Stablecoin" || ["USDC", "USDT", "DAI", "BUSD", "FDUSD", "PYUSD", "TUSD", "USD1"].includes(h.token.toUpperCase()))
-      .reduce((s, h) => s + convert(h.currentValueUsd, "USD"), 0);
-    return cashLikePortfolio + stablecoinValue;
-  }, [portfolioHoldings, cryptoHoldings, convert]);
-
-  const emergencyFundMonths = monthlyExpenses > 0 ? liquidAssets / monthlyExpenses : 0;
+  // Emergency fund = savings-type portfolio holdings
+  const emergencyFundMonths = monthlyExpenses > 0 ? emergencyFundTotal / monthlyExpenses : 0;
   const wealthToIncomeRatio = annualizedIncome > 0 ? netWorth / annualizedIncome : 0;
 
   const passiveIncome = useMemo(() => {
@@ -322,8 +351,8 @@ export default function DashboardPage() {
     },
     { label: "Debt / Income", value: debtToIncomeRatio, max: 100, thresholds: [35, 50] as [number, number], invert: true, suffix: "%",
       status: debtToIncomeRatio <= 35 ? "Healthy" : debtToIncomeRatio <= 50 ? "Caution" : "High",
-      formula: "Net Debt \u00f7 Annual Income", detail: `${format(netDebt)} \u00f7 ${format(annualizedIncome)}`,
-      desc: "Net debt (liabilities minus receivables) relative to income. Banks use this to assess risk \u2014 under 35% is ideal.",
+      formula: "Net Debt \u00f7 Weighted Annual Income", detail: `${format(netDebt)} \u00f7 ${format(annualizedIncome)} (${format(weightedMonthlyIncome)}/mo \u00d7 12)`,
+      desc: "Net debt relative to income. Income is weighted: recent 3 months count double vs older 3 months, then annualized.",
       tip: debtToIncomeRatio <= 35 ? "Lenders see you as low risk. Good position for future borrowing if needed." : "Avoid new debt until this ratio drops. Focus on increasing income or paying down principal.",
     },
     { label: "Savings Rate", value: savingsRate, max: 100, thresholds: [10, 20] as [number, number], invert: false, suffix: "%",
@@ -334,13 +363,13 @@ export default function DashboardPage() {
     },
     { label: "Emergency Fund", value: emergencyFundMonths, max: 12, thresholds: [3, 6] as [number, number], invert: false, suffix: "months",
       status: emergencyFundMonths >= 6 ? "Strong" : emergencyFundMonths >= 3 ? "Adequate" : "Build up",
-      formula: "Liquid Assets \u00f7 Monthly Expenses", detail: `${format(liquidAssets)} \u00f7 ${format(monthlyExpenses)}/mo`,
-      desc: "How many months you could survive without income. Includes cash, bonds, and stablecoins. 3-6 months is the standard target.",
-      tip: emergencyFundMonths >= 6 ? "Well protected! Anything above 6 months could be invested for growth." : emergencyFundMonths >= 3 ? "You have a basic safety net. Build to 6 months for full protection." : "This is your #1 priority. Set up auto-transfers to build this up.",
+      formula: "Emergency Fund \u00f7 Weighted Monthly Expenses", detail: `${format(emergencyFundTotal)} \u00f7 ${format(monthlyExpenses)}/mo`,
+      desc: "How many months your emergency fund covers. Based on your savings-type holdings and weighted average monthly expenses (recent months weighted higher).",
+      tip: emergencyFundMonths >= 6 ? "Well protected! Anything above 6 months could be invested for growth." : emergencyFundMonths >= 3 ? "You have a basic safety net. Build to 6 months for full protection." : "This is your #1 priority. Add accounts on the Emergency page.",
     },
     { label: "Wealth / Income", value: wealthToIncomeRatio, max: 12, thresholds: [1, 5] as [number, number], invert: false, suffix: "x annual",
       status: wealthToIncomeRatio >= 5 ? "Strong" : wealthToIncomeRatio >= 1 ? "Growing" : "Early",
-      formula: "Net Worth \u00f7 Annual Income", detail: `${format(netWorth)} \u00f7 ${format(annualizedIncome)}`,
+      formula: "Net Worth \u00f7 Weighted Annual Income", detail: `${format(netWorth)} \u00f7 ${format(annualizedIncome)}`,
       desc: "How many years of income you've accumulated. A rule of thumb: aim for 1x by 30, 3x by 40, 6x by 50, 10-12x by retirement.",
       tip: wealthToIncomeRatio >= 5 ? "You're building real wealth. Stay the course." : wealthToIncomeRatio >= 1 ? "Good progress! Focus on increasing both savings rate and investment returns." : "You're in the accumulation phase. Every dollar saved now has the most compounding time.",
     },
@@ -363,7 +392,7 @@ export default function DashboardPage() {
       desc: "Simple: are you earning more than you spend? A positive cash flow is the foundation of all wealth building.",
       tip: netCashFlow >= 0 ? "You're cash-flow positive. Direct the surplus to savings and investments." : "You're spending more than you earn. Review expenses immediately and find cuts.",
     },
-  ], [debtToAssetRatio, debtToIncomeRatio, savingsRate, emergencyFundMonths, wealthToIncomeRatio, investmentToNetWorthRatio, fiRatio, netCashFlow, iOwe, totalAssets, annualizedIncome, periodIncomeTotal, periodExpenseTotal, liquidAssets, monthlyExpenses, netWorth, investmentAssets, passiveAnnualized, annualizedExpenses, format]);
+  ], [debtToAssetRatio, debtToIncomeRatio, savingsRate, emergencyFundMonths, wealthToIncomeRatio, investmentToNetWorthRatio, fiRatio, netCashFlow, netDebt, owedToMe, totalAssets, annualizedIncome, periodIncomeTotal, periodExpenseTotal, emergencyFundTotal, monthlyExpenses, netWorth, investmentAssets, passiveAnnualized, annualizedExpenses, format]);
 
   // ---- Asset allocation ---------------------------------------------------
 
@@ -461,13 +490,7 @@ export default function DashboardPage() {
 
   const activePortfolioTotal = includeSuper ? portfolioTotal : normalTotal;
 
-  // Emergency fund = savings type holdings (excluding from portfolio total to avoid double-count)
-  const emergencyFundTotal = useMemo(
-    () => portfolioHoldings
-      .filter((h) => h.type === "savings")
-      .reduce((s, h) => s + convert(h.currentValue, h.currency), 0),
-    [portfolioHoldings, convert],
-  );
+  // emergencyFundTotal moved earlier (before financial health section)
 
   // Portfolio total for display excludes savings (shown separately)
   const portfolioDisplayTotal = activePortfolioTotal - emergencyFundTotal;
