@@ -167,7 +167,7 @@ export function PortfolioCharts({
     <>
       {/* ── Value Trend Chart ── */}
       <BlurFade delay={baseDelay * 2}>
-        <div className="finance-card p-6">
+        <div className="finance-card px-3 py-4 sm:p-6">
           <div className="mb-4 flex items-center justify-between">
             <p className="label-mono">Value Trend</p>
             <div className="flex items-center gap-1">
@@ -239,7 +239,7 @@ export function PortfolioCharts({
       {/* ── Broker Breakdown ── */}
       {brokerBreakdown.length > 0 && (
         <BlurFade delay={baseDelay * 5.5}>
-          <div className="finance-card p-6">
+          <div className="finance-card px-3 py-4 sm:p-6">
             <p className="label-mono mb-4">By Broker</p>
             <div className="space-y-2.5">
               {brokerBreakdown.map((b, i) => {
@@ -247,18 +247,18 @@ export function PortfolioCharts({
                 const color = CHART_COLORS[i % CHART_COLORS.length];
                 return (
                   <div key={b.broker} className="space-y-1">
-                    <div className="flex items-center justify-between text-sm">
-                      <div className="flex items-center gap-2">
+                    <div className="flex items-center justify-between text-sm gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
                         <span
-                          className="inline-block h-2.5 w-2.5 rounded-full"
+                          className="inline-block h-2.5 w-2.5 rounded-full shrink-0"
                           style={{ backgroundColor: color }}
                         />
-                        <span>{b.broker}</span>
-                        <span className="text-xs text-muted-foreground">
-                          {b.count} holding{b.count !== 1 ? "s" : ""}
+                        <span className="truncate">{b.broker}</span>
+                        <span className="text-xs text-muted-foreground shrink-0">
+                          {b.count}
                         </span>
                       </div>
-                      <span className="font-mono text-xs tabular-nums text-muted-foreground">
+                      <span className="font-mono text-xs tabular-nums text-muted-foreground shrink-0">
                         {format(b.value)} ({pct.toFixed(1)}%)
                       </span>
                     </div>

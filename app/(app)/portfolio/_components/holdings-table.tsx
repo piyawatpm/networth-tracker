@@ -150,10 +150,10 @@ export function HoldingsTable({
                   {/* ── Collapsed row — tap to expand ── */}
                   <button
                     onClick={() => setExpandedId(isExpanded ? null : h.id)}
-                    className="w-full text-left px-4 py-3 flex items-center gap-3 hover:bg-muted/20 transition-colors"
+                    className="w-full text-left px-3 sm:px-4 py-3 flex items-center gap-2.5 sm:gap-3 hover:bg-muted/20 transition-colors overflow-hidden"
                   >
                     {/* Icon */}
-                    <div className="h-9 w-9 rounded-lg flex items-center justify-center shrink-0"
+                    <div className="h-8 w-8 sm:h-9 sm:w-9 rounded-lg flex items-center justify-center shrink-0"
                       style={{ backgroundColor: typeColor + "15" }}>
                       <span className="text-[10px] font-bold font-mono leading-none" style={{ color: typeColor }}>
                         {h.ticker ? h.ticker.slice(0, 4) : h.name.slice(0, 2).toUpperCase()}
@@ -193,14 +193,14 @@ export function HoldingsTable({
                   {isExpanded && (
                     <div className="border-t border-border/40">
                       {/* Stats grid */}
-                      <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-border/30">
+                      <div className="grid grid-cols-2 sm:grid-cols-4 sm:divide-x divide-border/30">
                         {[
                           { label: "Current Value", val: format(h.currentValue, h.currency), edit: true },
                           { label: "Invested", val: format(h.amountInvested, h.currency) },
                           { label: "Units", val: h.units.toLocaleString("en-US", { maximumFractionDigits: 6 }) },
                           { label: "Currency", val: h.currency },
                         ].map((m) => (
-                          <div key={m.label} className="px-4 py-2.5">
+                          <div key={m.label} className="px-3 sm:px-4 py-2.5 min-w-0">
                             <p className="text-[9px] text-muted-foreground uppercase tracking-wider">{m.label}</p>
                             {m.edit && editingValueId === h.id ? (
                               <div className="flex items-center gap-1 mt-0.5">
@@ -211,8 +211,8 @@ export function HoldingsTable({
                                 <Button variant="ghost" size="icon-xs" onClick={() => setEditingValueId(null)}><X className="h-2.5 w-2.5" /></Button>
                               </div>
                             ) : (
-                              <p className="text-xs font-medium tabular-nums mt-0.5 flex items-center gap-1">
-                                {m.val}
+                              <p className="text-xs font-medium tabular-nums mt-0.5 flex items-center gap-1 truncate">
+                                <span className="truncate">{m.val}</span>
                                 {m.edit && (
                                   <button onClick={(e) => { e.stopPropagation(); onStartEditValue(h); }}
                                     className="h-4 w-4 rounded bg-secondary hover:bg-secondary/80 inline-flex items-center justify-center transition-colors">
@@ -229,33 +229,33 @@ export function HoldingsTable({
                       </div>
 
                       {/* Action buttons */}
-                      <div className="flex items-center justify-between px-4 py-2 border-t border-border/30 bg-muted/10">
-                        <div className="flex items-center gap-1">
+                      <div className="flex items-center justify-between px-2 sm:px-4 py-2 border-t border-border/30 bg-muted/10 gap-1 overflow-hidden">
+                        <div className="flex items-center gap-0.5 sm:gap-1 flex-wrap min-w-0">
                           <TransactionDialog holding={h} onSave={onTransaction} trigger={
-                            <Button variant="outline" size="xs" className="gap-1 text-[10px] h-7">
-                              <ArrowRightLeft className="h-3 w-3" />Buy/Sell
+                            <Button variant="outline" size="xs" className="gap-0.5 sm:gap-1 text-[10px] h-7 px-2 sm:px-2.5">
+                              <ArrowRightLeft className="h-3 w-3 shrink-0" /><span>Buy/Sell</span>
                             </Button>
                           } />
-                          <Button variant="ghost" size="xs" className="gap-1 text-[10px] h-7" onClick={() => onShowTxHistory(h.id)}>
-                            <History className="h-3 w-3" />History
+                          <Button variant="ghost" size="xs" className="gap-0.5 sm:gap-1 text-[10px] h-7 px-1.5 sm:px-2.5" onClick={() => onShowTxHistory(h.id)}>
+                            <History className="h-3 w-3 shrink-0" /><span className="hidden sm:inline">History</span><span className="sm:hidden">Hist</span>
                           </Button>
-                          <Button variant="ghost" size="xs" className="gap-1 text-[10px] h-7" onClick={() => onShowLog(h.id)}>
-                            Price Log
+                          <Button variant="ghost" size="xs" className="gap-0.5 text-[10px] h-7 px-1.5 sm:px-2.5" onClick={() => onShowLog(h.id)}>
+                            <span className="hidden sm:inline">Price Log</span><span className="sm:hidden">Log</span>
                           </Button>
                           {h.link && (
                             <a href={h.link} target="_blank" rel="noopener noreferrer">
-                              <Button variant="ghost" size="xs" className="gap-1 text-[10px] h-7"><ExternalLink className="h-3 w-3" /></Button>
+                              <Button variant="ghost" size="xs" className="text-[10px] h-7 px-1.5"><ExternalLink className="h-3 w-3" /></Button>
                             </a>
                           )}
                         </div>
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-0.5 shrink-0">
                           <HoldingDialog holding={h} onSave={onSave} trigger={
                             <Button variant="ghost" size="icon-xs"><Pencil className="h-3 w-3" /></Button>
                           } />
                           {deleteConfirmId === h.id ? (
-                            <div className="flex gap-1">
-                              <Button variant="destructive" size="xs" className="h-6 text-[10px]" onClick={() => handleDelete(h.id)}>Delete</Button>
-                              <Button variant="ghost" size="xs" className="h-6 text-[10px]" onClick={() => setDeleteConfirmId(null)}>Cancel</Button>
+                            <div className="flex gap-0.5">
+                              <Button variant="destructive" size="xs" className="h-6 text-[10px]" onClick={() => handleDelete(h.id)}>Del</Button>
+                              <Button variant="ghost" size="xs" className="h-6 text-[10px]" onClick={() => setDeleteConfirmId(null)}>No</Button>
                             </div>
                           ) : (
                             <Button variant="ghost" size="icon-xs" onClick={() => setDeleteConfirmId(h.id)}><Trash2 className="h-3 w-3" /></Button>

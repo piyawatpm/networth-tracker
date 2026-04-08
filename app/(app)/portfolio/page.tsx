@@ -367,11 +367,11 @@ export default function PortfolioPage() {
   const DELAY = 0.05;
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 overflow-x-hidden">
       {/* ── Hero ── */}
       <BlurFade delay={0}>
-        <div className="flex items-start justify-between gap-4">
-          <div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+          <div className="min-w-0">
             <p className="label-mono mb-2">Portfolio</p>
             <div className="display-number">
               {totals.totalValue > 0 ? (
@@ -386,14 +386,13 @@ export default function PortfolioPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 flex-wrap">
             {/* Include Super Toggle */}
             <button
               onClick={() => setIncludeSuper(!includeSuper)}
-              className="flex items-center gap-2.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+              className="flex items-center gap-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground shrink-0"
             >
-              <span className="hidden sm:inline">Include Super</span>
-              <span className="sm:hidden">Super</span>
+              <span>Super</span>
               <span
                 className={cn(
                   "relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors",
@@ -414,18 +413,18 @@ export default function PortfolioPage() {
               variant="outline"
               size="sm"
               onClick={handleExportXls}
-              className="gap-1.5"
+              className="gap-1.5 shrink-0"
             >
               <Download className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">Export XLS</span>
+              <span className="hidden sm:inline">Export</span>
             </Button>
 
             {/* Add Holding */}
             <HoldingDialog
               onSave={handleSave}
               trigger={
-                <Button className="gap-1.5 rounded-full px-4">
-                  <Plus className="h-4 w-4" data-icon="inline-start" />
+                <Button className="gap-1.5 rounded-full px-4 shrink-0">
+                  <Plus className="h-4 w-4" />
                   <span className="hidden sm:inline">Add Holding</span>
                   <span className="sm:hidden">Add</span>
                 </Button>
@@ -437,39 +436,39 @@ export default function PortfolioPage() {
 
       {/* ── Summary Tiles ── */}
       <BlurFade delay={DELAY}>
-        <div className="finance-card p-5">
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-4 md:gap-0 md:divide-x md:divide-border">
-            <div className="md:pr-6">
+        <div className="finance-card px-3 py-4 sm:p-5">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-0 md:divide-x md:divide-border">
+            <div className="md:pr-6 min-w-0">
               <p className="label-mono mb-1">Total Value</p>
-              <p className="text-lg font-semibold tabular-nums">
+              <p className="text-base sm:text-lg font-semibold tabular-nums truncate">
                 {format(totals.totalValue)}
               </p>
             </div>
-            <div className="md:px-6">
+            <div className="md:px-6 min-w-0">
               <p className="label-mono mb-1">Invested</p>
-              <p className="text-lg font-semibold tabular-nums">
+              <p className="text-base sm:text-lg font-semibold tabular-nums truncate">
                 {format(totals.totalInvested)}
               </p>
             </div>
-            <div className="md:px-6">
+            <div className="md:px-6 min-w-0">
               <p className="label-mono mb-1">P&L</p>
               <p
                 className={cn(
-                  "text-lg font-semibold tabular-nums",
+                  "text-base sm:text-lg font-semibold tabular-nums truncate",
                   totals.pnl >= 0 ? "text-income" : "text-expense"
                 )}
               >
                 {totals.pnl >= 0 ? "+" : ""}
                 {format(totals.pnl)}
-                <span className="ml-1 text-sm font-normal">
+                <span className="ml-1 text-xs sm:text-sm font-normal">
                   ({totals.pnl >= 0 ? "+" : ""}
                   {totals.pnlPercent.toFixed(1)}%)
                 </span>
               </p>
             </div>
-            <div className="md:pl-6">
+            <div className="md:pl-6 min-w-0">
               <p className="label-mono mb-1">Holdings</p>
-              <p className="text-lg font-semibold tabular-nums">
+              <p className="text-base sm:text-lg font-semibold tabular-nums">
                 {totals.count}
               </p>
             </div>
