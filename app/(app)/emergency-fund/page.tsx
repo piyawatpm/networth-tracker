@@ -3,7 +3,8 @@
 import { useState, useMemo } from "react";
 import { useCloudStorage } from "@/components/providers/data-provider";
 import { useCurrency } from "@/components/providers/currency-provider";
-import type { PortfolioHolding, ExpenseEntry } from "@/lib/utils/types";
+import type { PortfolioHolding, ExpenseEntry, CryptoHolding } from "@/lib/utils/types";
+import { parseAndComputeHoldings } from "@/lib/utils/crypto-csv";
 import { normalizeExpenseEntry } from "@/lib/utils/types";
 import { getLastNMonthKeys, getMonthKey } from "@/lib/utils/timezone";
 import { cn } from "@/lib/utils";
@@ -34,6 +35,7 @@ import {
   Plus,
   Pencil,
   Trash2,
+  Bitcoin,
   Building2,
   Landmark,
   Banknote,
@@ -183,21 +185,29 @@ export default function EmergencyFundPage() {
   const [allHoldings, setHoldings] = useCloudStorage<PortfolioHolding[]>("portfolio_holdings", []);
   const [rawExpenses] = useCloudStorage<ExpenseEntry[]>("expense_entries", []);
   const [targetMonths, setTargetMonths] = useCloudStorage<number>("emergency_fund_target_months", 6);
+  const [cryptoCsvText] = useCloudStorage<string>("crypto_csv_text", "");
+  const [cryptoEmergencyTags] = useCloudStorage<Record<string, boolean>>("crypto_emergency_tags", {});
   const { convert, format, symbol } = useCurrency();
 
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
-  // Filter savings accounts
+  // Crypto holdings tagged as emergency fund
+  const cryptoHoldings = useMemo(() => cryptoCsvText ? parseAndComputeHoldings(cryptoCsvText) : [], [cryptoCsvText]);
+  const cryptoEFHoldings = useMemo(() => cryptoHoldings.filter((h) => cryptoEmergencyTags[h.token]), [cryptoHoldings, cryptoEmergencyTags]);
+  const cryptoEFTotal = useMemo(() => cryptoEFHoldings.reduce((s, h) => s + convert(h.currentValueUsd, "USD"), 0), [cryptoEFHoldings, convert]);
+
+  // Filter emergency fund accounts: savings type OR explicitly tagged
   const savingsAccounts = useMemo(
-    () => allHoldings.filter((h) => h.type === "savings"),
+    () => allHoldings.filter((h) => h.type === "savings" || h.isEmergencyFund),
     [allHoldings],
   );
 
-  // Total emergency fund
-  const totalFund = useMemo(
+  // Total emergency fund (portfolio + crypto)
+  const portfolioEFTotal = useMemo(
     () => savingsAccounts.reduce((s, h) => s + convert(h.currentValue, h.currency), 0),
     [savingsAccounts, convert],
   );
+  const totalFund = portfolioEFTotal + cryptoEFTotal;
 
   // Average monthly expenses (last 6 months)
   const expenses = useMemo(
@@ -479,6 +489,34 @@ export default function EmergencyFundPage() {
           )}
         </div>
       </BlurFade>
+
+      {/* Crypto Holdings tagged as EF */}
+      {cryptoEFHoldings.length > 0 && (
+        <BlurFade delay={0.2}>
+          <div className="space-y-3">
+            <p className="label-mono">Crypto ({cryptoEFHoldings.length})</p>
+            <div className="space-y-2">
+              {cryptoEFHoldings
+                .sort((a, b) => b.currentValueUsd - a.currentValueUsd)
+                .map((h) => (
+                  <div key={h.token} className="finance-card p-4 flex items-center gap-4">
+                    <div className="flex items-center justify-center h-9 w-9 rounded-full shrink-0 bg-accent/10">
+                      <Bitcoin className="h-4 w-4 text-accent" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold truncate">{h.token}</p>
+                      <p className="text-xs text-muted-foreground">Crypto · tagged as EF</p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-sm font-bold tabular-nums">{format(convert(h.currentValueUsd, "USD"))}</p>
+                      <p className="text-[10px] text-muted-foreground font-mono">USD</p>
+                    </div>
+                  </div>
+                ))}
+            </div>
+          </div>
+        </BlurFade>
+      )}
     </div>
   );
 }

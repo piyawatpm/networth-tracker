@@ -143,6 +143,7 @@ export default function DashboardPage() {
   const [portfolioTransactions] = useCloudStorage<PortfolioTransaction[]>("portfolio_transactions", []);
   const [nwSnapshots] = useCloudStorage<{ date: string; value: number }[]>("networth_snapshots", []);
   const [stablecoinTags] = useCloudStorage<Record<string, boolean>>("crypto_stablecoin_tags", {});
+  const [cryptoEmergencyTags] = useCloudStorage<Record<string, boolean>>("crypto_emergency_tags", {});
 
   const { convert, format, symbol, currency } = useCurrency();
   const [period, setPeriod] = useState<Period>("M");
@@ -225,8 +226,18 @@ export default function DashboardPage() {
 
   // Emergency fund = savings-type holdings
   const emergencyFundTotal = useMemo(
-    () => portfolioHoldings.filter((h) => h.type === "savings").reduce((s, h) => s + convert(h.currentValue, h.currency), 0),
-    [portfolioHoldings, convert],
+    () => {
+      // Portfolio holdings tagged as emergency fund
+      const portfolioEF = portfolioHoldings
+        .filter((h) => h.type === "savings" || h.isEmergencyFund)
+        .reduce((s, h) => s + convert(h.currentValue, h.currency), 0);
+      // Crypto holdings tagged as emergency fund
+      const cryptoEF = cryptoHoldings
+        .filter((h) => cryptoEmergencyTags[h.token])
+        .reduce((s, h) => s + convert(h.currentValueUsd, "USD"), 0);
+      return portfolioEF + cryptoEF;
+    },
+    [portfolioHoldings, cryptoHoldings, cryptoEmergencyTags, convert],
   );
 
   // Weighted average monthly expenses (recent 3mo × 2 + older 3mo × 1)

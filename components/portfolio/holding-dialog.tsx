@@ -23,6 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { HOLDING_TYPE_LABELS } from "@/lib/utils/constants";
+import { cn } from "@/lib/utils";
 import { useCurrency } from "@/components/providers/currency-provider";
 import type {
   PortfolioHolding,
@@ -59,6 +60,7 @@ export function HoldingDialog({ holding, onSave, trigger }: HoldingDialogProps) 
   const [accountType, setAccountType] = useState<AccountType>(
     holding?.accountType ?? "normal"
   );
+  const [isEmergencyFund, setIsEmergencyFund] = useState(holding?.isEmergencyFund ?? false);
   const [broker, setBroker] = useState(holding?.broker ?? "");
   const [country, setCountry] = useState(holding?.country ?? "");
   const [link, setLink] = useState(holding?.link ?? "");
@@ -79,6 +81,7 @@ export function HoldingDialog({ holding, onSave, trigger }: HoldingDialogProps) 
       setTicker(holding?.ticker ?? "");
       setType(holding?.type ?? "stock");
       setAccountType(holding?.accountType ?? "normal");
+      setIsEmergencyFund(holding?.isEmergencyFund ?? false);
       setBroker(holding?.broker ?? "");
       setCountry(holding?.country ?? "");
       setLink(holding?.link ?? "");
@@ -153,6 +156,7 @@ export function HoldingDialog({ holding, onSave, trigger }: HoldingDialogProps) 
       currency,
       notes: notes.trim(),
       createdAt: holding?.createdAt ?? Date.now(),
+      isEmergencyFund,
     };
 
     onSave(saved);
@@ -280,6 +284,24 @@ export function HoldingDialog({ holding, onSave, trigger }: HoldingDialogProps) 
               </Select>
             </div>
           </div>
+
+          {/* Emergency Fund toggle */}
+          <button
+            type="button"
+            onClick={() => setIsEmergencyFund(!isEmergencyFund)}
+            className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-secondary/50 hover:bg-secondary/80 transition-colors"
+          >
+            <span className="text-sm font-medium">Emergency Fund</span>
+            <span className={cn(
+              "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors",
+              isEmergencyFund ? "bg-income" : "bg-border"
+            )}>
+              <span className={cn(
+                "inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform",
+                isEmergencyFund ? "translate-x-[18px]" : "translate-x-[3px]"
+              )} />
+            </span>
+          </button>
 
           {/* Broker + Country row */}
           <div className="grid grid-cols-2 gap-3">

@@ -70,6 +70,12 @@ export default function CryptoPage() {
     {},
   );
 
+  // Emergency fund tag overrides
+  const [emergencyTags, setEmergencyTags] = useCloudStorage<Record<string, boolean>>(
+    "crypto_emergency_tags",
+    {},
+  );
+
   // Ticker mappings: CSV token name → Binance ticker symbol
   const [tickerMappings, setTickerMappings] = useCloudStorage<Record<string, string>>(
     "crypto_ticker_mappings",
@@ -388,6 +394,8 @@ export default function CryptoPage() {
         saveExchange={saveExchange}
         stablecoinTags={stablecoinTags}
         setStablecoinTags={setStablecoinTags}
+        emergencyTags={emergencyTags}
+        setEmergencyTags={setEmergencyTags}
         clearCsv={clearCsv}
       />
     </div>

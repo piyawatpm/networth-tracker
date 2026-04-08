@@ -169,6 +169,7 @@ export interface PortfolioHolding {
   currency: Currency;
   notes: string;
   createdAt: number;
+  isEmergencyFund?: boolean;
 }
 
 export interface PortfolioTransaction {
