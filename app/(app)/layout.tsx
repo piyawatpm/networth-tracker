@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "motion/react";
@@ -417,7 +417,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [moreOpen, setMoreOpen] = useState(false);
   const [mobileDrawer, setMobileDrawer] = useState(false);
-  const moreButtonRef = useRef<HTMLDivElement>(null);
 
   // Check if current path is in secondary nav (to highlight "More")
   const isSecondaryActive = SECONDARY_NAV.some((item) => pathname === item.href);
@@ -460,7 +459,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               })}
 
               {/* "More" dropdown */}
-              <div className="relative" ref={moreButtonRef}>
+              <div className="relative">
                 <button
                   onClick={() => setMoreOpen(!moreOpen)}
                   className={cn(
@@ -474,6 +473,33 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                   <span>More</span>
                   <ChevronDown className={cn("h-3 w-3 transition-transform", moreOpen && "rotate-180")} />
                 </button>
+
+                {moreOpen && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setMoreOpen(false)} />
+                    <div className="absolute left-0 top-full mt-2 w-48 rounded-2xl liquid-glass overflow-hidden p-1 z-50">
+                      {SECONDARY_NAV.map((item) => {
+                        const isActive = pathname === item.href;
+                        return (
+                          <Link
+                            key={item.href}
+                            href={item.href}
+                            onClick={() => setMoreOpen(false)}
+                            className={cn(
+                              "relative z-10 flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm transition-all duration-200",
+                              isActive
+                                ? "liquid-glass-pill text-foreground"
+                                : "text-muted-foreground hover:text-foreground hover:bg-white/[0.08]",
+                            )}
+                          >
+                            <item.icon className={cn("h-4 w-4", isActive && "text-accent")} />
+                            <span>{item.label}</span>
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
               </div>
             </nav>
           </div>
@@ -487,44 +513,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       </header>
-
-      {/* ── Desktop "More" dropdown — rendered outside header to avoid stacking context clipping ── */}
-      {moreOpen && (
-        <>
-          <div className="fixed inset-0 z-[55]" onClick={() => setMoreOpen(false)} />
-          <div
-            className="fixed w-48 rounded-2xl liquid-glass overflow-hidden p-1 z-[56] hidden md:block"
-            style={{
-              top: moreButtonRef.current
-                ? moreButtonRef.current.getBoundingClientRect().bottom + 4
-                : 48,
-              left: moreButtonRef.current
-                ? moreButtonRef.current.getBoundingClientRect().left
-                : 0,
-            }}
-          >
-            {SECONDARY_NAV.map((item) => {
-              const isActive = pathname === item.href;
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  onClick={() => setMoreOpen(false)}
-                  className={cn(
-                    "relative z-10 flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm transition-all duration-200",
-                    isActive
-                      ? "liquid-glass-pill text-foreground"
-                      : "text-muted-foreground hover:text-foreground hover:bg-white/[0.08]",
-                  )}
-                >
-                  <item.icon className={cn("h-4 w-4", isActive && "text-accent")} />
-                  <span>{item.label}</span>
-                </Link>
-              );
-            })}
-          </div>
-        </>
-      )}
 
       {/* ── Main content ── */}
       <main
