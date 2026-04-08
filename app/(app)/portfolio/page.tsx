@@ -117,27 +117,12 @@ export default function PortfolioPage() {
             );
             if (holdingIdx >= 0) {
               const h = updatedHoldings[holdingIdx];
-              // Price comes in result.currency (usually USD for US stocks)
-              // Convert to holding's currency if they differ
-              let priceInHoldingCurrency = result.price;
-              if (result.currency && h.currency && result.currency !== h.currency) {
-                priceInHoldingCurrency = convert(result.price, result.currency);
-                // convert() returns value in display currency, we need it in h.currency
-                // So: convert price from result.currency to display, then from display to h.currency
-                // Actually convert(amount, from) returns in displayCurrency. We need holding currency.
-                // Simpler: value in holding currency = price_usd * (rate_holding / rate_usd)
-                // But we only have convert(amount, from) → displayCurrency
-                // Use: priceInDisplay = convert(price, resultCurrency)
-                //      holdingRate = convert(1, holdingCurrency) → 1 unit of holding = X display
-                //      priceInHolding = priceInDisplay / holdingRate
-                const oneHoldingInDisplay = convert(1, h.currency);
-                if (oneHoldingInDisplay > 0) {
-                  const priceInDisplay = convert(result.price, result.currency);
-                  priceInHoldingCurrency = priceInDisplay / oneHoldingInDisplay;
-                }
-              }
-              const newValue = h.units * priceInHoldingCurrency;
+              // Store currentValue in the PRICE's currency (e.g., USD for US stocks)
+              // The display layer handles conversion to the user's preferred currency
+              const newValue = h.units * result.price;
               const oldValue = h.currentValue;
+              // Update the holding's currency to match the price source
+              const newCurrency = result.currency || h.currency;
 
               if (Math.abs(newValue - oldValue) > 0.01) {
                 addUpdateLog({
@@ -149,7 +134,7 @@ export default function PortfolioPage() {
                   timestamp: Date.now(),
                 });
 
-                updatedHoldings[holdingIdx] = { ...h, currentValue: newValue };
+                updatedHoldings[holdingIdx] = { ...h, currentValue: newValue, currency: newCurrency };
                 updatedCount++;
               }
             }
