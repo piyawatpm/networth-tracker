@@ -10,6 +10,8 @@
 .DS_Store
 *.pem
 *.png
+!public/icons/*.png
+!public/apple-touch-icon.png
 *.jpg
 
 # debug
