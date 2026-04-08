@@ -123,7 +123,7 @@ export function NetWorthChart({ nwTrendData, format, includeSuper = true, delay 
 
     return {
       ...base,
-      grid: { top: showBreakdown ? 12 : 16, right: 12, bottom: showBreakdown ? 40 : 28, left: 50, containLabel: false },
+      grid: { top: showBreakdown ? 10 : 12, right: 4, bottom: showBreakdown ? 38 : 24, left: 44, containLabel: false },
       xAxis: {
         ...base.xAxis,
         type: "category" as const,
@@ -157,7 +157,7 @@ export function NetWorthChart({ nwTrendData, format, includeSuper = true, delay 
 
   return (
     <BlurFade delay={delay}>
-      <div className="finance-card p-5">
+      <div className="finance-card px-3 py-4 sm:p-5">
         {/* Header row */}
         <div className="flex items-start justify-between mb-1">
           <div>
@@ -238,7 +238,8 @@ export function NetWorthChart({ nwTrendData, format, includeSuper = true, delay 
         {filteredData.length > 1 ? (
           <ReactECharts
             option={option}
-            style={{ height: 220, width: "100%" }}
+            style={{ height: 240, width: "100%" }}
+            className="!-mx-1 sm:!mx-0"
             opts={{ renderer: "svg" }}
           />
         ) : (

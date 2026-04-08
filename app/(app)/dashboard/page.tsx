@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
-import Link from "next/link";
 
 import { cn } from "@/lib/utils";
 import { BlurFade } from "@/components/ui/blur-fade";
@@ -562,21 +561,7 @@ export default function DashboardPage() {
         </section>
       </BlurFade>
 
-      {/* 2. QUICK ACTIONS */}
-      <BlurFade delay={D * 0.3}>
-        <div className="flex flex-wrap gap-2">
-          {[
-            { href: "/income", label: "+ Add Income" },
-            { href: "/expenses", label: "+ Add Expense" },
-            { href: "/portfolio", label: "Update Portfolio" },
-            { href: "/crypto", label: "Upload CSV" },
-          ].map((a) => (
-            <Link key={a.href} href={a.href} className="bg-secondary text-secondary-foreground hover:bg-secondary/80 px-3 py-1.5 rounded-full text-xs font-medium transition-colors">{a.label}</Link>
-          ))}
-        </div>
-      </BlurFade>
-
-      {/* 3. NET WORTH TREND — full width with multi-line */}
+      {/* 2. NET WORTH TREND — full width with multi-line */}
       <NetWorthChart nwTrendData={nwTrendData} format={format} includeSuper={includeSuper} delay={D} />
 
       {/* 3b. ASSET BREAKDOWN + WORLD DISTRIBUTION + MONEY FLOW */}

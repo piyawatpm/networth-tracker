@@ -521,7 +521,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           paddingRight: "env(safe-area-inset-right, 0px)",
         }}
       >
-        <div className="mx-auto max-w-7xl px-4 py-6 lg:px-8 lg:py-8">
+        <div className="mx-auto max-w-7xl px-3 py-5 sm:px-4 sm:py-6 lg:px-8 lg:py-8">
           {children}
         </div>
       </main>
