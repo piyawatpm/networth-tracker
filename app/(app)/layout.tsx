@@ -517,77 +517,133 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
       </main>
 
-      {/* ── Mobile bottom nav ── */}
-      <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-border/60 bg-background/90 backdrop-blur-md md:hidden">
-        <div className="flex items-center justify-around h-14 px-1">
-          {MOBILE_NAV.map((item) => {
-            const isActive = pathname === item.href;
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={cn(
-                  "flex flex-col items-center gap-0.5 px-3 py-1 rounded-lg text-[9px] font-medium transition-colors",
-                  isActive ? "text-foreground" : "text-muted-foreground",
-                )}
-              >
-                <item.icon className={cn("h-5 w-5", isActive && "text-accent")} />
-                <span>{item.label}</span>
-              </Link>
-            );
-          })}
-          {/* More button */}
-          <button
-            onClick={() => setMobileDrawer(true)}
-            className={cn(
-              "flex flex-col items-center gap-0.5 px-3 py-1 rounded-lg text-[9px] font-medium transition-colors",
-              isSecondaryActive ? "text-foreground" : "text-muted-foreground",
-            )}
-          >
-            <MoreHorizontal className={cn("h-5 w-5", isSecondaryActive && "text-accent")} />
-            <span>More</span>
-          </button>
-        </div>
-      </nav>
-
-      {/* ── Mobile drawer ── */}
-      {mobileDrawer && (
-        <div className="fixed inset-0 z-50 md:hidden">
-          <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={() => setMobileDrawer(false)} />
-          <div className="absolute bottom-0 left-0 right-0 bg-background rounded-t-2xl shadow-xl ring-1 ring-border/50 pb-8 animate-in slide-in-from-bottom duration-200">
-            <div className="flex items-center justify-between px-5 pt-4 pb-2">
-              <span className="text-sm font-semibold">More</span>
-              <button onClick={() => setMobileDrawer(false)} className="p-1 rounded-full hover:bg-secondary transition-colors">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <div className="px-3 pb-2">
-              {[...PRIMARY_NAV.slice(4), ...SECONDARY_NAV].map((item) => {
-                const isActive = pathname === item.href;
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    onClick={() => setMobileDrawer(false)}
+      {/* ── Mobile bottom nav (Liquid Glass) ── */}
+      <div
+        className="fixed bottom-0 left-0 right-0 z-50 md:hidden px-3"
+        style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 0.5rem)" }}
+      >
+        <nav className="liquid-glass rounded-[22px]">
+          <div className="relative z-10 flex items-center justify-around h-[64px] px-1">
+            {MOBILE_NAV.map((item) => {
+              const isActive = pathname === item.href;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className="relative flex flex-col items-center justify-center gap-[3px] w-[60px] h-[52px] rounded-2xl transition-all duration-300"
+                >
+                  {isActive && (
+                    <span className="absolute inset-[3px] rounded-xl liquid-glass-pill animate-in fade-in-0 zoom-in-90 duration-200" />
+                  )}
+                  <item.icon
                     className={cn(
-                      "flex items-center gap-3 px-3 py-3 rounded-lg transition-colors",
-                      isActive
-                        ? "bg-foreground/[0.06] text-foreground"
-                        : "text-muted-foreground hover:text-foreground hover:bg-foreground/[0.03]",
+                      "h-[21px] w-[21px] relative z-10 transition-all duration-300",
+                      isActive ? "text-accent" : "text-muted-foreground/50",
+                    )}
+                  />
+                  <span
+                    className={cn(
+                      "text-[10px] font-semibold relative z-10 transition-all duration-300 leading-none",
+                      isActive ? "text-foreground" : "text-muted-foreground/50",
                     )}
                   >
-                    <item.icon className="h-5 w-5" />
-                    <span className="text-sm font-medium">{item.label}</span>
-                  </Link>
-                );
-              })}
+                    {item.label}
+                  </span>
+                  {isActive && (
+                    <span className="absolute bottom-[2px] w-1 h-1 rounded-full bg-accent z-10 animate-in fade-in-0 zoom-in-50 duration-300" />
+                  )}
+                </Link>
+              );
+            })}
+            {/* More */}
+            <button
+              onClick={() => setMobileDrawer(true)}
+              className="relative flex flex-col items-center justify-center gap-[3px] w-[60px] h-[52px] rounded-2xl transition-all duration-300"
+            >
+              {isSecondaryActive && (
+                <span className="absolute inset-[3px] rounded-xl liquid-glass-pill" />
+              )}
+              <MoreHorizontal
+                className={cn(
+                  "h-[21px] w-[21px] relative z-10 transition-all duration-300",
+                  isSecondaryActive ? "text-accent" : "text-muted-foreground/50",
+                )}
+              />
+              <span
+                className={cn(
+                  "text-[10px] font-semibold relative z-10 transition-all duration-300 leading-none",
+                  isSecondaryActive ? "text-foreground" : "text-muted-foreground/50",
+                )}
+              >
+                More
+              </span>
+              {isSecondaryActive && (
+                <span className="absolute bottom-[2px] w-1 h-1 rounded-full bg-accent z-10" />
+              )}
+            </button>
+          </div>
+        </nav>
+      </div>
+
+      {/* ── Mobile drawer (Liquid Glass) ── */}
+      {mobileDrawer && (
+        <div className="fixed inset-0 z-[60] md:hidden">
+          <div
+            className="absolute inset-0 bg-black/20 backdrop-blur-sm animate-in fade-in-0 duration-200"
+            onClick={() => setMobileDrawer(false)}
+          />
+          <div
+            className="absolute bottom-0 left-0 right-0 px-3 animate-in slide-in-from-bottom duration-300"
+            style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 0.5rem)" }}
+          >
+            <div className="liquid-glass rounded-[22px]">
+              <div className="relative z-10">
+                {/* Drag handle */}
+                <div className="flex justify-center pt-3 pb-1">
+                  <div className="w-8 h-[3px] rounded-full bg-foreground/15" />
+                </div>
+                {/* Items */}
+                <div className="px-2 pb-3">
+                  {[...PRIMARY_NAV.slice(4), ...SECONDARY_NAV].map((item) => {
+                    const isActive = pathname === item.href;
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        onClick={() => setMobileDrawer(false)}
+                        className={cn(
+                          "flex items-center gap-3 px-4 py-3.5 rounded-2xl transition-all duration-200",
+                          isActive
+                            ? "liquid-glass-pill"
+                            : "active:bg-white/[0.08]",
+                        )}
+                      >
+                        <item.icon
+                          className={cn(
+                            "h-5 w-5 transition-colors",
+                            isActive ? "text-accent" : "text-muted-foreground/60",
+                          )}
+                        />
+                        <span
+                          className={cn(
+                            "text-sm font-medium transition-colors",
+                            isActive ? "text-foreground" : "text-muted-foreground/80",
+                          )}
+                        >
+                          {item.label}
+                        </span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Bottom padding for mobile nav */}
-      <div className="h-14 md:hidden" />
+      {/* Bottom padding for mobile floating nav + safe area */}
+      <div className="h-24 md:hidden" />
     </div>
   );
 }
