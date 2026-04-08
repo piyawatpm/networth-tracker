@@ -236,15 +236,15 @@ export default function DashboardPage() {
         allocs.push({ label: h.name, value: convert(h.currentValue, h.currency), color: colors[ci++ % colors.length] });
       }
     }
-    // Crypto
-    for (const h of cryptoHoldings) {
+    // Crypto — use rawCryptoHoldings (before stablecoin merge) so token names match tags
+    for (const h of rawCryptoHoldings) {
       if (cryptoEmergencyTags[h.token]) {
         allocs.push({ label: h.token, value: convert(h.currentValueUsd, "USD"), color: colors[ci++ % colors.length] });
       }
     }
     allocs.sort((a, b) => b.value - a.value);
     return { emergencyFundTotal: allocs.reduce((s, a) => s + a.value, 0), efAllocations: allocs };
-  }, [portfolioHoldings, cryptoHoldings, cryptoEmergencyTags, convert]);
+  }, [portfolioHoldings, rawCryptoHoldings, cryptoEmergencyTags, convert]);
 
   // Weighted average monthly expenses (recent 3mo × 2 + older 3mo × 1)
   const weightedMonthlyExpenses = useMemo(() => {
