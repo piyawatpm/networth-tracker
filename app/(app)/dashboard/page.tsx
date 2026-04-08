@@ -507,11 +507,25 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6 pb-12">
-      {/* Floating period toggle */}
-      <div className="fixed bottom-20 md:bottom-6 right-4 lg:right-8 z-40">
-        <div className="flex items-center rounded-full bg-card/90 backdrop-blur-md p-0.5 gap-0.5 shadow-lg ring-1 ring-border/40">
+      {/* Floating period toggle (Liquid Glass) */}
+      <div
+        className="fixed right-4 lg:right-8 z-40 md:bottom-6"
+        style={{ bottom: "calc(env(safe-area-inset-bottom, 0px) + 5.5rem)" }}
+      >
+        <div className="liquid-glass flex items-center rounded-full p-[3px] gap-[2px]">
           {(["W", "M", "Y"] as Period[]).map((p) => (
-            <button key={p} onClick={() => setPeriod(p)} className={cn("px-3 py-1.5 rounded-full text-xs font-semibold transition-all", period === p ? "bg-foreground text-background shadow-sm" : "text-muted-foreground hover:text-foreground")}>{p}</button>
+            <button
+              key={p}
+              onClick={() => setPeriod(p)}
+              className={cn(
+                "relative z-10 px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all duration-200",
+                period === p
+                  ? "liquid-glass-pill text-foreground"
+                  : "text-muted-foreground/60 hover:text-foreground",
+              )}
+            >
+              {p}
+            </button>
           ))}
         </div>
       </div>
