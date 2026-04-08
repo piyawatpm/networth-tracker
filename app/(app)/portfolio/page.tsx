@@ -546,6 +546,7 @@ export default function PortfolioPage() {
         convert={convert}
         displayCurrency={currency}
         onDeleteTransaction={(id) => setTransactions((prev) => prev.filter((t) => t.id !== id))}
+        onEditTransaction={(updated) => setTransactions((prev) => prev.map((t) => t.id === updated.id ? updated : t))}
       />
     </div>
   );

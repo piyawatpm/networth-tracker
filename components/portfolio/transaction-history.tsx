@@ -4,10 +4,11 @@ import { useState } from "react";
 import type { PortfolioHolding, PortfolioTransaction } from "@/lib/utils/types";
 import { formatDateString } from "@/lib/utils/timezone";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
-import { TrendingUp, TrendingDown, Trash2 } from "lucide-react";
+import { TrendingUp, TrendingDown, Trash2, Pencil, Check, X } from "lucide-react";
 
 interface TransactionHistoryProps {
   holdings: PortfolioHolding[];
@@ -18,19 +19,19 @@ interface TransactionHistoryProps {
   convert: (amount: number, from: string) => number;
   displayCurrency: string;
   onDeleteTransaction?: (id: string) => void;
+  onEditTransaction?: (tx: PortfolioTransaction) => void;
 }
 
 export function TransactionHistory({
-  holdings,
-  transactions,
-  holdingId,
-  setHoldingId,
-  format,
-  convert,
-  displayCurrency,
-  onDeleteTransaction,
+  holdings, transactions, holdingId, setHoldingId,
+  format, convert, displayCurrency,
+  onDeleteTransaction, onEditTransaction,
 }: TransactionHistoryProps) {
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editUnits, setEditUnits] = useState("");
+  const [editPrice, setEditPrice] = useState("");
+  const [editDate, setEditDate] = useState("");
 
   const holding = holdings.find((h) => h.id === holdingId);
   const entries = transactions
@@ -41,12 +42,33 @@ export function TransactionHistory({
   const totalSold = entries.filter((tx) => tx.type === "sell").reduce((s, tx) => s + tx.units, 0);
   const totalInvested = entries.filter((tx) => tx.type === "buy").reduce((s, tx) => s + tx.totalAmount, 0);
 
+  function startEdit(tx: PortfolioTransaction) {
+    setEditingId(tx.id);
+    setEditUnits(tx.units.toString());
+    setEditPrice(tx.pricePerUnit.toString());
+    setEditDate(tx.date);
+  }
+
+  function saveEdit(tx: PortfolioTransaction) {
+    const units = parseFloat(editUnits);
+    const price = parseFloat(editPrice);
+    if (isNaN(units) || isNaN(price) || units <= 0 || price < 0) return;
+    onEditTransaction?.({
+      ...tx,
+      units,
+      pricePerUnit: price,
+      totalAmount: units * price,
+      date: editDate || tx.date,
+    });
+    setEditingId(null);
+  }
+
   return (
-    <Dialog open={holdingId !== null} onOpenChange={(open) => { if (!open) setHoldingId(null); }}>
-      <DialogContent className="sm:max-w-md">
+    <Dialog open={holdingId !== null} onOpenChange={(open) => { if (!open) { setHoldingId(null); setEditingId(null); } }}>
+      <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Transaction History &mdash; {holding?.name ?? ""}</DialogTitle>
-          <DialogDescription>{holding?.ticker ?? ""} transactions</DialogDescription>
+          <DialogTitle>Transactions — {holding?.name ?? ""}</DialogTitle>
+          <DialogDescription>{holding?.ticker ?? ""}</DialogDescription>
         </DialogHeader>
 
         {/* Summary */}
@@ -67,65 +89,86 @@ export function TransactionHistory({
           </div>
         )}
 
-        {/* Transaction list */}
         {entries.length === 0 ? (
-          <div className="py-8 text-center text-sm text-muted-foreground">No transactions recorded yet.</div>
+          <div className="py-8 text-center text-sm text-muted-foreground">No transactions yet.</div>
         ) : (
-          <div className="max-h-72 overflow-y-auto -mx-1 px-1">
-            <div className="divide-y divide-border">
-              {entries.map((tx) => (
-                <div key={tx.id} className="flex items-center justify-between py-2.5 text-sm group">
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    {tx.type === "buy" ? (
-                      <span className="flex items-center gap-1 text-[10px] font-mono uppercase tracking-wider text-income bg-income/10 px-1.5 py-0.5 rounded shrink-0">
-                        <TrendingUp className="h-2.5 w-2.5" /> buy
-                      </span>
-                    ) : (
-                      <span className="flex items-center gap-1 text-[10px] font-mono uppercase tracking-wider text-expense bg-expense/10 px-1.5 py-0.5 rounded shrink-0">
-                        <TrendingDown className="h-2.5 w-2.5" /> sell
-                      </span>
-                    )}
-                    <span className="font-mono tabular-nums text-xs truncate">
-                      {tx.units} @ ${tx.pricePerUnit.toFixed(2)}
-                    </span>
+          <div className="space-y-1">
+            {entries.map((tx) => {
+              const isEditing = editingId === tx.id;
+
+              if (isEditing) {
+                return (
+                  <div key={tx.id} className="rounded-lg border border-border p-3 space-y-2 bg-muted/20">
+                    <div className="grid grid-cols-3 gap-2">
+                      <div>
+                        <p className="text-[9px] text-muted-foreground uppercase mb-0.5">Units</p>
+                        <Input type="number" value={editUnits} onChange={(e) => setEditUnits(e.target.value)}
+                          className="h-7 text-xs tabular-nums" step="any" min="0" />
+                      </div>
+                      <div>
+                        <p className="text-[9px] text-muted-foreground uppercase mb-0.5">Price (USD)</p>
+                        <Input type="number" value={editPrice} onChange={(e) => setEditPrice(e.target.value)}
+                          className="h-7 text-xs tabular-nums" step="any" min="0" />
+                      </div>
+                      <div>
+                        <p className="text-[9px] text-muted-foreground uppercase mb-0.5">Date</p>
+                        <Input type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)}
+                          className="h-7 text-xs" />
+                      </div>
+                    </div>
+                    <div className="flex justify-end gap-1.5">
+                      <Button variant="ghost" size="xs" onClick={() => setEditingId(null)}><X className="h-3 w-3 mr-1" />Cancel</Button>
+                      <Button size="xs" onClick={() => saveEdit(tx)}><Check className="h-3 w-3 mr-1" />Save</Button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className="font-mono tabular-nums text-xs font-medium">
-                      {format(tx.totalAmount, tx.currency)}
-                      {tx.currency !== displayCurrency && (
-                        <span className="text-muted-foreground/60 ml-1">
-                          ({format(convert(tx.totalAmount, tx.currency))})
-                        </span>
-                      )}
-                    </span>
-                    <span className="text-[10px] text-muted-foreground/50">
-                      {formatDateString(tx.date)}
-                    </span>
-                    {onDeleteTransaction && (
-                      deleteConfirmId === tx.id ? (
-                        <div className="flex items-center gap-1">
-                          <Button variant="destructive" size="xs" onClick={() => { onDeleteTransaction(tx.id); setDeleteConfirmId(null); }}>
-                            Delete
-                          </Button>
-                          <Button variant="ghost" size="xs" onClick={() => setDeleteConfirmId(null)}>
-                            Cancel
-                          </Button>
-                        </div>
-                      ) : (
-                        <Button
-                          variant="ghost"
-                          size="icon-xs"
-                          className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
-                          onClick={() => setDeleteConfirmId(tx.id)}
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </Button>
-                      )
+                );
+              }
+
+              return (
+                <div key={tx.id} className="flex items-center justify-between py-2 px-1 rounded-md hover:bg-muted/20 transition-colors group">
+                  <div className="flex items-center gap-2 min-w-0">
+                    {tx.type === "buy" ? (
+                      <span className="text-[9px] font-mono uppercase tracking-wider text-income bg-income/10 px-1.5 py-0.5 rounded shrink-0">BUY</span>
+                    ) : (
+                      <span className="text-[9px] font-mono uppercase tracking-wider text-expense bg-expense/10 px-1.5 py-0.5 rounded shrink-0">SELL</span>
                     )}
+                    <div className="min-w-0">
+                      <p className="text-xs font-mono tabular-nums truncate">
+                        {tx.units.toLocaleString(undefined, { maximumFractionDigits: 4 })} × ${tx.pricePerUnit.toFixed(2)}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground">{formatDateString(tx.date)}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <div className="text-right">
+                      <p className="text-xs font-mono tabular-nums font-medium">{format(tx.totalAmount, tx.currency)}</p>
+                      {tx.currency !== displayCurrency && (
+                        <p className="text-[9px] text-muted-foreground tabular-nums">({format(convert(tx.totalAmount, tx.currency))})</p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                      {onEditTransaction && (
+                        <Button variant="ghost" size="icon-xs" onClick={() => startEdit(tx)}>
+                          <Pencil className="h-2.5 w-2.5" />
+                        </Button>
+                      )}
+                      {onDeleteTransaction && (
+                        deleteConfirmId === tx.id ? (
+                          <div className="flex gap-0.5">
+                            <Button variant="destructive" size="xs" className="h-5 text-[9px]" onClick={() => { onDeleteTransaction(tx.id); setDeleteConfirmId(null); }}>Del</Button>
+                            <Button variant="ghost" size="xs" className="h-5 text-[9px]" onClick={() => setDeleteConfirmId(null)}>No</Button>
+                          </div>
+                        ) : (
+                          <Button variant="ghost" size="icon-xs" className="text-muted-foreground hover:text-destructive" onClick={() => setDeleteConfirmId(tx.id)}>
+                            <Trash2 className="h-2.5 w-2.5" />
+                          </Button>
+                        )
+                      )}
+                    </div>
                   </div>
                 </div>
-              ))}
-            </div>
+              );
+            })}
           </div>
         )}
       </DialogContent>
