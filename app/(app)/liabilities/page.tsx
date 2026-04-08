@@ -272,43 +272,34 @@ export default function LiabilitiesPage() {
                     </span>
                   </div>
 
+                  {/* Remaining amount — the key number */}
+                  <div className="flex items-baseline justify-between">
+                    <div>
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-0.5">
+                        {isCompleted ? "Settled" : "Remaining"}
+                      </p>
+                      <p className={cn("text-xl font-bold tabular-nums", isOwedToMe ? "text-income" : "text-expense")}>
+                        {sym}{remaining.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-0.5">Original</p>
+                      <p className="text-sm font-medium tabular-nums text-muted-foreground">
+                        {sym}{debt.originalAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </p>
+                    </div>
+                  </div>
+
                   {/* Progress bar */}
-                  <div className="space-y-1.5">
+                  <div className="space-y-1">
                     <Progress value={progressPct}>
-                      <span className="label-mono">
-                        {isCompleted ? "Settled" : "Progress"}
+                      <span className="text-[10px] text-muted-foreground tabular-nums">
+                        {sym}{totalPaid.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} paid
                       </span>
-                      <span className="ml-auto text-xs text-muted-foreground tabular-nums">
+                      <span className="ml-auto text-[10px] text-muted-foreground tabular-nums">
                         {progressPct.toFixed(0)}%
                       </span>
                     </Progress>
-                  </div>
-
-                  {/* Remaining vs Original */}
-                  <div className="flex items-baseline justify-between text-sm">
-                    <span className="tabular-nums font-medium">
-                      {sym}
-                      {remaining.toLocaleString("en-US", {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}{" "}
-                      <span className="text-muted-foreground font-normal">
-                        / {sym}
-                        {debt.originalAmount.toLocaleString("en-US", {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}{" "}
-                        remaining
-                      </span>
-                    </span>
-                    <span className="text-xs text-muted-foreground tabular-nums">
-                      {sym}
-                      {totalPaid.toLocaleString("en-US", {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}{" "}
-                      paid
-                    </span>
                   </div>
 
                   {/* Notes */}

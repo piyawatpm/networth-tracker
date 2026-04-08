@@ -219,7 +219,6 @@
 
 .liquid-glass {
   position: relative;
-  overflow: hidden;
   backdrop-filter: blur(40px) saturate(180%);
   -webkit-backdrop-filter: blur(40px) saturate(180%);
   /* Light theme */

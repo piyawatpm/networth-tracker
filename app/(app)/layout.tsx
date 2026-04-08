@@ -533,7 +533,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 0.5rem)" }}
       >
         <motion.nav
-          className="liquid-glass rounded-[22px]"
+          className="liquid-glass overflow-hidden rounded-[22px]"
           initial={{ y: 80, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ type: "spring", stiffness: 260, damping: 24, delay: 0.1 }}
@@ -664,7 +664,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               exit={{ y: "100%" }}
               transition={{ type: "spring", stiffness: 300, damping: 30 }}
             >
-              <div className="liquid-glass rounded-[22px]">
+              <div className="liquid-glass overflow-hidden rounded-[22px]">
                 <div className="relative z-10">
                   {/* Drag handle */}
                   <div className="flex justify-center pt-3 pb-1">
