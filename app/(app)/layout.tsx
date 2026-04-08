@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "motion/react";
@@ -413,10 +413,45 @@ function SnapshotButton() {
   );
 }
 
+function DesktopMoreDropdown({ open, onClose, pathname, anchorRef }: { open: boolean; onClose: () => void; pathname: string; anchorRef: React.RefObject<HTMLDivElement | null> }) {
+  if (!open) return null;
+  const rect = anchorRef.current?.getBoundingClientRect();
+  return (
+    <>
+      <div className="fixed inset-0 z-50 hidden md:block" onClick={onClose} />
+      <div
+        className="fixed z-50 w-48 rounded-2xl bg-popover shadow-lg ring-1 ring-border/50 p-1 hidden md:block"
+        style={{ top: rect ? rect.bottom + 6 : 52, left: rect ? rect.left : 0 }}
+      >
+        {SECONDARY_NAV.map((item) => {
+          const isActive = pathname === item.href;
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              onClick={onClose}
+              className={cn(
+                "flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm transition-all duration-200",
+                isActive
+                  ? "bg-foreground/[0.06] text-foreground"
+                  : "text-muted-foreground hover:text-foreground hover:bg-foreground/[0.04]",
+              )}
+            >
+              <item.icon className={cn("h-4 w-4", isActive && "text-accent")} />
+              <span>{item.label}</span>
+            </Link>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [moreOpen, setMoreOpen] = useState(false);
   const [mobileDrawer, setMobileDrawer] = useState(false);
+  const moreButtonRef = useRef<HTMLDivElement>(null);
 
   // Check if current path is in secondary nav (to highlight "More")
   const isSecondaryActive = SECONDARY_NAV.some((item) => pathname === item.href);
@@ -459,7 +494,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               })}
 
               {/* "More" dropdown */}
-              <div className="relative">
+              <div className="relative" ref={moreButtonRef}>
                 <button
                   onClick={() => setMoreOpen(!moreOpen)}
                   className={cn(
@@ -488,48 +523,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
       </header>
 
-      {/* ── Desktop "More" dropdown — outside header to escape backdrop-filter stacking context ── */}
-      {moreOpen && (
-        <>
-          <div className="fixed inset-0 z-50 hidden md:block" onClick={() => setMoreOpen(false)} />
-          <div className="sticky top-12 z-50 hidden md:block" style={{ marginTop: "env(safe-area-inset-top, 0px)" }}>
-            <div className="mx-auto max-w-7xl px-4 lg:px-8">
-              <div className="flex">
-                {/* Push to align with "More" button — after logo + 5 nav items */}
-                <div className="flex items-center gap-1">
-                  <span className="mr-3 text-sm font-bold tracking-tight invisible">Networth</span>
-                  {PRIMARY_NAV.map((item) => (
-                    <span key={item.href} className="invisible flex items-center gap-1.5 px-2.5 py-1 text-xs">
-                      <item.icon className="h-3.5 w-3.5" />{item.label}
-                    </span>
-                  ))}
-                </div>
-                <div className="w-48 rounded-2xl bg-popover shadow-lg ring-1 ring-border/50 p-1">
-                  {SECONDARY_NAV.map((item) => {
-                    const isActive = pathname === item.href;
-                    return (
-                      <Link
-                        key={item.href}
-                        href={item.href}
-                        onClick={() => setMoreOpen(false)}
-                        className={cn(
-                          "flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm transition-all duration-200",
-                          isActive
-                            ? "bg-foreground/[0.06] text-foreground"
-                            : "text-muted-foreground hover:text-foreground hover:bg-foreground/[0.04]",
-                        )}
-                      >
-                        <item.icon className={cn("h-4 w-4", isActive && "text-accent")} />
-                        <span>{item.label}</span>
-                      </Link>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          </div>
-        </>
-      )}
+      {/* ── Desktop "More" dropdown (fixed, outside header) ── */}
+      <DesktopMoreDropdown open={moreOpen} onClose={() => setMoreOpen(false)} pathname={pathname} anchorRef={moreButtonRef} />
 
       {/* ── Main content ── */}
       <main
