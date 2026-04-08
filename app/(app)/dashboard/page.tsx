@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo } from "react";
 
 import { cn } from "@/lib/utils";
 import { BlurFade } from "@/components/ui/blur-fade";
@@ -16,11 +16,10 @@ import {
 import {
   getSydneyDateString,
   getLast6MonthKeys,
-  monthKeyToLabel,
   computeOccurrences,
+  formatDateString,
 } from "@/lib/utils/timezone";
 import {
-  CHART_COLORS,
   INCOME_TYPE_LABELS,
   EXPENSE_TYPE_LABELS,
   FREQUENCY_LABELS,
@@ -36,24 +35,20 @@ import type {
   RecurringExpense,
   RecurringIncome,
 } from "@/lib/utils/types";
+import { ArrowUpRight, ArrowDownRight } from "lucide-react";
 
 // Sub-components
-import {
-  FinancialHealthSection,
-  type FinancialIndicator,
-} from "./_components/financial-health-section";
-import { GlanceCards, type ActivityItem } from "./_components/glance-cards";
 import { NetWorthChart } from "./_components/net-worth-chart";
-import { VitalsCard } from "./_components/goal-progress";
 import { TopMovers } from "./_components/top-movers";
 import {
   UpcomingRecurring,
   type UpcomingItem,
 } from "./_components/upcoming-recurring";
 import { AssetBreakdown } from "./_components/asset-breakdown";
-import { IncomeExpenseCharts } from "./_components/income-expense-charts";
 import { WorldDistributionChart } from "./_components/world-distribution-chart";
 import { MoneyFlowCard } from "./_components/money-flow-card";
+import { EmergencyFundCard } from "./_components/emergency-fund-card";
+import { KeyNumbersCard } from "./_components/key-numbers-card";
 import { totalInvestedInRange } from "@/lib/utils/portfolio-transactions";
 
 // ---------------------------------------------------------------------------
@@ -124,8 +119,6 @@ function isInPrevPeriod(dateStr: string, period: Period): boolean {
   return dateStr >= start && dateStr <= end;
 }
 
-const PERIOD_LABELS: Record<Period, string> = { W: "This Week", M: "This Month", Y: "This Year" };
-
 function sumConverted(
   entries: { amount: number; currency: Currency }[],
   convert: (a: number, from: Currency) => number,
@@ -148,7 +141,7 @@ export default function DashboardPage() {
   const [recurringExpenses] = useCloudStorage<RecurringExpense[]>("recurring_expense_templates", []);
   const [recurringIncomes] = useCloudStorage<RecurringIncome[]>("recurring_income_templates", []);
   const [portfolioTransactions] = useCloudStorage<PortfolioTransaction[]>("portfolio_transactions", []);
-  const [nwSnapshots, setNwSnapshots] = useCloudStorage<{ date: string; value: number }[]>("networth_snapshots", []);
+  const [nwSnapshots] = useCloudStorage<{ date: string; value: number }[]>("networth_snapshots", []);
   const [stablecoinTags] = useCloudStorage<Record<string, boolean>>("crypto_stablecoin_tags", {});
 
   const { convert, format, symbol, currency } = useCurrency();
@@ -160,7 +153,6 @@ export default function DashboardPage() {
   const toggleSection = (key: string) => {
     setHiddenSections((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
   };
-  const isVisible = (key: string) => !hiddenSections.includes(key);
 
   // ---- Derived data -------------------------------------------------------
 
@@ -172,18 +164,12 @@ export default function DashboardPage() {
   const cryptoTotal = useMemo(() => convert(getTotalCryptoValueUsd(cryptoHoldings), "USD"), [cryptoHoldings, convert]);
 
   const normalTotal = useMemo(
-    () =>
-      portfolioHoldings
-        .filter((h) => h.accountType === "normal")
-        .reduce((s, h) => s + convert(h.currentValue, h.currency), 0),
+    () => portfolioHoldings.filter((h) => h.accountType === "normal").reduce((s, h) => s + convert(h.currentValue, h.currency), 0),
     [portfolioHoldings, convert],
   );
 
   const superTotal = useMemo(
-    () =>
-      portfolioHoldings
-        .filter((h) => h.accountType === "super")
-        .reduce((s, h) => s + convert(h.currentValue, h.currency), 0),
+    () => portfolioHoldings.filter((h) => h.accountType === "super").reduce((s, h) => s + convert(h.currentValue, h.currency), 0),
     [portfolioHoldings, convert],
   );
 
@@ -201,19 +187,13 @@ export default function DashboardPage() {
   const netWorthWithSuper = portfolioTotal + cryptoTotal + owedToMe - iOwe;
   const netWorthNoSuper = normalTotal + cryptoTotal + owedToMe - iOwe;
   const netWorth = includeSuper ? netWorthWithSuper : netWorthNoSuper;
-  const totalAssets = (includeSuper ? portfolioTotal : normalTotal) + cryptoTotal + owedToMe;
 
-  // Net worth snapshots — no longer auto-saved client-side.
-  // Snapshots are created by: manual snapshot button (📷) or daily cron.
-  // This avoids duplicates and currency mismatch issues.
-
-  // Convert all snapshots to current display currency at render time
+  // Net worth trend — convert snapshots to display currency at render time
   const nwTrendData = useMemo(() => {
     return nwSnapshots.map((s) => {
       const ext = s as { valueNoSuper?: number; currency?: string; portfolio?: number; crypto?: number };
       const snapCur = ext.currency ?? "AUD";
       const fx = (v: number) => snapCur !== currency ? Math.round(convert(v, snapCur) * 100) / 100 : v;
-
       const rawNw = includeSuper ? s.value : (ext.valueNoSuper ?? s.value);
       return {
         date: s.date.slice(5),
@@ -228,92 +208,44 @@ export default function DashboardPage() {
 
   const periodIncome = useMemo(() => incomeEntries.filter((e) => isInPeriod(e.date ?? "", period)), [incomeEntries, period]);
   const periodExpenses = useMemo(() => expenseEntries.filter((e) => isInPeriod(e.date ?? "", period)), [expenseEntries, period]);
-  const prevPeriodIncome = useMemo(() => incomeEntries.filter((e) => isInPrevPeriod(e.date ?? "", period)), [incomeEntries, period]);
-  const prevPeriodExpenses = useMemo(() => expenseEntries.filter((e) => isInPrevPeriod(e.date ?? "", period)), [expenseEntries, period]);
 
   const periodIncomeTotal = useMemo(() => sumConverted(periodIncome, convert), [periodIncome, convert]);
   const periodExpenseTotal = useMemo(() => sumConverted(periodExpenses, convert), [periodExpenses, convert]);
-  const prevIncomeTotal = useMemo(() => sumConverted(prevPeriodIncome, convert), [prevPeriodIncome, convert]);
-  const prevExpenseTotal = useMemo(() => sumConverted(prevPeriodExpenses, convert), [prevPeriodExpenses, convert]);
 
   const periodInvested = useMemo(() => {
     const today = getSydneyDateString();
     let from: string;
-    if (period === "W") {
-      from = getWeekStart();
-    } else if (period === "M") {
-      from = today.slice(0, 7) + "-01";
-    } else {
-      from = today.slice(0, 4) + "-01-01";
-    }
+    if (period === "W") from = getWeekStart();
+    else if (period === "M") from = today.slice(0, 7) + "-01";
+    else from = today.slice(0, 4) + "-01-01";
     return totalInvestedInRange(portfolioTransactions, from, today, convert);
   }, [period, convert, portfolioTransactions]);
 
-  const netCashFlow = periodIncomeTotal - periodExpenseTotal;
   const savingsRate = periodIncomeTotal > 0 ? ((periodIncomeTotal - periodExpenseTotal) / periodIncomeTotal) * 100 : 0;
-  const netDebt = Math.max(0, iOwe - owedToMe);
-  const debtToAssetRatio = totalAssets > 0 ? (netDebt / totalAssets) * 100 : 0;
-  const incomeChange = prevIncomeTotal > 0 ? ((periodIncomeTotal - prevIncomeTotal) / prevIncomeTotal) * 100 : 0;
-  const expenseChange = prevExpenseTotal > 0 ? ((periodExpenseTotal - prevExpenseTotal) / prevExpenseTotal) * 100 : 0;
 
-  // Emergency fund = savings type holdings
+  // Emergency fund = savings-type holdings
   const emergencyFundTotal = useMemo(
-    () => portfolioHoldings
-      .filter((h) => h.type === "savings")
-      .reduce((s, h) => s + convert(h.currentValue, h.currency), 0),
+    () => portfolioHoldings.filter((h) => h.type === "savings").reduce((s, h) => s + convert(h.currentValue, h.currency), 0),
     [portfolioHoldings, convert],
   );
 
-  // ---- Financial Health computed values -----------------------------------
-
-  // Weighted average monthly income: recent 3 months × 2, older 3 months × 1
-  const last6MonthKeys = last6Keys;
-  const { annualizedIncome, weightedMonthlyIncome } = useMemo(() => {
-    const monthlyTotals = last6MonthKeys.map((mk) =>
-      incomeEntries
-        .filter((e) => (e.date ?? "").startsWith(mk))
-        .reduce((s, e) => s + convert(e.amount, e.currency), 0),
+  // Weighted average monthly expenses (recent 3mo × 2 + older 3mo × 1)
+  const weightedMonthlyExpenses = useMemo(() => {
+    const monthlyTotals = last6Keys.map((mk) =>
+      expenseEntries.filter((e) => (e.date ?? "").startsWith(mk)).reduce((s, e) => s + convert(e.amount, e.currency), 0),
     );
     const recent3 = monthlyTotals.slice(-3);
     const older3 = monthlyTotals.slice(0, 3);
     const recent3Avg = recent3.filter((v) => v > 0).length > 0
-      ? recent3.reduce((s, v) => s + v, 0) / Math.max(1, recent3.filter((v) => v > 0).length)
-      : 0;
+      ? recent3.reduce((s, v) => s + v, 0) / Math.max(1, recent3.filter((v) => v > 0).length) : 0;
     const older3Avg = older3.filter((v) => v > 0).length > 0
-      ? older3.reduce((s, v) => s + v, 0) / Math.max(1, older3.filter((v) => v > 0).length)
-      : 0;
-    // Weighted: recent × 2, older × 1, divide by 3
-    const weighted = older3Avg > 0 ? (recent3Avg * 2 + older3Avg) / 3 : recent3Avg;
-    return { annualizedIncome: weighted * 12, weightedMonthlyIncome: weighted };
-  }, [incomeEntries, convert, last6MonthKeys]);
+      ? older3.reduce((s, v) => s + v, 0) / Math.max(1, older3.filter((v) => v > 0).length) : 0;
+    return older3Avg > 0 ? (recent3Avg * 2 + older3Avg) / 3 : recent3Avg;
+  }, [expenseEntries, convert, last6Keys]);
 
-  // Weighted average monthly expenses (same approach)
-  const { weightedMonthlyExpenses } = useMemo(() => {
-    const monthlyTotals = last6MonthKeys.map((mk) =>
-      expenseEntries
-        .filter((e) => (e.date ?? "").startsWith(mk))
-        .reduce((s, e) => s + convert(e.amount, e.currency), 0),
-    );
-    const recent3 = monthlyTotals.slice(-3);
-    const older3 = monthlyTotals.slice(0, 3);
-    const recent3Avg = recent3.filter((v) => v > 0).length > 0
-      ? recent3.reduce((s, v) => s + v, 0) / Math.max(1, recent3.filter((v) => v > 0).length)
-      : 0;
-    const older3Avg = older3.filter((v) => v > 0).length > 0
-      ? older3.reduce((s, v) => s + v, 0) / Math.max(1, older3.filter((v) => v > 0).length)
-      : 0;
-    const weighted = older3Avg > 0 ? (recent3Avg * 2 + older3Avg) / 3 : recent3Avg;
-    return { weightedMonthlyExpenses: weighted };
-  }, [expenseEntries, convert, last6MonthKeys]);
+  const emergencyFundMonths = weightedMonthlyExpenses > 0 ? emergencyFundTotal / weightedMonthlyExpenses : 0;
 
-  const monthlyExpenses = weightedMonthlyExpenses;
-
-  const debtToIncomeRatio = annualizedIncome > 0 ? (netDebt / annualizedIncome) * 100 : 0;
-
-  // Emergency fund = savings-type portfolio holdings
-  const emergencyFundMonths = monthlyExpenses > 0 ? emergencyFundTotal / monthlyExpenses : 0;
-  const wealthToIncomeRatio = annualizedIncome > 0 ? netWorth / annualizedIncome : 0;
-
+  // Passive income for FI ratio
   const passiveIncome = useMemo(() => {
     const defaultPassive = ["dividend", "crypto_yield", "interest", "rental"];
     return periodIncome
@@ -334,90 +266,26 @@ export default function DashboardPage() {
   }, [periodExpenseTotal, period]);
 
   const fiRatio = annualizedExpenses > 0 ? (passiveAnnualized / annualizedExpenses) * 100 : 0;
+
+  // Investment rate: (portfolio + crypto) / net worth
   const investmentAssets = portfolioTotal + cryptoTotal;
-  const investmentToNetWorthRatio = netWorth > 0 ? (investmentAssets / netWorth) * 100 : 0;
+  const investRate = netWorth > 0 ? (investmentAssets / netWorth) * 100 : 0;
 
-  // ---- Financial health indicators data -----------------------------------
+  // Runway: all liquid assets / monthly burn
+  const liquidAssets = normalTotal + cryptoTotal + emergencyFundTotal;
+  const runwayMonths = weightedMonthlyExpenses > 0 ? liquidAssets / weightedMonthlyExpenses : 99;
 
-  const indicators: FinancialIndicator[] = useMemo(() => [
-    { label: "Debt / Assets", value: debtToAssetRatio, max: 100, thresholds: [30, 60] as [number, number], invert: true, suffix: "%",
-      status: debtToAssetRatio <= 30 ? "Healthy" : debtToAssetRatio <= 60 ? "Moderate" : "High",
-      formula: "(Liabilities \u2212 Owed to Me) \u00f7 Total Assets", detail: `(${format(iOwe)} \u2212 ${format(owedToMe)}) \u00f7 ${format(totalAssets)} = ${format(netDebt)}`,
-      desc: "Net debt (what you owe minus what others owe you) as a share of total assets. Lower is better.",
-      tip: debtToAssetRatio <= 30 ? "You're in great shape. Keep debt low as you grow assets." : debtToAssetRatio <= 60 ? "Consider paying down debt before taking on more." : "Focus on debt reduction \u2014 pay off highest-interest debt first.",
-    },
-    { label: "Debt / Income", value: debtToIncomeRatio, max: 100, thresholds: [35, 50] as [number, number], invert: true, suffix: "%",
-      status: debtToIncomeRatio <= 35 ? "Healthy" : debtToIncomeRatio <= 50 ? "Caution" : "High",
-      formula: "Net Debt \u00f7 Weighted Annual Income", detail: `${format(netDebt)} \u00f7 ${format(annualizedIncome)} (${format(weightedMonthlyIncome)}/mo \u00d7 12)`,
-      desc: "Net debt relative to income. Income is weighted: recent 3 months count double vs older 3 months, then annualized.",
-      tip: debtToIncomeRatio <= 35 ? "Lenders see you as low risk. Good position for future borrowing if needed." : "Avoid new debt until this ratio drops. Focus on increasing income or paying down principal.",
-    },
-    { label: "Savings Rate", value: savingsRate, max: 100, thresholds: [10, 20] as [number, number], invert: false, suffix: "%",
-      status: savingsRate >= 20 ? "Excellent" : savingsRate >= 10 ? "Good" : "Low",
-      formula: "(Income \u2212 Expenses) \u00f7 Income", detail: `(${format(periodIncomeTotal)} \u2212 ${format(periodExpenseTotal)}) \u00f7 ${format(periodIncomeTotal)}`,
-      desc: "The percentage of income you keep. The single most important habit for building wealth. 20%+ puts you ahead of most people.",
-      tip: savingsRate >= 20 ? "Outstanding! Consider directing extra savings into investments." : savingsRate >= 10 ? "Good start. Try automating an extra 5% into savings." : "Track your top 3 expense categories and find one to cut by 10%.",
-    },
-    { label: "Emergency Fund", value: emergencyFundMonths, max: 12, thresholds: [3, 6] as [number, number], invert: false, suffix: "months",
-      status: emergencyFundMonths >= 6 ? "Strong" : emergencyFundMonths >= 3 ? "Adequate" : "Build up",
-      formula: "Emergency Fund \u00f7 Weighted Monthly Expenses", detail: `${format(emergencyFundTotal)} \u00f7 ${format(monthlyExpenses)}/mo`,
-      desc: "How many months your emergency fund covers. Based on your savings-type holdings and weighted average monthly expenses (recent months weighted higher).",
-      tip: emergencyFundMonths >= 6 ? "Well protected! Anything above 6 months could be invested for growth." : emergencyFundMonths >= 3 ? "You have a basic safety net. Build to 6 months for full protection." : "This is your #1 priority. Add accounts on the Emergency page.",
-    },
-    { label: "Wealth / Income", value: wealthToIncomeRatio, max: 12, thresholds: [1, 5] as [number, number], invert: false, suffix: "x annual",
-      status: wealthToIncomeRatio >= 5 ? "Strong" : wealthToIncomeRatio >= 1 ? "Growing" : "Early",
-      formula: "Net Worth \u00f7 Weighted Annual Income", detail: `${format(netWorth)} \u00f7 ${format(annualizedIncome)}`,
-      desc: "How many years of income you've accumulated. A rule of thumb: aim for 1x by 30, 3x by 40, 6x by 50, 10-12x by retirement.",
-      tip: wealthToIncomeRatio >= 5 ? "You're building real wealth. Stay the course." : wealthToIncomeRatio >= 1 ? "Good progress! Focus on increasing both savings rate and investment returns." : "You're in the accumulation phase. Every dollar saved now has the most compounding time.",
-    },
-    { label: "Invest / Net Worth", value: Math.min(investmentToNetWorthRatio, 100), max: 100, thresholds: [40, 70] as [number, number], invert: false, suffix: "%",
-      status: investmentToNetWorthRatio >= 70 ? "Great" : investmentToNetWorthRatio >= 40 ? "Good" : "Grow",
-      formula: "Investment Assets \u00f7 Net Worth", detail: `${format(investmentAssets)} \u00f7 ${format(netWorth)}`,
-      desc: "What portion of your wealth is actively invested (portfolio + crypto). Higher means more of your money is working for you, generating returns.",
-      tip: investmentToNetWorthRatio >= 70 ? "Your money is working hard. Ensure you're diversified across asset classes." : "Consider moving idle cash into diversified investments for long-term growth.",
-    },
-    { label: "FI Ratio", value: Math.min(fiRatio, 100), max: 100, thresholds: [25, 100] as [number, number], invert: false, suffix: "%",
-      status: fiRatio >= 100 ? "Free!" : fiRatio >= 25 ? "On track" : "Building",
-      formula: "Passive Income \u00f7 Total Expenses", detail: `${format(passiveAnnualized)}/yr \u00f7 ${format(annualizedExpenses)}/yr`,
-      desc: "The holy grail \u2014 when passive income (dividends, interest, rental, crypto yield) covers 100% of expenses, you're financially independent.",
-      tip: fiRatio >= 100 ? "Congratulations! You could live entirely on passive income." : fiRatio >= 25 ? "Great progress toward FI. Keep growing passive income sources." : "Focus on building dividend stocks, rental income, or yield-generating assets.",
-    },
-    { label: "Net Cash Flow", value: Math.max(0, savingsRate), max: 100, thresholds: [0, 15] as [number, number], invert: false,
-      suffix: format(netCashFlow).replace(/[A-Z$\s]/g, "").slice(0, 8),
-      status: netCashFlow >= 0 ? "Surplus" : "Deficit",
-      formula: "Income \u2212 Expenses", detail: `${format(periodIncomeTotal)} \u2212 ${format(periodExpenseTotal)}`,
-      desc: "Simple: are you earning more than you spend? A positive cash flow is the foundation of all wealth building.",
-      tip: netCashFlow >= 0 ? "You're cash-flow positive. Direct the surplus to savings and investments." : "You're spending more than you earn. Review expenses immediately and find cuts.",
-    },
-  ], [debtToAssetRatio, debtToIncomeRatio, savingsRate, emergencyFundMonths, wealthToIncomeRatio, investmentToNetWorthRatio, fiRatio, netCashFlow, netDebt, owedToMe, totalAssets, annualizedIncome, periodIncomeTotal, periodExpenseTotal, emergencyFundTotal, monthlyExpenses, netWorth, investmentAssets, passiveAnnualized, annualizedExpenses, format]);
+  // ---- Asset breakdown rows -----------------------------------------------
 
-  // ---- Asset allocation ---------------------------------------------------
+  const portfolioDisplayTotal = (includeSuper ? portfolioTotal : normalTotal) - emergencyFundTotal;
 
-  const allocationData = useMemo(() => {
-    const slices: { name: string; value: number; color: string }[] = [];
-    let ci = 0;
-    const filteredPortfolio = includeSuper
-      ? portfolioHoldings
-      : portfolioHoldings.filter((h) => h.accountType !== "super");
-    for (const h of filteredPortfolio) {
-      slices.push({ name: h.ticker || h.name, value: convert(h.currentValue, h.currency), color: CHART_COLORS[ci++ % CHART_COLORS.length] });
-    }
-    for (const h of cryptoHoldings) {
-      slices.push({ name: h.token, value: convert(h.currentValueUsd, "USD"), color: CHART_COLORS[ci++ % CHART_COLORS.length] });
-    }
-    return slices.filter((s) => s.value > 0).sort((a, b) => b.value - a.value);
-  }, [portfolioHoldings, cryptoHoldings, convert, includeSuper]);
-
-  // ---- Income vs Expenses bar chart data ----------------------------------
-
-  const barData = useMemo(() => {
-    return last6Keys.map((key) => {
-      let inc = 0, exp = 0;
-      for (const e of incomeEntries) { if ((e.date ?? "").slice(0, 7) === key) inc += convert(e.amount, e.currency); }
-      for (const e of expenseEntries) { if ((e.date ?? "").slice(0, 7) === key) exp += convert(e.amount, e.currency); }
-      return { month: monthKeyToLabel(key), income: inc, expenses: exp, net: inc - exp };
-    });
-  }, [last6Keys, incomeEntries, expenseEntries, convert]);
+  const assetRows = useMemo(() => [
+    { key: "portfolio", label: "Portfolio", value: portfolioDisplayTotal, negative: false },
+    { key: "crypto", label: "Crypto", value: cryptoTotal, negative: false },
+    { key: "emergency", label: "Emergency Fund", value: emergencyFundTotal, negative: false },
+    { key: "owed_to_me", label: "Owed to Me", value: owedToMe, negative: false },
+    { key: "i_owe", label: "I Owe", value: -iOwe, negative: true },
+  ], [portfolioDisplayTotal, cryptoTotal, emergencyFundTotal, owedToMe, iOwe]);
 
   // ---- Portfolio Highlights -----------------------------------------------
 
@@ -456,49 +324,18 @@ export default function DashboardPage() {
     return items.sort((a, b) => a.nextDate.localeCompare(b.nextDate)).slice(0, 5);
   }, [recurringExpenses, recurringIncomes]);
 
-  // ---- Health score -------------------------------------------------------
-
-  const healthScore = useMemo(() => {
-    let score = 0;
-    if (savingsRate > 0) score += Math.min(savingsRate, 30);
-    if (debtToAssetRatio < 50) score += Math.max(0, 30 - debtToAssetRatio * 0.6);
-    if (netWorth > 0) score += 20;
-    if (periodIncomeTotal > 0 && periodExpenseTotal < periodIncomeTotal) score += 20;
-    return Math.round(Math.min(100, Math.max(0, score)));
-  }, [savingsRate, debtToAssetRatio, netWorth, periodIncomeTotal, periodExpenseTotal]);
-
-  const healthLabel = healthScore >= 80 ? "Excellent" : healthScore >= 60 ? "Good" : healthScore >= 40 ? "Fair" : "Needs Work";
-  const healthColor = healthScore >= 80 ? "#2e8b57" : healthScore >= 60 ? "#2e8b57" : healthScore >= 40 ? "#2c251e" : "#cd5c5c";
-
   // ---- Recent activity feed -----------------------------------------------
 
-  const recentActivity: ActivityItem[] = useMemo(() => {
-    const items: ActivityItem[] = [];
+  const recentActivity = useMemo(() => {
+    const items: { id: string; kind: "income" | "expense"; label: string; description: string; amount: number; currency: string; date: string }[] = [];
     for (const e of incomeEntries) {
-      items.push({ id: e.id, kind: "income", type: e.type, label: (INCOME_TYPE_LABELS as Record<string, string>)[e.type] ?? e.type, description: e.description, amount: e.amount, currency: e.currency, date: e.date });
+      items.push({ id: e.id, kind: "income", label: (INCOME_TYPE_LABELS as Record<string, string>)[e.type] ?? e.type, description: e.description, amount: e.amount, currency: e.currency, date: e.date });
     }
     for (const e of expenseEntries) {
-      items.push({ id: e.id, kind: "expense", type: e.type, label: (EXPENSE_TYPE_LABELS as Record<string, string>)[e.type] ?? e.type, description: e.description, amount: e.amount, currency: e.currency, date: e.date });
+      items.push({ id: e.id, kind: "expense", label: (EXPENSE_TYPE_LABELS as Record<string, string>)[e.type] ?? e.type, description: e.description, amount: e.amount, currency: e.currency, date: e.date });
     }
-    return items.sort((a, b) => (b.date ?? "").localeCompare(a.date ?? "")).slice(0, 5);
+    return items.sort((a, b) => (b.date ?? "").localeCompare(a.date ?? "")).slice(0, 6);
   }, [incomeEntries, expenseEntries]);
-
-  // ---- Asset breakdown rows -----------------------------------------------
-
-  const activePortfolioTotal = includeSuper ? portfolioTotal : normalTotal;
-
-  // emergencyFundTotal moved earlier (before financial health section)
-
-  // Portfolio total for display excludes savings (shown separately)
-  const portfolioDisplayTotal = activePortfolioTotal - emergencyFundTotal;
-
-  const assetRows = useMemo(() => [
-    { key: "portfolio", label: "Portfolio", value: portfolioDisplayTotal, negative: false },
-    { key: "crypto", label: "Crypto", value: cryptoTotal, negative: false },
-    { key: "emergency", label: "Emergency Fund", value: emergencyFundTotal, negative: false },
-    { key: "owed_to_me", label: "Owed to Me", value: owedToMe, negative: false },
-    { key: "i_owe", label: "I Owe", value: -iOwe, negative: true },
-  ], [portfolioDisplayTotal, cryptoTotal, emergencyFundTotal, owedToMe, iOwe]);
 
   // ---- Render -------------------------------------------------------------
 
@@ -544,27 +381,17 @@ export default function DashboardPage() {
           >
             <span className="hidden sm:inline">Include Super</span>
             <span className="sm:hidden">Super</span>
-            <span
-              className={cn(
-                "relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors",
-                includeSuper ? "bg-income" : "bg-border"
-              )}
-            >
-              <span
-                className={cn(
-                  "inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform",
-                  includeSuper ? "translate-x-[18px]" : "translate-x-[3px]"
-                )}
-              />
+            <span className={cn("relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors", includeSuper ? "bg-income" : "bg-border")}>
+              <span className={cn("inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform", includeSuper ? "translate-x-[18px]" : "translate-x-[3px]")} />
             </span>
           </button>
         </section>
       </BlurFade>
 
-      {/* 2. NET WORTH TREND — full width with multi-line */}
+      {/* 2. NET WORTH TREND */}
       <NetWorthChart nwTrendData={nwTrendData} format={format} includeSuper={includeSuper} delay={D} />
 
-      {/* 3b. ASSET BREAKDOWN + WORLD DISTRIBUTION + MONEY FLOW */}
+      {/* 3. ASSET BREAKDOWN + WORLD DISTRIBUTION + MONEY FLOW */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
         <AssetBreakdown rows={assetRows} hiddenSections={hiddenSections} onToggleSection={toggleSection} format={format} delay={D * 0.5} />
         <div className="md:col-span-3">
@@ -591,40 +418,67 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* 4. GOAL SECTION */}
-      <GoalSection netWorth={netWorth} symbol={symbol} format={format} />
-
-      {/* 5. VITALS + FINANCIAL HEALTH SCORE */}
-      <VitalsCard
-        period={period} periodLabel={PERIOD_LABELS[period]}
-        periodIncomeTotal={periodIncomeTotal} periodExpenseTotal={periodExpenseTotal}
-        netCashFlow={netCashFlow} incomeChange={incomeChange} expenseChange={expenseChange}
-        prevIncomeTotal={prevIncomeTotal} prevExpenseTotal={prevExpenseTotal}
-        healthScore={healthScore} healthLabel={healthLabel} healthColor={healthColor}
-        savingsRate={savingsRate} debtToAssetRatio={debtToAssetRatio}
-        format={format} delayVitals={D} delayHealth={D * 2}
-      />
-
-      {/* FINANCIAL HEALTH INDICATORS */}
-      {isVisible("health-indicators") && (
-        <FinancialHealthSection indicators={indicators} delay={D * 2.5} />
-      )}
-
-      {/* 6. INCOME VS EXPENSES BAR + ASSET ALLOCATION DONUT */}
-      <IncomeExpenseCharts barData={barData} allocationData={allocationData} format={format} delayBar={D * 3} delayDonut={D * 4} />
-
-      {/* 7. PORTFOLIO HIGHLIGHTS + UPCOMING RECURRING */}
+      {/* 4. EMERGENCY FUND + KEY NUMBERS */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
-        <TopMovers gainers={portfolioHighlights.gainers} losers={portfolioHighlights.losers} format={format} delay={D * 5} />
-        <UpcomingRecurring items={upcomingRecurring} format={format} delay={D * 6} />
+        <EmergencyFundCard
+          fundTotal={emergencyFundTotal}
+          monthlyBurn={weightedMonthlyExpenses}
+          coverageMonths={emergencyFundMonths}
+          targetMonths={6}
+          format={format}
+          delay={D * 2}
+        />
+        <KeyNumbersCard
+          savingsRate={savingsRate}
+          runwayMonths={runwayMonths}
+          fiRatio={fiRatio}
+          investRate={investRate}
+          format={format}
+          delay={D * 2.5}
+        />
       </div>
 
-      {/* 8. WEEKLY GLANCE + RECENT ACTIVITY */}
-      <GlanceCards
-        incomeEntries={incomeEntries} expenseEntries={expenseEntries}
-        recentActivity={recentActivity} convert={convert} format={format}
-        delayWeek={D * 7} delayRecent={D * 7.5}
-      />
+      {/* 5. GOAL SECTION */}
+      <GoalSection netWorth={netWorth} symbol={symbol} format={format} />
+
+      {/* 6. TOP MOVERS + UPCOMING RECURRING */}
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
+        <TopMovers gainers={portfolioHighlights.gainers} losers={portfolioHighlights.losers} format={format} delay={D * 3} />
+        <UpcomingRecurring items={upcomingRecurring} format={format} delay={D * 3.5} />
+      </div>
+
+      {/* 7. RECENT ACTIVITY */}
+      <BlurFade delay={D * 4}>
+        <div className="finance-card px-3 py-4 sm:p-5">
+          <p className="label-mono mb-3">Recent Activity</p>
+          {recentActivity.length > 0 ? (
+            <div className="divide-y divide-border/50">
+              {recentActivity.map((item) => (
+                <div key={item.id} className="flex items-center gap-3 py-2.5">
+                  <span className={cn(
+                    "inline-flex items-center justify-center h-7 w-7 rounded-full shrink-0",
+                    item.kind === "income" ? "bg-income/10 text-income" : "bg-expense/10 text-expense",
+                  )}>
+                    {item.kind === "income" ? <ArrowUpRight className="h-3.5 w-3.5" /> : <ArrowDownRight className="h-3.5 w-3.5" />}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{item.description || item.label}</p>
+                    <p className="text-[11px] text-muted-foreground">{item.label} · {formatDateString(item.date)}</p>
+                  </div>
+                  <p className={cn(
+                    "text-sm font-mono tabular-nums font-medium shrink-0",
+                    item.kind === "income" ? "text-income" : "text-expense",
+                  )}>
+                    {item.kind === "income" ? "+" : "-"}{format(item.amount, item.currency as Currency)}
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground/50 py-6 text-center">No transactions recorded yet</p>
+          )}
+        </div>
+      </BlurFade>
     </div>
   );
 }
