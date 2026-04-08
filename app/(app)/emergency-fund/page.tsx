@@ -215,14 +215,20 @@ export default function EmergencyFundPage() {
     [rawExpenses],
   );
   const monthKeys = useMemo(() => getLastNMonthKeys(6), []);
+  // Weighted average: recent 3 months × 2 + older 3 months × 1 (same as dashboard)
   const avgMonthlyExpense = useMemo(() => {
     const totals = monthKeys.map((mk) =>
       expenses
         .filter((e) => getMonthKey(e.date) === mk)
         .reduce((s, e) => s + convert(e.amount, e.currency), 0),
     );
-    const withData = totals.filter((t) => t > 0);
-    return withData.length > 0 ? withData.reduce((s, v) => s + v, 0) / withData.length : 0;
+    const recent3 = totals.slice(-3);
+    const older3 = totals.slice(0, 3);
+    const recent3Avg = recent3.filter((v) => v > 0).length > 0
+      ? recent3.reduce((s, v) => s + v, 0) / Math.max(1, recent3.filter((v) => v > 0).length) : 0;
+    const older3Avg = older3.filter((v) => v > 0).length > 0
+      ? older3.reduce((s, v) => s + v, 0) / Math.max(1, older3.filter((v) => v > 0).length) : 0;
+    return older3Avg > 0 ? (recent3Avg * 2 + older3Avg) / 3 : recent3Avg;
   }, [expenses, convert, monthKeys]);
 
   const targetAmount = avgMonthlyExpense * targetMonths;
@@ -401,7 +407,7 @@ export default function EmergencyFundPage() {
       {locationBreakdown.length > 0 && (
         <BlurFade delay={0.1}>
           <div className="finance-card p-5">
-            <p className="label-mono mb-4">Where It&apos;s Held</p>
+            <p className="label-mono mb-4">Allocation</p>
             <div className="space-y-2.5">
               {locationBreakdown.map((loc) => (
                 <div key={loc.loc} className="space-y-1">

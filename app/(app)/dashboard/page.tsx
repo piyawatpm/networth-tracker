@@ -144,6 +144,7 @@ export default function DashboardPage() {
   const [nwSnapshots] = useCloudStorage<{ date: string; value: number }[]>("networth_snapshots", []);
   const [stablecoinTags] = useCloudStorage<Record<string, boolean>>("crypto_stablecoin_tags", {});
   const [cryptoEmergencyTags] = useCloudStorage<Record<string, boolean>>("crypto_emergency_tags", {});
+  const [efTargetMonths] = useCloudStorage<number>("emergency_fund_target_months", 6);
 
   const { convert, format, symbol, currency } = useCurrency();
   const [period, setPeriod] = useState<Period>("M");
@@ -440,7 +441,7 @@ export default function DashboardPage() {
           fundTotal={emergencyFundTotal}
           monthlyBurn={weightedMonthlyExpenses}
           coverageMonths={emergencyFundMonths}
-          targetMonths={6}
+          targetMonths={efTargetMonths}
           allocations={efAllocations}
           format={format}
           delay={D * 2}
