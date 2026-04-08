@@ -422,8 +422,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex min-h-screen flex-col">
-      {/* ── Desktop top nav ── */}
-      <header className="sticky top-0 z-50 border-b border-border/60 bg-background/80 backdrop-blur-md">
+      {/* ── Top nav (Liquid Glass) ── */}
+      <header
+        className="sticky top-0 z-50 liquid-glass-bar"
+        style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}
+      >
         <div className="mx-auto flex h-12 max-w-7xl items-center justify-between px-4 lg:px-8">
           <div className="flex items-center gap-1">
             <Link
@@ -473,7 +476,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 {moreOpen && (
                   <>
                     <div className="fixed inset-0 z-40" onClick={() => setMoreOpen(false)} />
-                    <div className="absolute left-0 top-full mt-1 w-48 rounded-lg bg-popover p-1 shadow-lg ring-1 ring-border/50 z-50">
+                    <div className="absolute left-0 top-full mt-1 w-48 rounded-2xl liquid-glass p-1 z-50">
                       {SECONDARY_NAV.map((item) => {
                         const isActive = pathname === item.href;
                         return (
@@ -482,13 +485,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                             href={item.href}
                             onClick={() => setMoreOpen(false)}
                             className={cn(
-                              "flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors",
+                              "relative z-10 flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm transition-all duration-200",
                               isActive
-                                ? "bg-foreground/[0.06] text-foreground"
-                                : "text-muted-foreground hover:text-foreground hover:bg-foreground/[0.03]",
+                                ? "liquid-glass-pill text-foreground"
+                                : "text-muted-foreground hover:text-foreground hover:bg-white/[0.08]",
                             )}
                           >
-                            <item.icon className="h-4 w-4" />
+                            <item.icon className={cn("h-4 w-4", isActive && "text-accent")} />
                             <span>{item.label}</span>
                           </Link>
                         );
@@ -511,7 +514,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </header>
 
       {/* ── Main content ── */}
-      <main className="flex-1">
+      <main
+        className="flex-1"
+        style={{
+          paddingLeft: "env(safe-area-inset-left, 0px)",
+          paddingRight: "env(safe-area-inset-right, 0px)",
+        }}
+      >
         <div className="mx-auto max-w-7xl px-4 py-6 lg:px-8 lg:py-8">
           {children}
         </div>
