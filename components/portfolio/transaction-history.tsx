@@ -15,6 +15,8 @@ interface TransactionHistoryProps {
   holdingId: string | null;
   setHoldingId: (id: string | null) => void;
   format: (value: number, currency?: string) => string;
+  convert: (amount: number, from: string) => number;
+  displayCurrency: string;
   onDeleteTransaction?: (id: string) => void;
 }
 
@@ -24,6 +26,8 @@ export function TransactionHistory({
   holdingId,
   setHoldingId,
   format,
+  convert,
+  displayCurrency,
   onDeleteTransaction,
 }: TransactionHistoryProps) {
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
@@ -88,6 +92,11 @@ export function TransactionHistory({
                   <div className="flex items-center gap-2 shrink-0">
                     <span className="font-mono tabular-nums text-xs font-medium">
                       {format(tx.totalAmount, tx.currency)}
+                      {tx.currency !== displayCurrency && (
+                        <span className="text-muted-foreground/60 ml-1">
+                          ({format(convert(tx.totalAmount, tx.currency))})
+                        </span>
+                      )}
                     </span>
                     <span className="text-[10px] text-muted-foreground/50">
                       {formatDateString(tx.date)}
