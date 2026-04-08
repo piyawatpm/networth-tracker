@@ -533,6 +533,7 @@ export default function PortfolioPage() {
         logHoldingId={logHoldingId}
         setLogHoldingId={setLogHoldingId}
         format={format}
+        onLogChange={() => setUpdateLog(getUpdateLog())}
       />
 
       {/* ── Transaction History Dialog ── */}

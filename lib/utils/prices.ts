@@ -55,8 +55,18 @@ export function getUpdateLog(): PriceUpdateLog[] {
 export function addUpdateLog(entry: PriceUpdateLog): void {
   const log = getUpdateLog();
   log.unshift(entry); // newest first
-  // Keep last 100 entries
   localStorage.setItem(LOG_KEY, JSON.stringify(log.slice(0, 100)));
+}
+
+export function deleteUpdateLogEntry(index: number): void {
+  const log = getUpdateLog();
+  log.splice(index, 1);
+  localStorage.setItem(LOG_KEY, JSON.stringify(log));
+}
+
+export function clearUpdateLogForHolding(holdingId: string): void {
+  const log = getUpdateLog().filter((e) => e.holdingId !== holdingId);
+  localStorage.setItem(LOG_KEY, JSON.stringify(log));
 }
 
 export function canAutoUpdate(ticker: string): boolean {
