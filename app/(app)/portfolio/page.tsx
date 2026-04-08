@@ -557,6 +557,7 @@ export default function PortfolioPage() {
         holdingId={txHistoryHoldingId}
         setHoldingId={setTxHistoryHoldingId}
         format={format}
+        onDeleteTransaction={(id) => setTransactions((prev) => prev.filter((t) => t.id !== id))}
       />
     </div>
   );
