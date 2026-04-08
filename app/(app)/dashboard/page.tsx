@@ -224,21 +224,26 @@ export default function DashboardPage() {
 
   const savingsRate = periodIncomeTotal > 0 ? ((periodIncomeTotal - periodExpenseTotal) / periodIncomeTotal) * 100 : 0;
 
-  // Emergency fund = savings-type holdings
-  const emergencyFundTotal = useMemo(
-    () => {
-      // Portfolio holdings tagged as emergency fund
-      const portfolioEF = portfolioHoldings
-        .filter((h) => h.type === "savings" || h.isEmergencyFund)
-        .reduce((s, h) => s + convert(h.currentValue, h.currency), 0);
-      // Crypto holdings tagged as emergency fund
-      const cryptoEF = cryptoHoldings
-        .filter((h) => cryptoEmergencyTags[h.token])
-        .reduce((s, h) => s + convert(h.currentValueUsd, "USD"), 0);
-      return portfolioEF + cryptoEF;
-    },
-    [portfolioHoldings, cryptoHoldings, cryptoEmergencyTags, convert],
-  );
+  // Emergency fund = savings-type + tagged holdings + tagged crypto
+  const { emergencyFundTotal, efAllocations } = useMemo(() => {
+    const allocs: { label: string; value: number; color: string }[] = [];
+    const colors = ["#4d7cc7", "#2e8b57", "#d4a033", "#9e5e8e", "#2ea598", "#708090", "#cd5c5c", "#5b8a72"];
+    let ci = 0;
+    // Portfolio
+    for (const h of portfolioHoldings) {
+      if (h.type === "savings" || h.isEmergencyFund) {
+        allocs.push({ label: h.name, value: convert(h.currentValue, h.currency), color: colors[ci++ % colors.length] });
+      }
+    }
+    // Crypto
+    for (const h of cryptoHoldings) {
+      if (cryptoEmergencyTags[h.token]) {
+        allocs.push({ label: h.token, value: convert(h.currentValueUsd, "USD"), color: colors[ci++ % colors.length] });
+      }
+    }
+    allocs.sort((a, b) => b.value - a.value);
+    return { emergencyFundTotal: allocs.reduce((s, a) => s + a.value, 0), efAllocations: allocs };
+  }, [portfolioHoldings, cryptoHoldings, cryptoEmergencyTags, convert]);
 
   // Weighted average monthly expenses (recent 3mo × 2 + older 3mo × 1)
   const weightedMonthlyExpenses = useMemo(() => {
@@ -436,6 +441,7 @@ export default function DashboardPage() {
           monthlyBurn={weightedMonthlyExpenses}
           coverageMonths={emergencyFundMonths}
           targetMonths={6}
+          allocations={efAllocations}
           format={format}
           delay={D * 2}
         />

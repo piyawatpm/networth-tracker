@@ -234,20 +234,33 @@ export default function EmergencyFundPage() {
   // Location breakdown
   const locationBreakdown = useMemo(() => {
     const map: Record<string, number> = {};
+    // Portfolio EF accounts by location/type
     for (const h of savingsAccounts) {
-      const loc = h.broker || "other";
-      map[loc] = (map[loc] ?? 0) + convert(h.currentValue, h.currency);
+      if (h.type === "savings") {
+        const loc = h.broker || "other";
+        const label = FUND_LOCATIONS.find((l) => l.value === loc)?.label ?? loc;
+        map[label] = (map[label] ?? 0) + convert(h.currentValue, h.currency);
+      } else {
+        // Tagged holding — use name
+        map[h.name] = (map[h.name] ?? 0) + convert(h.currentValue, h.currency);
+      }
     }
+    // Crypto EF tokens
+    for (const h of cryptoEFHoldings) {
+      map[h.token] = (map[h.token] ?? 0) + convert(h.currentValueUsd, "USD");
+    }
+    const colors = ["#4d7cc7", "#2e8b57", "#d4a033", "#708090", "#2ea598", "#9e5e8e", "#cd5c5c", "#5b8a72"];
+    let ci = 0;
     return Object.entries(map)
-      .map(([loc, value]) => ({
-        loc,
-        label: FUND_LOCATIONS.find((l) => l.value === loc)?.label ?? loc,
+      .map(([label, value]) => ({
+        loc: label,
+        label,
         value,
-        color: LOCATION_COLORS[loc] ?? "#708090",
+        color: LOCATION_COLORS[label] ?? colors[ci++ % colors.length],
         pct: totalFund > 0 ? (value / totalFund) * 100 : 0,
       }))
       .sort((a, b) => b.value - a.value);
-  }, [savingsAccounts, convert, totalFund]);
+  }, [savingsAccounts, cryptoEFHoldings, convert, totalFund]);
 
   // Handlers
   function handleSave(h: PortfolioHolding) {
