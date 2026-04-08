@@ -474,32 +474,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                   <ChevronDown className={cn("h-3 w-3 transition-transform", moreOpen && "rotate-180")} />
                 </button>
 
-                {moreOpen && (
-                  <>
-                    <div className="fixed inset-0 z-40" onClick={() => setMoreOpen(false)} />
-                    <div className="absolute left-0 top-full mt-2 w-48 rounded-2xl liquid-glass overflow-hidden p-1 z-50">
-                      {SECONDARY_NAV.map((item) => {
-                        const isActive = pathname === item.href;
-                        return (
-                          <Link
-                            key={item.href}
-                            href={item.href}
-                            onClick={() => setMoreOpen(false)}
-                            className={cn(
-                              "relative z-10 flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm transition-all duration-200",
-                              isActive
-                                ? "liquid-glass-pill text-foreground"
-                                : "text-muted-foreground hover:text-foreground hover:bg-white/[0.08]",
-                            )}
-                          >
-                            <item.icon className={cn("h-4 w-4", isActive && "text-accent")} />
-                            <span>{item.label}</span>
-                          </Link>
-                        );
-                      })}
-                    </div>
-                  </>
-                )}
               </div>
             </nav>
           </div>
@@ -513,6 +487,49 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       </header>
+
+      {/* ── Desktop "More" dropdown — outside header to escape backdrop-filter stacking context ── */}
+      {moreOpen && (
+        <>
+          <div className="fixed inset-0 z-50 hidden md:block" onClick={() => setMoreOpen(false)} />
+          <div className="sticky top-12 z-50 hidden md:block" style={{ marginTop: "env(safe-area-inset-top, 0px)" }}>
+            <div className="mx-auto max-w-7xl px-4 lg:px-8">
+              <div className="flex">
+                {/* Push to align with "More" button — after logo + 5 nav items */}
+                <div className="flex items-center gap-1">
+                  <span className="mr-3 text-sm font-bold tracking-tight invisible">Networth</span>
+                  {PRIMARY_NAV.map((item) => (
+                    <span key={item.href} className="invisible flex items-center gap-1.5 px-2.5 py-1 text-xs">
+                      <item.icon className="h-3.5 w-3.5" />{item.label}
+                    </span>
+                  ))}
+                </div>
+                <div className="w-48 rounded-2xl bg-popover shadow-lg ring-1 ring-border/50 p-1">
+                  {SECONDARY_NAV.map((item) => {
+                    const isActive = pathname === item.href;
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        onClick={() => setMoreOpen(false)}
+                        className={cn(
+                          "flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm transition-all duration-200",
+                          isActive
+                            ? "bg-foreground/[0.06] text-foreground"
+                            : "text-muted-foreground hover:text-foreground hover:bg-foreground/[0.04]",
+                        )}
+                      >
+                        <item.icon className={cn("h-4 w-4", isActive && "text-accent")} />
+                        <span>{item.label}</span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
 
       {/* ── Main content ── */}
       <main
