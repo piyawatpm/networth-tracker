@@ -110,15 +110,23 @@ export default function CryptoPage() {
   const wsSymbols = useMemo(() => {
     if (rawHoldings.length === 0) return [];
     const symbols: string[] = [];
+    const skip = new Set(["CASH", "USD", "USDT", "USDC", "DAI", "BUSD", "TUSD", "FDUSD"]);
     for (const h of rawHoldings) {
-      const mapped = tickerMappings[h.token] ?? h.token;
-      const sym = `${mapped.toUpperCase()}USDT`;
-      if (!symbols.includes(sym) && mapped !== "CASH" && mapped !== "USD") {
+      // Skip stablecoin-tagged tokens
+      if (stablecoinTags[h.token]) continue;
+      // Use ticker mapping if available; skip tokens without a mapping
+      // (raw CSV names like "Bitcoin" aren't valid Binance symbols)
+      const mapped = tickerMappings[h.token];
+      if (!mapped) continue;
+      const upper = mapped.toUpperCase();
+      if (skip.has(upper)) continue;
+      const sym = `${upper}USDT`;
+      if (!symbols.includes(sym)) {
         symbols.push(sym);
       }
     }
     return symbols;
-  }, [rawHoldings, tickerMappings]);
+  }, [rawHoldings, tickerMappings, stablecoinTags]);
 
   const { livePrices: wsLivePrices, connected: wsConnected } = useBinanceWs(wsSymbols);
 
