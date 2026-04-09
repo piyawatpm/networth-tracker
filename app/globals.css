@@ -141,6 +141,16 @@
   body {
     @apply bg-background text-foreground;
     font-feature-settings: "rlig" 1, "calt" 1;
+    /* Subtle ambient gradient for depth — glass cards need a non-flat bg */
+    background-image:
+      radial-gradient(ellipse 80% 60% at 20% 10%, rgba(201, 95, 63, 0.04) 0%, transparent 60%),
+      radial-gradient(ellipse 60% 50% at 80% 90%, rgba(201, 95, 63, 0.03) 0%, transparent 50%);
+    background-attachment: fixed;
+  }
+  .dark body {
+    background-image:
+      radial-gradient(ellipse 80% 60% at 20% 10%, rgba(224, 151, 112, 0.03) 0%, transparent 60%),
+      radial-gradient(ellipse 60% 50% at 80% 90%, rgba(224, 151, 112, 0.02) 0%, transparent 50%);
   }
   html {
     @apply font-sans;
@@ -200,6 +210,10 @@
   }
   .display-number {
     @apply text-4xl md:text-6xl tracking-tighter leading-none font-semibold tabular-nums;
+    text-shadow: 0 0 40px rgba(201, 95, 63, 0.08);
+  }
+  .dark .display-number {
+    text-shadow: 0 0 60px rgba(224, 151, 112, 0.10);
   }
   .label-mono {
     @apply font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground;
@@ -208,10 +222,51 @@
     @apply text-base text-muted-foreground leading-relaxed max-w-[65ch];
   }
   .finance-card {
-    @apply bg-card rounded-xl border border-border/50 transition-colors duration-200;
+    @apply rounded-xl transition-all duration-300;
+    backdrop-filter: blur(16px) saturate(140%);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    /* Light — warm translucent sand */
+    background: linear-gradient(
+      145deg,
+      rgba(244, 243, 237, 0.65) 0%,
+      rgba(244, 243, 237, 0.40) 100%
+    );
+    border: 0.5px solid rgba(255, 255, 255, 0.55);
+    box-shadow:
+      0 2px 16px rgba(0, 0, 0, 0.04),
+      0 1px 4px rgba(0, 0, 0, 0.02),
+      inset 0 1px 0 rgba(255, 255, 255, 0.40);
   }
   .finance-card:hover {
-    @apply border-border;
+    box-shadow:
+      0 4px 24px rgba(0, 0, 0, 0.06),
+      0 1px 4px rgba(0, 0, 0, 0.03),
+      inset 0 1px 0 rgba(255, 255, 255, 0.45);
+    border-color: rgba(255, 255, 255, 0.65);
+  }
+  .dark .finance-card {
+    background: linear-gradient(
+      145deg,
+      rgba(255, 255, 255, 0.05) 0%,
+      rgba(255, 255, 255, 0.015) 100%
+    );
+    border: 0.5px solid rgba(255, 255, 255, 0.06);
+    box-shadow:
+      0 2px 16px rgba(0, 0, 0, 0.20),
+      0 1px 4px rgba(0, 0, 0, 0.12),
+      inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  }
+  .dark .finance-card:hover {
+    background: linear-gradient(
+      145deg,
+      rgba(255, 255, 255, 0.065) 0%,
+      rgba(255, 255, 255, 0.025) 100%
+    );
+    border-color: rgba(255, 255, 255, 0.10);
+    box-shadow:
+      0 4px 24px rgba(0, 0, 0, 0.25),
+      0 1px 4px rgba(0, 0, 0, 0.15),
+      inset 0 1px 0 rgba(255, 255, 255, 0.06);
   }
 }
 
@@ -307,4 +362,65 @@
   box-shadow:
     0 1px 12px rgba(0, 0, 0, 0.2),
     inset 0 -0.5px 0 rgba(255, 255, 255, 0.03);
+}
+
+/* ── Glass Dialogs ── */
+[data-slot="dialog-content"] {
+  backdrop-filter: blur(32px) saturate(160%) !important;
+  -webkit-backdrop-filter: blur(32px) saturate(160%) !important;
+  background: linear-gradient(
+    160deg,
+    rgba(244, 243, 237, 0.80) 0%,
+    rgba(244, 243, 237, 0.60) 100%
+  ) !important;
+  border: 0.5px solid rgba(255, 255, 255, 0.60) !important;
+  box-shadow:
+    0 16px 64px rgba(0, 0, 0, 0.12),
+    0 4px 16px rgba(0, 0, 0, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.50) !important;
+  ring: none !important;
+}
+
+.dark [data-slot="dialog-content"] {
+  background: linear-gradient(
+    160deg,
+    rgba(255, 255, 255, 0.10) 0%,
+    rgba(255, 255, 255, 0.04) 100%
+  ) !important;
+  border: 0.5px solid rgba(255, 255, 255, 0.10) !important;
+  box-shadow:
+    0 16px 64px rgba(0, 0, 0, 0.50),
+    0 4px 16px rgba(0, 0, 0, 0.30),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+}
+
+/* Glass dialog overlay — frosted backdrop */
+[data-slot="dialog-overlay"] {
+  background: rgba(0, 0, 0, 0.15) !important;
+  backdrop-filter: blur(4px) !important;
+  -webkit-backdrop-filter: blur(4px) !important;
+}
+
+.dark [data-slot="dialog-overlay"] {
+  background: rgba(0, 0, 0, 0.30) !important;
+}
+
+/* ── Glass Inputs — subtle glass inset ── */
+input:not([type="checkbox"]):not([type="radio"]),
+textarea,
+[data-slot="select-trigger"] {
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+/* ── Glass Progress Bars ── */
+[role="progressbar"] > div,
+.progress-fill {
+  backdrop-filter: blur(4px);
+  box-shadow: 0 0 8px rgba(201, 95, 63, 0.15);
+}
+
+.dark [role="progressbar"] > div,
+.dark .progress-fill {
+  box-shadow: 0 0 12px rgba(224, 151, 112, 0.12);
 }
