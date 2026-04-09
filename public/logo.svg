@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <!-- Warm terracotta gradient -->
+    <linearGradient id="flame" x1="0.3" y1="0" x2="0.7" y2="1">
+      <stop offset="0%" stop-color="#f4a261"/>
+      <stop offset="50%" stop-color="#e07650"/>
+      <stop offset="100%" stop-color="#c95f3f"/>
+    </linearGradient>
+    <!-- Subtle inner glow -->
+    <radialGradient id="glow" cx="0.5" cy="0.4" r="0.5">
+      <stop offset="0%" stop-color="#f4a261" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#f4a261" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="512" height="512" rx="112" fill="#1a1a1a"/>
+
+  <!-- Subtle radial glow behind the mark -->
+  <circle cx="256" cy="240" r="160" fill="url(#glow)"/>
+
+  <!-- Hearth flame / rising bars — abstract mark suggesting growth + warmth -->
+  <!-- Three ascending bars that form a flame/chart hybrid -->
+
+  <!-- Left bar (shortest) -->
+  <rect x="138" y="280" width="52" height="108" rx="10" fill="url(#flame)" opacity="0.55"/>
+
+  <!-- Center bar (tallest — the flame peak) -->
+  <rect x="230" y="160" width="52" height="228" rx="10" fill="url(#flame)" opacity="1"/>
+
+  <!-- Right bar (medium) -->
+  <rect x="322" y="220" width="52" height="168" rx="10" fill="url(#flame)" opacity="0.75"/>
+
+  <!-- Connecting curve at top — gives the bars a flame silhouette -->
+  <path
+    d="M164 280 Q164 210, 256 155 Q348 210, 348 220"
+    stroke="url(#flame)"
+    stroke-width="3.5"
+    fill="none"
+    opacity="0.35"
+    stroke-linecap="round"
+  />
+
+  <!-- Base line — the hearth -->
+  <rect x="120" y="404" width="272" height="4" rx="2" fill="#e09770" opacity="0.3"/>
+</svg>

@@ -472,9 +472,23 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <div className="flex items-center gap-1">
             <Link
               href="/dashboard"
-              className="mr-3 text-sm font-bold tracking-tight"
+              className="mr-3 flex items-center gap-1.5"
             >
-              Vesta
+              <svg viewBox="0 0 512 512" fill="none" className="h-6 w-6" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                  <linearGradient id="nav-flame" x1="0.3" y1="0" x2="0.7" y2="1">
+                    <stop offset="0%" stopColor="#f4a261"/>
+                    <stop offset="50%" stopColor="#e07650"/>
+                    <stop offset="100%" stopColor="#c95f3f"/>
+                  </linearGradient>
+                </defs>
+                <rect width="512" height="512" rx="112" fill="currentColor" className="text-foreground/[0.06]" />
+                <rect x="138" y="280" width="52" height="108" rx="10" fill="url(#nav-flame)" opacity="0.55"/>
+                <rect x="230" y="160" width="52" height="228" rx="10" fill="url(#nav-flame)"/>
+                <rect x="322" y="220" width="52" height="168" rx="10" fill="url(#nav-flame)" opacity="0.75"/>
+                <rect x="120" y="404" width="272" height="4" rx="2" fill="#e09770" opacity="0.3"/>
+              </svg>
+              <span className="text-sm font-bold tracking-tight">Vesta</span>
             </Link>
 
             {/* Primary nav items */}
