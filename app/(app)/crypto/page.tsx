@@ -22,8 +22,11 @@ import type { CryptoHolding } from "@/lib/utils/types";
 import { ECHARTS_COLORS } from "@/lib/utils/echarts";
 import ReactECharts from "echarts-for-react";
 
-import { Settings2 } from "lucide-react";
+import { Settings2, Wifi, WifiOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { useBinanceWs } from "@/lib/hooks/use-binance-ws";
+import { LiveChart } from "@/components/ui/live-chart";
 import { UploadSection } from "./_components/upload-section";
 import { PriceStatus } from "./_components/price-status";
 import { HistoryChart } from "./_components/history-chart";
@@ -98,10 +101,44 @@ export default function CryptoPage() {
     [setExchangeOverrides],
   );
 
-  const holdings = useMemo(
+  // Build Binance WS symbols from ticker mappings
+  const rawHoldings = useMemo(
     () => (csvText ? parseAndComputeHoldings(csvText) : []),
     [csvText],
   );
+
+  const wsSymbols = useMemo(() => {
+    if (rawHoldings.length === 0) return [];
+    const symbols: string[] = [];
+    for (const h of rawHoldings) {
+      const mapped = tickerMappings[h.token] ?? h.token;
+      const sym = `${mapped.toUpperCase()}USDT`;
+      if (!symbols.includes(sym) && mapped !== "CASH" && mapped !== "USD") {
+        symbols.push(sym);
+      }
+    }
+    return symbols;
+  }, [rawHoldings, tickerMappings]);
+
+  const { livePrices: wsLivePrices, connected: wsConnected } = useBinanceWs(wsSymbols);
+
+  // Merge WS prices into token-name keyed prices
+  useEffect(() => {
+    if (Object.keys(wsLivePrices).length === 0) return;
+    const mapped: Record<string, number> = {};
+    for (const h of rawHoldings) {
+      const ticker = tickerMappings[h.token] ?? h.token;
+      const sym = `${ticker.toUpperCase()}USDT`;
+      if (wsLivePrices[sym]) {
+        mapped[h.token] = wsLivePrices[sym].price;
+      }
+    }
+    if (Object.keys(mapped).length > 0) {
+      setLivePrices((prev) => ({ ...prev, ...mapped }));
+    }
+  }, [wsLivePrices, rawHoldings, tickerMappings]);
+
+  const holdings = rawHoldings;
 
   const portfolioHistory = useMemo(
     () => (csvText ? computePortfolioHistory(csvText) : []),
@@ -330,6 +367,34 @@ export default function CryptoPage() {
   // ── Portfolio view ────────────────────────────────────────
   return (
     <div className="space-y-8 overflow-x-hidden">
+      {/* ── Live Value + Real-Time Chart ── */}
+      <div className="finance-card px-3 py-4 sm:p-5">
+        <div className="flex items-center justify-between mb-1">
+          <div className="flex items-center gap-2">
+            <p className="label-mono">Live Value</p>
+            <span className={cn(
+              "flex items-center gap-1 text-[10px] font-mono",
+              wsConnected ? "text-income" : "text-muted-foreground/50",
+            )}>
+              {wsConnected ? <Wifi className="h-2.5 w-2.5" /> : <WifiOff className="h-2.5 w-2.5" />}
+              {wsConnected ? "LIVE" : "Connecting..."}
+            </span>
+          </div>
+          <p className="text-xs text-muted-foreground tabular-nums">
+            {Object.keys(wsLivePrices).length} streams
+          </p>
+        </div>
+        <p className="text-2xl sm:text-3xl font-bold tabular-nums mb-2">
+          {format(totalValueConverted)}
+        </p>
+        <LiveChart
+          value={totalValueConverted}
+          interval={3000}
+          height={200}
+          symbol={symbol}
+        />
+      </div>
+
       <PriceStatus
         filteredValueUsd={filteredValueUsd}
         filteredCostUsd={filteredCostUsd}
