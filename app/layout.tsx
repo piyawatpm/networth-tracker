@@ -15,12 +15,12 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Networth",
+  title: "Vesta",
   description: "Personal finance & investment tracker",
-  applicationName: "Networth",
+  applicationName: "Vesta",
   appleWebApp: {
     capable: true,
-    title: "Networth",
+    title: "Vesta",
     statusBarStyle: "black-translucent",
   },
   formatDetection: {

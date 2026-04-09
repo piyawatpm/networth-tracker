@@ -474,7 +474,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               href="/dashboard"
               className="mr-3 text-sm font-bold tracking-tight"
             >
-              Networth
+              Vesta
             </Link>
 
             {/* Primary nav items */}

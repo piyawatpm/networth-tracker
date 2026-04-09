@@ -1,7 +1,7 @@
 /// Service Worker for Networth PWA
 /// Strategy: Network-first for pages/API, Cache-first for static assets
 
-const CACHE_NAME = "networth-v1";
+const CACHE_NAME = "vesta-v1";
 
 // Static assets to precache on install
 const PRECACHE_URLS = ["/", "/favicon.ico"];
