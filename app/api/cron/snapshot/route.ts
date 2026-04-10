@@ -174,8 +174,7 @@ export async function GET(request: Request) {
       .reduce((s, h) => s + toUsd(h.currentValue ?? 0, h.currency ?? "AUD"), 0);
 
     if (portfolioTotal > 0) {
-      const withoutToday = portfolioSnapshots.filter((s) => s.date !== today);
-      const newSnapshots = [...withoutToday.slice(-89), { date: today, value: portfolioNoSuper, valueWithSuper: portfolioTotal, currency: "USD" }];
+      const newSnapshots = [...portfolioSnapshots.slice(-89), { date: today, time: now, value: portfolioNoSuper, valueWithSuper: portfolioTotal, currency: "USD" }];
       updates.push({ key: "portfolio_snapshots", value: JSON.stringify(newSnapshots), updated_at: now });
       log.push(`Portfolio snapshot: w/super=$${portfolioTotal.toFixed(0)} no-super=$${portfolioNoSuper.toFixed(0)} USD`);
     } else {
@@ -361,12 +360,11 @@ export async function GET(request: Request) {
       } catch { /* silent */ }
     }
 
-    // Crypto snapshot — update today's entry with latest prices
+    // Crypto snapshot — append new entry each run
     if (cryptoTotalUsd > 0) {
-      const withoutToday = cryptoSnapshots.filter((s) => s.date !== today);
       updates.push({
         key: "crypto_snapshots",
-        value: JSON.stringify([...withoutToday.slice(-89), { date: today, value: cryptoTotalUsd, currency: "USD" }]),
+        value: JSON.stringify([...cryptoSnapshots.slice(-89), { date: today, time: now, value: cryptoTotalUsd, currency: "USD" }]),
         updated_at: now,
       });
       log.push(`Crypto snapshot: $${cryptoTotalUsd.toFixed(0)} USD`);
@@ -389,11 +387,10 @@ export async function GET(request: Request) {
     const netWorth = portfolioTotal + cryptoTotalUsd + owedToMe - iOwe;
     const netWorthNoSuper = portfolioNoSuper + cryptoTotalUsd + owedToMe - iOwe;
 
-    // Net worth snapshot — update today's entry with latest values
-    const withoutNwToday = nwSnapshots.filter((s) => s.date !== today);
+    // Net worth snapshot — append new entry each run
     updates.push({
       key: "networth_snapshots",
-      value: JSON.stringify([...withoutNwToday.slice(-89), { date: today, value: netWorth, valueNoSuper: netWorthNoSuper, currency: "USD", portfolio: portfolioTotal, crypto: cryptoTotalUsd }]),
+      value: JSON.stringify([...nwSnapshots.slice(-89), { date: today, time: now, value: netWorth, valueNoSuper: netWorthNoSuper, currency: "USD", portfolio: portfolioTotal, crypto: cryptoTotalUsd }]),
       updated_at: now,
     });
     log.push(`Net worth: $${netWorth.toFixed(0)} (portfolio=$${portfolioTotal.toFixed(0)} crypto=$${cryptoTotalUsd.toFixed(0)} owed=$${owedToMe.toFixed(0)} debt=$${iOwe.toFixed(0)}) USD`);
