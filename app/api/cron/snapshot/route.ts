@@ -139,7 +139,7 @@ export async function GET(request: Request) {
       }
     };
 
-    const holdings = parse<{ currentValue: number; currency: string; type: string; accountType: string }[]>("portfolio_holdings", []);
+    const holdings = parse<{ id: string; ticker: string; country: string; units: number; currentValue: number; currency: string; type: string; accountType: string }[]>("portfolio_holdings", []);
     const portfolioSnapshots = parse<{ date: string }[]>("portfolio_snapshots", []);
     const nwSnapshots = parse<{ date: string; value: number }[]>("networth_snapshots", []);
     const cryptoSnapshots = parse<{ date: string; value: number }[]>("crypto_snapshots", []);
@@ -169,6 +169,40 @@ export async function GET(request: Request) {
 
     const updates: { key: string; value: string; updated_at: string }[] = [];
     const now = new Date().toISOString();
+
+    // ── 0. Update stock prices via Finnhub REST API ──
+    if (process.env.FINNHUB_API_KEY) {
+      const stockHoldings = holdings.filter((h) => h.ticker && h.units > 0 && h.type !== "savings");
+      if (stockHoldings.length > 0) {
+        let updatedCount = 0;
+        // Fetch prices sequentially to respect rate limits (30/sec)
+        for (const h of stockHoldings) {
+          try {
+            const symbol = h.country?.toUpperCase() === "AU" ? `${h.ticker.toUpperCase()}.AX` : h.ticker.toUpperCase();
+            const res = await fetch(
+              `https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${process.env.FINNHUB_API_KEY}`,
+            );
+            if (res.ok) {
+              const data = await res.json();
+              if (data.c && data.c > 0) {
+                h.currentValue = h.units * data.c;
+                // Finnhub returns USD for US stocks, AUD for .AX stocks
+                if (h.country?.toUpperCase() === "US") h.currency = "USD";
+                updatedCount++;
+              }
+            }
+          } catch { /* skip individual failures */ }
+        }
+        if (updatedCount > 0) {
+          updates.push({ key: "portfolio_holdings", value: JSON.stringify(holdings), updated_at: now });
+          log.push(`Stock prices: updated ${updatedCount}/${stockHoldings.length} via Finnhub`);
+        } else {
+          log.push(`Stock prices: no updates from Finnhub`);
+        }
+      }
+    } else {
+      log.push(`Stock prices: FINNHUB_API_KEY not set`);
+    }
 
     // ── 1. Portfolio snapshot (converted to USD) ──
     const portfolioTotal = holdings

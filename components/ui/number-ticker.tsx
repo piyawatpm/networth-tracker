@@ -23,13 +23,20 @@ export function NumberTicker({
   suffix = "",
 }: NumberTickerProps) {
   const [displayValue, setDisplayValue] = useState(direction === "up" ? 0 : value);
+  const prevValue = useRef(direction === "up" ? 0 : value);
   const startTime = useRef<number | null>(null);
   const animationFrame = useRef<number>(0);
-  const duration = 800; // ms
+  const isFirstRender = useRef(true);
 
   useEffect(() => {
-    const startValue = direction === "up" ? 0 : value * 2;
+    const startValue = prevValue.current;
     const endValue = value;
+    const duration = isFirstRender.current ? 800 : 300;
+
+    isFirstRender.current = false;
+
+    // Skip animation if value didn't change
+    if (startValue === endValue) return;
 
     const timeout = setTimeout(() => {
       const animate = (timestamp: number) => {
@@ -45,6 +52,8 @@ export function NumberTicker({
 
         if (progress < 1) {
           animationFrame.current = requestAnimationFrame(animate);
+        } else {
+          prevValue.current = endValue;
         }
       };
 
@@ -55,8 +64,10 @@ export function NumberTicker({
     return () => {
       clearTimeout(timeout);
       cancelAnimationFrame(animationFrame.current);
+      // Save where we are so next animation starts from here
+      prevValue.current = displayValue;
     };
-  }, [value, direction, delay]);
+  }, [value, delay]);
 
   const formatted = displayValue.toLocaleString("en-US", {
     minimumFractionDigits: decimalPlaces,

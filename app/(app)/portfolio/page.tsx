@@ -22,7 +22,8 @@ import { NumberTicker } from "@/components/ui/number-ticker";
 import { Button } from "@/components/ui/button";
 import { HoldingDialog } from "@/components/portfolio/holding-dialog";
 import type { FundAllocations } from "@/components/portfolio/fund-breakdown";
-import { Plus, Download } from "lucide-react";
+import { Plus, Download, Wifi, WifiOff } from "lucide-react";
+import { useFinnhubWs } from "@/lib/hooks/use-finnhub-ws";
 
 import { PortfolioCharts } from "./_components/portfolio-charts";
 import { HoldingsTable } from "./_components/holdings-table";
@@ -176,6 +177,36 @@ export default function PortfolioPage() {
       fetchPrices();
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Finnhub WebSocket for real-time US stock prices ──
+  const wsSymbols = useMemo(() => {
+    return holdings
+      .filter((h) => h.ticker && canAutoUpdate(h.ticker) && h.country?.toUpperCase() === "US")
+      .map((h) => h.ticker.toUpperCase());
+  }, [holdings]);
+
+  const { livePrices: finnhubPrices, connected: wsConnected } = useFinnhubWs(wsSymbols);
+
+  // Apply Finnhub live prices to holdings
+  useEffect(() => {
+    if (Object.keys(finnhubPrices).length === 0) return;
+
+    setHoldings((prev) => {
+      let changed = false;
+      const updated = prev.map((h) => {
+        const ticker = h.ticker?.toUpperCase();
+        const trade = finnhubPrices[ticker];
+        if (!trade) return h;
+
+        const newValue = h.units * trade.price;
+        if (Math.abs(newValue - h.currentValue) < 0.01) return h;
+
+        changed = true;
+        return { ...h, currentValue: newValue };
+      });
+      return changed ? updated : prev;
+    });
+  }, [finnhubPrices]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function startEditValue(h: PortfolioHolding) {
     setEditingValueId(h.id);
@@ -372,7 +403,18 @@ export default function PortfolioPage() {
       <BlurFade delay={0}>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
           <div className="min-w-0">
-            <p className="label-mono mb-2">Portfolio</p>
+            <div className="flex items-center gap-2 mb-2">
+              <p className="label-mono">Portfolio</p>
+              {wsSymbols.length > 0 && (
+                <span className={cn(
+                  "flex items-center gap-1 text-[10px] font-mono",
+                  wsConnected ? "text-income" : "text-muted-foreground/50",
+                )}>
+                  {wsConnected ? <Wifi className="h-2.5 w-2.5" /> : <WifiOff className="h-2.5 w-2.5" />}
+                  {wsConnected ? "LIVE" : "Connecting..."}
+                </span>
+              )}
+            </div>
             <div className="display-number">
               {totals.totalValue > 0 ? (
                 <NumberTicker

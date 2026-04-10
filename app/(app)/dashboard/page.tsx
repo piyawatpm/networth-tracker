@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 
 import { cn } from "@/lib/utils";
 import { BlurFade } from "@/components/ui/blur-fade";
@@ -35,7 +35,11 @@ import type {
   RecurringExpense,
   RecurringIncome,
 } from "@/lib/utils/types";
-import { ArrowUpRight, ArrowDownRight } from "lucide-react";
+import { ArrowUpRight, ArrowDownRight, Wifi } from "lucide-react";
+import { useBinanceWs } from "@/lib/hooks/use-binance-ws";
+import { useFinnhubWs } from "@/lib/hooks/use-finnhub-ws";
+import { applyLivePrices } from "@/lib/utils/crypto-prices";
+import { canAutoUpdate } from "@/lib/utils/prices";
 
 // Sub-components
 import { NetWorthChart } from "./_components/net-worth-chart";
@@ -149,6 +153,7 @@ export default function DashboardPage() {
   const { convert, format, symbol, currency } = useCurrency();
   const [period, setPeriod] = useState<Period>("M");
   const [includeSuper, setIncludeSuper] = useState(true);
+  const [tickerMappings] = useCloudStorage<Record<string, string>>("crypto_ticker_mappings", {});
 
   // Section visibility
   const [hiddenSections, setHiddenSections] = useCloudStorage<string[]>("dashboard_hidden_sections", []);
@@ -156,23 +161,80 @@ export default function DashboardPage() {
     setHiddenSections((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
   };
 
+  // ---- Real-time prices via WebSocket ------------------------------------
+
+  // Finnhub WS for US stocks
+  const stockWsSymbols = useMemo(() => {
+    return portfolioHoldings
+      .filter((h) => h.ticker && canAutoUpdate(h.ticker) && h.country?.toUpperCase() === "US")
+      .map((h) => h.ticker.toUpperCase());
+  }, [portfolioHoldings]);
+  const { livePrices: finnhubPrices, connected: stockWsConnected } = useFinnhubWs(stockWsSymbols);
+
+  // Binance WS for crypto
+  const rawCryptoHoldings = useMemo(() => (cryptoCsvText ? parseAndComputeHoldings(cryptoCsvText) : []), [cryptoCsvText]);
+  const cryptoWsSymbols = useMemo(() => {
+    const skip = new Set(["CASH", "USD", "USDT", "USDC", "DAI", "BUSD", "TUSD", "FDUSD"]);
+    const syms: string[] = [];
+    for (const h of rawCryptoHoldings) {
+      if (stablecoinTags[h.token]) continue;
+      const mapped = tickerMappings[h.token];
+      if (!mapped) continue;
+      const upper = mapped.toUpperCase();
+      if (skip.has(upper)) continue;
+      const sym = `${upper}USDT`;
+      if (!syms.includes(sym)) syms.push(sym);
+    }
+    return syms;
+  }, [rawCryptoHoldings, tickerMappings, stablecoinTags]);
+  const { livePrices: binancePrices, connected: cryptoWsConnected } = useBinanceWs(cryptoWsSymbols);
+
+  // Merge Binance WS prices into crypto holdings
+  const [cryptoLivePrices, setCryptoLivePrices] = useState<Record<string, number>>({});
+  useEffect(() => {
+    if (Object.keys(binancePrices).length === 0) return;
+    const mapped: Record<string, number> = {};
+    for (const h of rawCryptoHoldings) {
+      const ticker = tickerMappings[h.token] ?? h.token;
+      const sym = `${ticker.toUpperCase()}USDT`;
+      if (binancePrices[sym]) mapped[h.token] = binancePrices[sym].price;
+    }
+    if (Object.keys(mapped).length > 0) {
+      setCryptoLivePrices((prev) => ({ ...prev, ...mapped }));
+    }
+  }, [binancePrices, rawCryptoHoldings, tickerMappings]);
+
+  // Live portfolio holdings with Finnhub prices applied
+  const livePortfolioHoldings = useMemo(() => {
+    if (Object.keys(finnhubPrices).length === 0) return portfolioHoldings;
+    return portfolioHoldings.map((h) => {
+      const trade = finnhubPrices[h.ticker?.toUpperCase()];
+      if (!trade) return h;
+      const newValue = h.units * trade.price;
+      if (Math.abs(newValue - h.currentValue) < 0.01) return h;
+      return { ...h, currentValue: newValue };
+    });
+  }, [portfolioHoldings, finnhubPrices]);
+
   // ---- Derived data -------------------------------------------------------
 
-  const rawCryptoHoldings = useMemo(() => (cryptoCsvText ? parseAndComputeHoldings(cryptoCsvText) : []), [cryptoCsvText]);
-  const cryptoHoldings = useMemo(() => applyStablecoinTags(rawCryptoHoldings, stablecoinTags), [rawCryptoHoldings, stablecoinTags]);
+  const cryptoHoldings = useMemo(() => {
+    const tagged = applyStablecoinTags(rawCryptoHoldings, stablecoinTags);
+    return applyLivePrices(tagged, cryptoLivePrices);
+  }, [rawCryptoHoldings, stablecoinTags, cryptoLivePrices]);
   const last6Keys = getLast6MonthKeys();
 
-  const portfolioTotal = useMemo(() => portfolioHoldings.reduce((s, h) => s + convert(h.currentValue, h.currency), 0), [portfolioHoldings, convert]);
+  const portfolioTotal = useMemo(() => livePortfolioHoldings.reduce((s, h) => s + convert(h.currentValue, h.currency), 0), [livePortfolioHoldings, convert]);
   const cryptoTotal = useMemo(() => convert(getTotalCryptoValueUsd(cryptoHoldings), "USD"), [cryptoHoldings, convert]);
 
   const normalTotal = useMemo(
-    () => portfolioHoldings.filter((h) => h.accountType === "normal").reduce((s, h) => s + convert(h.currentValue, h.currency), 0),
-    [portfolioHoldings, convert],
+    () => livePortfolioHoldings.filter((h) => h.accountType === "normal").reduce((s, h) => s + convert(h.currentValue, h.currency), 0),
+    [livePortfolioHoldings, convert],
   );
 
   const superTotal = useMemo(
-    () => portfolioHoldings.filter((h) => h.accountType === "super").reduce((s, h) => s + convert(h.currentValue, h.currency), 0),
-    [portfolioHoldings, convert],
+    () => livePortfolioHoldings.filter((h) => h.accountType === "super").reduce((s, h) => s + convert(h.currentValue, h.currency), 0),
+    [livePortfolioHoldings, convert],
   );
 
   const { owedToMe, iOwe } = useMemo(() => {
@@ -231,7 +293,7 @@ export default function DashboardPage() {
     const colors = ["#4d7cc7", "#2e8b57", "#d4a033", "#9e5e8e", "#2ea598", "#708090", "#cd5c5c", "#5b8a72"];
     let ci = 0;
     // Portfolio
-    for (const h of portfolioHoldings) {
+    for (const h of livePortfolioHoldings) {
       if (h.type === "savings" || h.isEmergencyFund) {
         allocs.push({ label: h.name, value: convert(h.currentValue, h.currency), color: colors[ci++ % colors.length] });
       }
@@ -244,7 +306,7 @@ export default function DashboardPage() {
     }
     allocs.sort((a, b) => b.value - a.value);
     return { emergencyFundTotal: allocs.reduce((s, a) => s + a.value, 0), efAllocations: allocs };
-  }, [portfolioHoldings, rawCryptoHoldings, cryptoEmergencyTags, convert]);
+  }, [livePortfolioHoldings, rawCryptoHoldings, cryptoEmergencyTags, convert]);
 
   // Weighted average monthly expenses (recent 3mo × 2 + older 3mo × 1)
   const weightedMonthlyExpenses = useMemo(() => {
@@ -309,7 +371,7 @@ export default function DashboardPage() {
   const portfolioHighlights = useMemo(() => {
     type HL = { name: string; pnl: number; pnlPct: number };
     const items: HL[] = [];
-    for (const h of portfolioHoldings) {
+    for (const h of livePortfolioHoldings) {
       const cur = convert(h.currentValue, h.currency), cost = convert(h.amountInvested, h.currency);
       items.push({ name: h.ticker || h.name, pnl: cur - cost, pnlPct: cost > 0 ? ((cur - cost) / cost) * 100 : 0 });
     }
@@ -319,7 +381,7 @@ export default function DashboardPage() {
     }
     const sorted = [...items].sort((a, b) => b.pnl - a.pnl);
     return { gainers: sorted.filter((i) => i.pnl > 0).slice(0, 3), losers: sorted.filter((i) => i.pnl < 0).sort((a, b) => a.pnl - b.pnl).slice(0, 3) };
-  }, [portfolioHoldings, cryptoHoldings, convert]);
+  }, [livePortfolioHoldings, cryptoHoldings, convert]);
 
   // ---- Upcoming Recurring -------------------------------------------------
 
@@ -387,7 +449,15 @@ export default function DashboardPage() {
       <BlurFade delay={0}>
         <section className="flex items-start justify-between gap-4">
           <div>
-            <p className="label-mono mb-2">Net Worth</p>
+            <div className="flex items-center gap-2 mb-2">
+              <p className="label-mono">Net Worth</p>
+              {(stockWsConnected || cryptoWsConnected) && (
+                <span className="flex items-center gap-1 text-[10px] font-mono text-income">
+                  <Wifi className="h-2.5 w-2.5" />
+                  LIVE
+                </span>
+              )}
+            </div>
             <div className="display-number">
               <NumberTicker value={netWorth} prefix={symbol} decimalPlaces={0} className="display-number" />
             </div>
