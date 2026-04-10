@@ -254,121 +254,81 @@ export async function GET(request: Request) {
       log.push(`Recurring expenses: no templates`);
     }
 
-    // ── 5. Crypto price update via Binance ──
+    // ── 5. Crypto price update via CoinGecko ──
+    // Binance blocks Vercel server IPs, so we use CoinGecko as primary source.
+    // Client-side (browser) still uses Binance WS for real-time streaming.
     const cryptoCsvText = parse<string>("crypto_csv_text", "");
-    log.push(`CSV data: ${cryptoCsvText ? `${cryptoCsvText.length} chars` : "EMPTY"}`);
-    log.push(`Ticker mappings: ${JSON.stringify(tickerMappings)}`);
 
     if (cryptoCsvText) {
       try {
-        // Parse CSV to get holdings with token + amount
-        // We import dynamically to keep the function pure
         const { parseAndComputeHoldings } = await import("@/lib/utils/crypto-csv");
         const { STABLECOINS, YIELD_PREFIXES, COINGECKO_IDS } = await import("@/lib/utils/constants");
 
         const holdings = parseAndComputeHoldings(cryptoCsvText);
-        log.push(`Parsed holdings: ${holdings.map((h) => `${h.token}(${h.amount})`).join(", ")}`);
 
+        // Filter non-stable tokens — use ticker mapping to detect stablecoins by mapped symbol too
         const nonStableTokens = holdings.filter((h) => {
           const upper = h.token.toUpperCase();
-          if (STABLECOINS.has(upper)) return false;
+          const mapped = (tickerMappings[h.token] ?? h.token).toUpperCase();
+          if (STABLECOINS.has(upper) || STABLECOINS.has(mapped)) return false;
           if (upper === "STABLECOIN" || upper === "CASH") return false;
           if (YIELD_PREFIXES.some((p) => upper.toLowerCase().startsWith(p))) return false;
           return h.amount > 0;
         });
 
-        log.push(`Non-stable tokens: ${nonStableTokens.map((h) => h.token).join(", ") || "NONE"}`);
+        log.push(`Holdings: ${holdings.length} total, ${nonStableTokens.length} to price`);
 
-        if (nonStableTokens.length > 0) {
-          // Step 1: Fetch prices from Binance
-          const pricePromises = nonStableTokens.map(async (h) => {
-            const mappedTicker = (tickerMappings[h.token] ?? h.token).toUpperCase();
-            const symbol = `${mappedTicker}USDT`;
-            try {
-              const res = await fetch(
-                `https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`,
-              );
-              if (!res.ok) return { token: h.token, mappedTicker, price: null };
-              const data = await res.json();
-              return { token: h.token, mappedTicker, price: parseFloat(data.price) };
-            } catch {
-              return { token: h.token, mappedTicker, price: null };
-            }
-          });
+        if (nonStableTokens.length > 0 && process.env.COINGECKO_API_KEY) {
+          // Map tokens to CoinGecko IDs via ticker mappings
+          const cgMap: { token: string; cgId: string }[] = [];
+          const unmapped: string[] = [];
 
-          const results = await Promise.all(pricePromises);
-          const prices: Record<string, number> = {};
-          let binanceCount = 0;
-          const failedTokens: { token: string; mappedTicker: string }[] = [];
-
-          for (const r of results) {
-            if (r.price !== null && !isNaN(r.price)) {
-              prices[r.token] = r.price;
-              binanceCount++;
+          for (const h of nonStableTokens) {
+            const mapped = (tickerMappings[h.token] ?? h.token).toUpperCase();
+            const cgId = COINGECKO_IDS[mapped] ?? COINGECKO_IDS[h.token];
+            if (cgId) {
+              cgMap.push({ token: h.token, cgId });
             } else {
-              failedTokens.push({ token: r.token, mappedTicker: r.mappedTicker });
+              unmapped.push(`${h.token}(${mapped})`);
             }
           }
 
-          log.push(`Binance: ${binanceCount}/${nonStableTokens.length} — ${results.map((r) => `${r.token}→${r.mappedTicker}USDT=${r.price ?? "FAIL"}`).join(", ")}`);
-          if (failedTokens.length > 0) log.push(`Binance failed: ${failedTokens.map((f) => `${f.token}→${f.mappedTicker}USDT`).join(", ")}`);
+          if (unmapped.length > 0) {
+            log.push(`No CoinGecko ID: ${unmapped.join(", ")} — add to COINGECKO_IDS in constants.ts`);
+          }
 
-          // Step 2: CoinGecko fallback for tokens Binance doesn't have
-          log.push(`CoinGecko API key: ${process.env.COINGECKO_API_KEY ? "SET" : "MISSING"}`);
-          if (failedTokens.length > 0 && process.env.COINGECKO_API_KEY) {
-            try {
-              // Map failed tokens to CoinGecko IDs
-              const cgMap: { token: string; cgId: string }[] = [];
-              for (const f of failedTokens) {
-                const cgId = COINGECKO_IDS[f.mappedTicker] ?? COINGECKO_IDS[f.token];
-                if (cgId) cgMap.push({ token: f.token, cgId });
+          if (cgMap.length > 0) {
+            const ids = cgMap.map((c) => c.cgId).join(",");
+            const cgRes = await fetch(
+              `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`,
+              { headers: { "x-cg-demo-api-key": process.env.COINGECKO_API_KEY } },
+            );
+
+            if (cgRes.ok) {
+              const cgData = await cgRes.json();
+              const prices: Record<string, number> = {};
+              for (const { token, cgId } of cgMap) {
+                const price = cgData[cgId]?.usd;
+                if (price != null) prices[token] = price;
               }
 
-              if (cgMap.length > 0) {
-                const ids = cgMap.map((c) => c.cgId).join(",");
-                const cgRes = await fetch(
-                  `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`,
-                  { headers: { "x-cg-demo-api-key": process.env.COINGECKO_API_KEY } },
-                );
-
-                if (cgRes.ok) {
-                  const cgData = await cgRes.json();
-                  let cgCount = 0;
-                  for (const { token, cgId } of cgMap) {
-                    const price = cgData[cgId]?.usd;
-                    if (price != null) {
-                      prices[token] = price;
-                      cgCount++;
-                    }
-                  }
-                  log.push(`CoinGecko: ${cgCount}/${cgMap.length} tokens — ${cgMap.map((c) => `${c.token}=$${prices[c.token]?.toFixed(2) ?? "?"}`).join(", ")}`);
-                } else {
-                  log.push(`CoinGecko: HTTP ${cgRes.status}`);
-                }
+              const fetched = Object.keys(prices).length;
+              if (fetched > 0) {
+                updates.push({
+                  key: "crypto_prices",
+                  value: JSON.stringify({ prices, fetchedAt: Date.now() }),
+                  updated_at: now,
+                });
+                log.push(`CoinGecko: ${fetched}/${cgMap.length} — ${Object.entries(prices).map(([t, p]) => `${t}=$${p.toFixed(2)}`).join(", ")}`);
+              } else {
+                log.push(`CoinGecko: returned no prices`);
               }
-
-              const unmapped = failedTokens.filter(
-                (f) => !cgMap.some((c) => c.token === f.token),
-              );
-              if (unmapped.length > 0) {
-                log.push(`No price source: ${unmapped.map((u) => u.token).join(", ")} — add to COINGECKO_IDS`);
-              }
-            } catch (e) {
-              log.push(`CoinGecko error: ${String(e)}`);
+            } else {
+              log.push(`CoinGecko: HTTP ${cgRes.status}`);
             }
           }
-
-          const totalFetched = Object.keys(prices).length;
-          if (totalFetched > 0) {
-            updates.push({
-              key: "crypto_prices",
-              value: JSON.stringify({ prices, fetchedAt: Date.now() }),
-              updated_at: now,
-            });
-            log.push(`Crypto prices saved: ${totalFetched}/${nonStableTokens.length} — ${Object.entries(prices).map(([t, p]) => `${t}=$${p.toFixed(2)}`).join(", ")}`);
-          } else {
-            log.push(`Crypto prices: all fetches failed`);
-          }
+        } else if (nonStableTokens.length > 0) {
+          log.push(`CoinGecko API key: MISSING — add COINGECKO_API_KEY to Vercel env vars`);
         } else {
           log.push(`Crypto prices: no non-stable tokens to fetch`);
         }
