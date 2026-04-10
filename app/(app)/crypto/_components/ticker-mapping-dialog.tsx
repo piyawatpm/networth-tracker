@@ -66,20 +66,19 @@ export function TickerMappingDialog({
   const [localMappings, setLocalMappings] = useState<Record<string, string>>({});
   const [search, setSearch] = useState("");
 
+  // Only re-initialize when dialog opens, not on every tokens/mappings reference change
   useEffect(() => {
-    if (open) {
-      // Initialize with existing mappings + auto-suggestions for unmapped tokens
-      const init: Record<string, string> = { ...mappings };
-      for (const token of tokens) {
-        if (!init[token]) {
-          // Try auto-suggest from known mappings
-          init[token] = KNOWN_MAPPINGS[token] ?? token;
-        }
+    if (!open) return;
+    const init: Record<string, string> = { ...mappings };
+    for (const token of tokens) {
+      if (!init[token]) {
+        init[token] = KNOWN_MAPPINGS[token] ?? token;
       }
-      setLocalMappings(init);
-      setSearch("");
     }
-  }, [open, tokens, mappings]);
+    setLocalMappings(init);
+    setSearch("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   function handleSave() {
     onSave(localMappings);
