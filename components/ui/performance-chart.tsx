@@ -1,10 +1,20 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import ReactECharts from "echarts-for-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  AreaSeries,
+  ColorType,
+  createChart,
+  type IChartApi,
+  type ISeriesApi,
+  type UTCTimestamp,
+  CrosshairMode,
+  LineStyle,
+  createSeriesMarkers,
+  type SeriesMarker,
+} from "lightweight-charts";
 import { useTheme } from "next-themes";
 import { useCurrency } from "@/components/providers/currency-provider";
-import { getCartesianBaseOption, formatAxisValue } from "@/lib/utils/echarts";
 import { cn } from "@/lib/utils";
 import { NumberTicker } from "@/components/ui/number-ticker";
 
@@ -30,7 +40,7 @@ export interface PerformanceChartProps {
   currentValue: number;
   /** Historical snapshots (raw, in their stored currency) */
   snapshots: SnapshotPoint[];
-  /** Optional: source currency override for `currentValue` (defaults to user's currency) */
+  /** Optional: source currency override for `currentValue` */
   currentValueCurrency?: string;
   /** Show LIVE indicator */
   isLive?: boolean;
@@ -41,7 +51,7 @@ export interface PerformanceChartProps {
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Constants
 // ---------------------------------------------------------------------------
 
 const PERIOD_LABELS: Record<Period, string> = {
@@ -62,27 +72,16 @@ const PNL_LABELS: Record<Period, string> = {
   "ALL": "All-time PnL",
 };
 
-/** Parse date string "YYYY-MM-DD" or "YYYY-MM-DD HH:MM" → Date object (Sydney-aware) */
-function parseSnapshotDate(s: string): Date {
-  // Both formats are local-time strings — JS will treat them as local
-  // We just need them to be sortable/comparable
-  if (s.length <= 10) return new Date(`${s}T00:00:00`);
-  return new Date(s.replace(" ", "T"));
-}
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
-/** Format x-axis label depending on period */
-function formatXLabel(date: string, period: Period): string {
-  if (period === "1D") {
-    // Show HH:MM
-    const t = date.length > 10 ? date.slice(11) : "";
-    return t || date.slice(5);
+/** Parse "YYYY-MM-DD" or "YYYY-MM-DD HH:MM" → Unix seconds (UTCTimestamp) */
+function parseToTimestamp(s: string): UTCTimestamp {
+  if (s.length <= 10) {
+    return Math.floor(new Date(`${s}T00:00:00`).getTime() / 1000) as UTCTimestamp;
   }
-  if (period === "1W" || period === "1M") {
-    // Show MM/DD
-    return date.slice(5, 10).replace("-", "/");
-  }
-  // 6M, 1Y, ALL — show MM/YY
-  return `${date.slice(5, 7)}/${date.slice(2, 4)}`;
+  return Math.floor(new Date(s.replace(" ", "T")).getTime() / 1000) as UTCTimestamp;
 }
 
 // ---------------------------------------------------------------------------
@@ -103,145 +102,229 @@ export function PerformanceChart({
   const { format, convert, currency, symbol } = useCurrency();
   const [period, setPeriod] = useState<Period>(defaultPeriod);
 
-  // Convert snapshots to display currency
+  const containerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const seriesRef = useRef<ISeriesApi<"Area"> | null>(null);
+
+  // Convert + sort snapshots
   const convertedSnapshots = useMemo(() => {
-    return snapshots.map((s) => {
-      const cur = s.currency ?? "USD";
-      const value = cur !== currency
-        ? Math.round(convert(s.value, cur) * 100) / 100
-        : s.value;
-      return { date: s.date, value, parsed: parseSnapshotDate(s.date) };
-    }).sort((a, b) => a.parsed.getTime() - b.parsed.getTime());
+    return snapshots
+      .map((s) => {
+        const cur = s.currency ?? "USD";
+        const value = cur !== currency
+          ? Math.round(convert(s.value, cur) * 100) / 100
+          : s.value;
+        return { time: parseToTimestamp(s.date), value };
+      })
+      .sort((a, b) => a.time - b.time);
   }, [snapshots, currency, convert]);
 
   // Filter by period
   const filteredData = useMemo(() => {
     if (convertedSnapshots.length === 0) return [];
-    const now = Date.now();
+    const nowSec = Math.floor(Date.now() / 1000);
     let cutoff = 0;
     switch (period) {
       case "1D":
-        cutoff = now - 24 * 60 * 60 * 1000;
+        cutoff = nowSec - 24 * 60 * 60;
         break;
       case "1W":
-        cutoff = now - 7 * 24 * 60 * 60 * 1000;
+        cutoff = nowSec - 7 * 24 * 60 * 60;
         break;
       case "1M":
-        cutoff = now - 30 * 24 * 60 * 60 * 1000;
+        cutoff = nowSec - 30 * 24 * 60 * 60;
         break;
       case "6M":
-        cutoff = now - 180 * 24 * 60 * 60 * 1000;
+        cutoff = nowSec - 180 * 24 * 60 * 60;
         break;
       case "1Y":
-        cutoff = now - 365 * 24 * 60 * 60 * 1000;
+        cutoff = nowSec - 365 * 24 * 60 * 60;
         break;
       case "ALL":
         return convertedSnapshots;
     }
-    return convertedSnapshots.filter((s) => s.parsed.getTime() >= cutoff);
+    return convertedSnapshots.filter((s) => s.time >= cutoff);
   }, [convertedSnapshots, period]);
 
-  // Compute PnL stats — first vs last (or vs current value if live)
-  const stats = useMemo(() => {
-    if (filteredData.length === 0) return null;
-    const first = filteredData[0].value;
-    // Use the live current value as "now" for PnL calculation
-    const last = currentValue || filteredData[filteredData.length - 1].value;
-    const change = last - first;
-    const changePct = first > 0 ? (change / first) * 100 : 0;
-    const high = Math.max(...filteredData.map((d) => d.value), last);
-    const low = Math.min(...filteredData.map((d) => d.value), last);
-    return { first, last, change, changePct, high, low };
-  }, [filteredData, currentValue]);
-
-  const isPositive = (stats?.change ?? 0) >= 0;
-
-  // Chart line color
-  const lineColor = isPositive
-    ? (isDark ? "#4ade80" : "#2e8b57")
-    : (isDark ? "#f87171" : "#c95f3f");
-
-  // Chart series — append the live current value as the last point
+  // Append the live current value as the latest data point
   const chartData = useMemo(() => {
     if (filteredData.length === 0) return [];
-    const data = filteredData.map((d) => ({ date: d.date, value: d.value }));
-    // Append live current value as the most recent point
+    const data = [...filteredData];
     if (currentValue > 0) {
-      const lastDate = data[data.length - 1].date;
-      const now = new Date();
-      const liveDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-      if (liveDate !== lastDate) {
-        data.push({ date: liveDate, value: currentValue });
+      const liveTime = Math.floor(Date.now() / 1000) as UTCTimestamp;
+      const last = data[data.length - 1];
+      // Avoid duplicate timestamps (lightweight-charts requires strictly increasing)
+      if (liveTime > last.time) {
+        data.push({ time: liveTime, value: currentValue });
       } else {
-        data[data.length - 1] = { date: lastDate, value: currentValue };
+        data[data.length - 1] = { time: last.time, value: currentValue };
       }
     }
     return data;
   }, [filteredData, currentValue]);
 
-  const option = useMemo(() => {
-    const base = getCartesianBaseOption(isDark, symbol);
-    return {
-      ...base,
-      grid: { top: 24, right: 12, bottom: 28, left: 8, containLabel: true },
-      xAxis: {
-        ...base.xAxis,
-        type: "category" as const,
-        data: chartData.map((d) => formatXLabel(d.date, period)),
-        boundaryGap: false,
-        axisLabel: {
-          ...base.xAxis.axisLabel,
-          interval: chartData.length > 6 ? Math.floor(chartData.length / 5) : 0,
+  // Compute PnL stats
+  const stats = useMemo(() => {
+    if (chartData.length === 0) return null;
+    const first = chartData[0].value;
+    const last = chartData[chartData.length - 1].value;
+    const change = last - first;
+    const changePct = first > 0 ? (change / first) * 100 : 0;
+    const high = Math.max(...chartData.map((d) => d.value));
+    const low = Math.min(...chartData.map((d) => d.value));
+    const highIdx = chartData.findIndex((d) => d.value === high);
+    const lowIdx = chartData.findIndex((d) => d.value === low);
+    return { first, last, change, changePct, high, low, highIdx, lowIdx };
+  }, [chartData]);
+
+  const isPositive = (stats?.change ?? 0) >= 0;
+
+  // Chart colors based on PnL direction
+  const lineColor = isPositive
+    ? (isDark ? "#4ade80" : "#2e8b57")
+    : (isDark ? "#f87171" : "#c95f3f");
+  const topColor = isPositive
+    ? (isDark ? "rgba(74, 222, 128, 0.30)" : "rgba(46, 139, 87, 0.30)")
+    : (isDark ? "rgba(248, 113, 113, 0.30)" : "rgba(201, 95, 63, 0.30)");
+  const bottomColor = isPositive
+    ? (isDark ? "rgba(74, 222, 128, 0.0)" : "rgba(46, 139, 87, 0.0)")
+    : (isDark ? "rgba(248, 113, 113, 0.0)" : "rgba(201, 95, 63, 0.0)");
+
+  // Initialize chart once
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    const chart = createChart(containerRef.current, {
+      layout: {
+        background: { type: ColorType.Solid, color: "transparent" },
+        textColor: isDark ? "#888" : "#968360",
+        fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+        fontSize: 11,
+      },
+      grid: {
+        vertLines: { visible: false },
+        horzLines: { visible: false },
+      },
+      rightPriceScale: {
+        borderVisible: false,
+        scaleMargins: { top: 0.15, bottom: 0.1 },
+      },
+      timeScale: {
+        borderVisible: false,
+        timeVisible: period === "1D",
+        secondsVisible: false,
+        fixLeftEdge: true,
+        fixRightEdge: true,
+      },
+      crosshair: {
+        mode: CrosshairMode.Magnet,
+        vertLine: {
+          color: isDark ? "#555" : "#aaa",
+          width: 1,
+          style: LineStyle.Dashed,
+          labelBackgroundColor: isDark ? "#2a2a2a" : "#f4f3ed",
+        },
+        horzLine: {
+          color: isDark ? "#555" : "#aaa",
+          width: 1,
+          style: LineStyle.Dashed,
+          labelBackgroundColor: isDark ? "#2a2a2a" : "#f4f3ed",
         },
       },
-      yAxis: {
-        ...base.yAxis,
-        type: "value" as const,
-        position: "right" as const,
-        axisLabel: {
-          ...base.yAxis.axisLabel,
-          formatter: (v: number) => formatAxisValue(v),
-        },
-        min: (value: { min: number }) => Math.floor(value.min * 0.995),
-        max: (value: { max: number }) => Math.ceil(value.max * 1.005),
+      handleScale: false,
+      handleScroll: false,
+      width: containerRef.current.clientWidth,
+      height,
+    });
+
+    const series = chart.addSeries(AreaSeries, {
+      lineColor,
+      topColor,
+      bottomColor,
+      lineWidth: 2,
+      priceFormat: {
+        type: "price",
+        precision: 2,
+        minMove: 0.01,
       },
-      series: [
-        {
-          name: label,
-          type: "line" as const,
-          data: chartData.map((d) => d.value),
-          smooth: 0.3,
-          showSymbol: false,
-          lineStyle: { color: lineColor, width: 2 },
-          itemStyle: { color: lineColor, borderWidth: 0 },
-          areaStyle: {
-            color: {
-              type: "linear" as const,
-              x: 0, y: 0, x2: 0, y2: 1,
-              colorStops: [
-                { offset: 0, color: lineColor + "30" },
-                { offset: 1, color: lineColor + "00" },
-              ],
-            },
-          },
-          markPoint: stats ? {
-            symbol: "pin",
-            symbolSize: 0,
-            label: {
-              fontSize: 10,
-              color: isDark ? "#aaa" : "#888",
-              formatter: (params: { value: number }) =>
-                `${symbol}${Number(params.value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-            },
-            data: [
-              { type: "max" as const, name: "high" },
-              { type: "min" as const, name: "low" },
-            ],
-          } : undefined,
-        },
-      ],
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
+
+    chartRef.current = chart;
+    seriesRef.current = series;
+
+    // Handle resize
+    const handleResize = () => {
+      if (containerRef.current && chartRef.current) {
+        chartRef.current.applyOptions({ width: containerRef.current.clientWidth });
+      }
     };
-  }, [chartData, isDark, lineColor, label, symbol, stats, period]);
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      chart.remove();
+      chartRef.current = null;
+      seriesRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDark, height]);
+
+  // Update colors when PnL direction changes
+  useEffect(() => {
+    if (!seriesRef.current) return;
+    seriesRef.current.applyOptions({ lineColor, topColor, bottomColor });
+  }, [lineColor, topColor, bottomColor]);
+
+  // Update timeScale visibility based on period
+  useEffect(() => {
+    if (!chartRef.current) return;
+    chartRef.current.applyOptions({
+      timeScale: {
+        timeVisible: period === "1D",
+        secondsVisible: false,
+      },
+    });
+  }, [period]);
+
+  // Set data + markers when chartData changes
+  useEffect(() => {
+    if (!seriesRef.current || !chartRef.current) return;
+    if (chartData.length === 0) {
+      seriesRef.current.setData([]);
+      return;
+    }
+    seriesRef.current.setData(chartData);
+
+    // Add high/low markers
+    if (stats && chartData.length > 1) {
+      const markers: SeriesMarker<UTCTimestamp>[] = [];
+      if (stats.highIdx >= 0) {
+        markers.push({
+          time: chartData[stats.highIdx].time,
+          position: "aboveBar",
+          color: isDark ? "#888" : "#666",
+          shape: "arrowDown",
+          text: `${symbol}${stats.high.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+        });
+      }
+      if (stats.lowIdx >= 0 && stats.lowIdx !== stats.highIdx) {
+        markers.push({
+          time: chartData[stats.lowIdx].time,
+          position: "belowBar",
+          color: isDark ? "#888" : "#666",
+          shape: "arrowUp",
+          text: `${symbol}${stats.low.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+        });
+      }
+      try {
+        createSeriesMarkers(seriesRef.current, markers);
+      } catch { /* markers may not be supported in all builds */ }
+    }
+
+    chartRef.current.timeScale().fitContent();
+  }, [chartData, stats, isDark, symbol]);
 
   const periods: Period[] = ["1D", "1W", "1M", "6M", "1Y"];
   const displayValue = currentValueCurrency
@@ -250,7 +333,7 @@ export function PerformanceChart({
 
   return (
     <div className="finance-card px-4 py-5 sm:p-6">
-      {/* Header — value + PnL + period selector */}
+      {/* Header */}
       <div className="flex items-start justify-between gap-3 mb-4">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 mb-1">
@@ -303,14 +386,9 @@ export function PerformanceChart({
         </div>
       </div>
 
-      {/* Chart */}
+      {/* Chart container */}
       {chartData.length > 1 ? (
-        <ReactECharts
-          option={option}
-          style={{ height, width: "100%" }}
-          notMerge
-          opts={{ renderer: "svg" }}
-        />
+        <div ref={containerRef} style={{ height, width: "100%" }} />
       ) : (
         <div className="flex items-center justify-center" style={{ height }}>
           <p className="text-sm text-muted-foreground/50">
