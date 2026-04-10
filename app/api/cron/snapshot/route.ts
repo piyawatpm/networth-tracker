@@ -357,8 +357,7 @@ export async function GET(request: Request) {
         const mergedPrices = priceUpdate ? { ...latestPrices.prices, ...JSON.parse(priceUpdate.value).prices } : latestPrices.prices;
 
         for (const h of cryptoHoldings) {
-          const mappedTicker = tickerMappings[h.token] ?? h.token;
-          const price = mergedPrices[mappedTicker];
+          const price = mergedPrices[h.token] ?? mergedPrices[tickerMappings[h.token] ?? h.token];
           if (price != null) h.currentValueUsd = price * h.amount;
         }
         cryptoTotalUsd = getTotalCryptoValueUsd(cryptoHoldings);
