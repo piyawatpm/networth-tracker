@@ -256,14 +256,19 @@ export async function GET(request: Request) {
 
     // ── 5. Crypto price update via Binance ──
     const cryptoCsvText = parse<string>("crypto_csv_text", "");
+    log.push(`CSV data: ${cryptoCsvText ? `${cryptoCsvText.length} chars` : "EMPTY"}`);
+    log.push(`Ticker mappings: ${JSON.stringify(tickerMappings)}`);
+
     if (cryptoCsvText) {
       try {
         // Parse CSV to get holdings with token + amount
         // We import dynamically to keep the function pure
         const { parseAndComputeHoldings } = await import("@/lib/utils/crypto-csv");
-        const { STABLECOINS, YIELD_PREFIXES } = await import("@/lib/utils/constants");
+        const { STABLECOINS, YIELD_PREFIXES, COINGECKO_IDS } = await import("@/lib/utils/constants");
 
         const holdings = parseAndComputeHoldings(cryptoCsvText);
+        log.push(`Parsed holdings: ${holdings.map((h) => `${h.token}(${h.amount})`).join(", ")}`);
+
         const nonStableTokens = holdings.filter((h) => {
           const upper = h.token.toUpperCase();
           if (STABLECOINS.has(upper)) return false;
@@ -272,8 +277,10 @@ export async function GET(request: Request) {
           return h.amount > 0;
         });
 
+        log.push(`Non-stable tokens: ${nonStableTokens.map((h) => h.token).join(", ") || "NONE"}`);
+
         if (nonStableTokens.length > 0) {
-          // Fetch all prices from Binance using ticker mappings
+          // Step 1: Fetch prices from Binance
           const pricePromises = nonStableTokens.map(async (h) => {
             const mappedTicker = (tickerMappings[h.token] ?? h.token).toUpperCase();
             const symbol = `${mappedTicker}USDT`;
@@ -291,23 +298,74 @@ export async function GET(request: Request) {
 
           const results = await Promise.all(pricePromises);
           const prices: Record<string, number> = {};
-          let fetchedCount = 0;
+          let binanceCount = 0;
+          const failedTokens: { token: string; mappedTicker: string }[] = [];
 
           for (const r of results) {
             if (r.price !== null && !isNaN(r.price)) {
               prices[r.token] = r.price;
-              fetchedCount++;
+              binanceCount++;
+            } else {
+              failedTokens.push({ token: r.token, mappedTicker: r.mappedTicker });
             }
           }
 
-          // Save prices to Supabase
-          if (fetchedCount > 0) {
+          log.push(`Binance: ${binanceCount}/${nonStableTokens.length} — ${results.map((r) => `${r.token}→${r.mappedTicker}USDT=${r.price ?? "FAIL"}`).join(", ")}`);
+          if (failedTokens.length > 0) log.push(`Binance failed: ${failedTokens.map((f) => `${f.token}→${f.mappedTicker}USDT`).join(", ")}`);
+
+          // Step 2: CoinGecko fallback for tokens Binance doesn't have
+          log.push(`CoinGecko API key: ${process.env.COINGECKO_API_KEY ? "SET" : "MISSING"}`);
+          if (failedTokens.length > 0 && process.env.COINGECKO_API_KEY) {
+            try {
+              // Map failed tokens to CoinGecko IDs
+              const cgMap: { token: string; cgId: string }[] = [];
+              for (const f of failedTokens) {
+                const cgId = COINGECKO_IDS[f.mappedTicker] ?? COINGECKO_IDS[f.token];
+                if (cgId) cgMap.push({ token: f.token, cgId });
+              }
+
+              if (cgMap.length > 0) {
+                const ids = cgMap.map((c) => c.cgId).join(",");
+                const cgRes = await fetch(
+                  `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`,
+                  { headers: { "x-cg-demo-api-key": process.env.COINGECKO_API_KEY } },
+                );
+
+                if (cgRes.ok) {
+                  const cgData = await cgRes.json();
+                  let cgCount = 0;
+                  for (const { token, cgId } of cgMap) {
+                    const price = cgData[cgId]?.usd;
+                    if (price != null) {
+                      prices[token] = price;
+                      cgCount++;
+                    }
+                  }
+                  log.push(`CoinGecko: ${cgCount}/${cgMap.length} tokens — ${cgMap.map((c) => `${c.token}=$${prices[c.token]?.toFixed(2) ?? "?"}`).join(", ")}`);
+                } else {
+                  log.push(`CoinGecko: HTTP ${cgRes.status}`);
+                }
+              }
+
+              const unmapped = failedTokens.filter(
+                (f) => !cgMap.some((c) => c.token === f.token),
+              );
+              if (unmapped.length > 0) {
+                log.push(`No price source: ${unmapped.map((u) => u.token).join(", ")} — add to COINGECKO_IDS`);
+              }
+            } catch (e) {
+              log.push(`CoinGecko error: ${String(e)}`);
+            }
+          }
+
+          const totalFetched = Object.keys(prices).length;
+          if (totalFetched > 0) {
             updates.push({
               key: "crypto_prices",
               value: JSON.stringify({ prices, fetchedAt: Date.now() }),
               updated_at: now,
             });
-            log.push(`Crypto prices: fetched ${fetchedCount}/${nonStableTokens.length} from Binance — ${Object.entries(prices).map(([t, p]) => `${t}=$${p.toFixed(2)}`).join(", ")}`);
+            log.push(`Crypto prices saved: ${totalFetched}/${nonStableTokens.length} — ${Object.entries(prices).map(([t, p]) => `${t}=$${p.toFixed(2)}`).join(", ")}`);
           } else {
             log.push(`Crypto prices: all fetches failed`);
           }

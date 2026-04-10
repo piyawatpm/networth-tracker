@@ -44,12 +44,13 @@ function formatCryptoAmount(amount: number): string {
   });
 }
 
-type SortField = "token" | "amount" | "value" | "cost" | "pnl" | "pct" | "exchange";
+type SortField = "token" | "amount" | "price" | "value" | "cost" | "pnl" | "pct" | "exchange";
 
 export function HoldingsBreakdown({
   pricedHoldings,
   holdings,
   totalValueUsd,
+  livePrices,
   selectedTokens,
   setSelectedTokens,
   allChartTokens,
@@ -72,6 +73,7 @@ export function HoldingsBreakdown({
   pricedHoldings: CryptoHolding[];
   holdings: CryptoHolding[];
   totalValueUsd: number;
+  livePrices: Record<string, number>;
   selectedTokens: Record<string, boolean>;
   setSelectedTokens: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
   allChartTokens: DonutChartItem[];
@@ -119,6 +121,9 @@ export function HoldingsBreakdown({
         case "amount":
           cmp = a.amount - b.amount;
           break;
+        case "price":
+          cmp = (livePrices[a.token] ?? 0) - (livePrices[b.token] ?? 0);
+          break;
         case "value":
           cmp = a.currentValueUsd - b.currentValueUsd;
           break;
@@ -138,7 +143,7 @@ export function HoldingsBreakdown({
       return sortDir === "desc" ? -cmp : cmp;
     });
     return list;
-  }, [pricedHoldings, sortField, sortDir, getExchange]);
+  }, [pricedHoldings, sortField, sortDir, getExchange, livePrices]);
 
   // Donut data: only selected tokens
   const chartData = useMemo(() => {
@@ -263,6 +268,15 @@ export function HoldingsBreakdown({
                       </span>
                     </th>
                     <th
+                      className="hidden sm:table-cell px-4 pb-2 text-right font-mono text-[10px] uppercase tracking-wider text-muted-foreground font-medium cursor-pointer select-none"
+                      onClick={() => toggleSort("price")}
+                    >
+                      <span className="inline-flex items-center justify-end gap-1">
+                        Price
+                        {sortField === "price" && <ArrowUpDown className="h-2.5 w-2.5" />}
+                      </span>
+                    </th>
+                    <th
                       className="px-4 pb-2 text-right font-mono text-[10px] uppercase tracking-wider text-muted-foreground font-medium cursor-pointer select-none"
                       onClick={() => toggleSort("value")}
                     >
@@ -349,6 +363,13 @@ export function HoldingsBreakdown({
                         </td>
                         <td className="hidden sm:table-cell px-4 py-3 text-right tabular-nums font-mono text-xs text-muted-foreground">
                           {formatCryptoAmount(h.amount)}
+                        </td>
+                        <td className="hidden sm:table-cell px-4 py-3 text-right tabular-nums font-mono text-xs text-muted-foreground">
+                          {livePrices[h.token] != null
+                            ? `$${livePrices[h.token] < 1
+                                ? livePrices[h.token].toFixed(4)
+                                : livePrices[h.token].toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                            : "\u2014"}
                         </td>
                         <td className="px-4 py-3 text-right tabular-nums font-mono text-sm">
                           {format(h.currentValueUsd, "USD")}

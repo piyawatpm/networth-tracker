@@ -79,6 +79,7 @@ export const COINGECKO_IDS: Record<string, string> = {
   ETH: "ethereum",
   SOL: "solana",
   OKB: "okb",
+  HYPE: "hyperliquid",
   BNB: "binancecoin",
   XRP: "ripple",
   ADA: "cardano",

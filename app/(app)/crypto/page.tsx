@@ -26,7 +26,6 @@ import { Settings2, Wifi, WifiOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useBinanceWs } from "@/lib/hooks/use-binance-ws";
-import { LiveChart } from "@/components/ui/live-chart";
 import { UploadSection } from "./_components/upload-section";
 import { PriceStatus } from "./_components/price-status";
 import { HistoryChart } from "./_components/history-chart";
@@ -375,26 +374,19 @@ export default function CryptoPage() {
   // ── Portfolio view ────────────────────────────────────────
   return (
     <div className="space-y-8 overflow-x-hidden">
-      {/* ── Live Value + Real-Time Chart ── */}
+      {/* ── Live WebSocket Status ── */}
       <div className="finance-card px-3 py-4 sm:p-5">
-        <div className="flex items-center justify-between mb-1">
-          <div className="flex items-center gap-2">
-            <p className="label-mono">Live Value</p>
-            <span className={cn(
-              "flex items-center gap-1 text-[10px] font-mono",
-              wsConnected ? "text-income" : "text-muted-foreground/50",
-            )}>
-              {wsConnected ? <Wifi className="h-2.5 w-2.5" /> : <WifiOff className="h-2.5 w-2.5" />}
-              {wsConnected ? "LIVE" : "Connecting..."}
-            </span>
-          </div>
+        <div className="flex items-center gap-2 mb-3">
+          <p className="label-mono">Live Prices</p>
+          <span className={cn(
+            "flex items-center gap-1 text-[10px] font-mono",
+            wsConnected ? "text-income" : "text-muted-foreground/50",
+          )}>
+            {wsConnected ? <Wifi className="h-2.5 w-2.5" /> : <WifiOff className="h-2.5 w-2.5" />}
+            {wsConnected ? "LIVE" : "Connecting..."}
+          </span>
         </div>
-        <p className="text-2xl sm:text-3xl font-bold tabular-nums mb-1">
-          {format(totalValueConverted)}
-        </p>
-
-        {/* Stream status — which coins are live vs not */}
-        <div className="flex flex-wrap gap-1.5 mb-3">
+        <div className="flex flex-wrap gap-1.5">
           {rawHoldings
             .filter((h) => !stablecoinTags[h.token])
             .map((h) => {
@@ -423,13 +415,6 @@ export default function CryptoPage() {
               );
             })}
         </div>
-
-        <LiveChart
-          value={totalValueConverted}
-          interval={3000}
-          height={300}
-          symbol={symbol}
-        />
       </div>
 
       <PriceStatus
@@ -477,6 +462,7 @@ export default function CryptoPage() {
         pricedHoldings={pricedHoldings}
         holdings={holdings}
         totalValueUsd={totalValueUsd}
+        livePrices={livePrices}
         selectedTokens={selectedTokens}
         setSelectedTokens={setSelectedTokens}
         allChartTokens={allChartTokens}

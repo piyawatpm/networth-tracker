@@ -27,7 +27,8 @@ export function isCryptoPricesCacheStale(): boolean {
 
 /**
  * Fetch crypto prices from Binance API.
- * Falls back to stale cache if fetch fails.
+ * Tokens that Binance doesn't have fall back to CoinGecko via server API.
+ * Falls back to stale cache if all fetches fail.
  */
 export async function fetchCryptoPrices(
   tokens: string[],
@@ -41,7 +42,7 @@ export async function fetchCryptoPrices(
   if (toFetch.length === 0) return {};
 
   try {
-    // Fetch from Binance in parallel
+    // Step 1: Fetch from Binance in parallel
     const results = await Promise.all(
       toFetch.map(async (token) => {
         const symbol = `${token.toUpperCase()}USDT`;
@@ -59,9 +60,31 @@ export async function fetchCryptoPrices(
     );
 
     const prices: Record<string, number> = {};
+    const failedTokens: string[] = [];
     for (const r of results) {
       if (r.price !== null && !isNaN(r.price)) {
         prices[r.token] = r.price;
+      } else {
+        failedTokens.push(r.token);
+      }
+    }
+
+    // Step 2: CoinGecko fallback for tokens Binance doesn't have
+    if (failedTokens.length > 0) {
+      try {
+        const res = await fetch("/api/crypto-prices", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tokens: failedTokens }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          for (const [token, price] of Object.entries(data.prices)) {
+            prices[token] = price as number;
+          }
+        }
+      } catch {
+        // CoinGecko fallback failed — continue with Binance prices only
       }
     }
 
