@@ -314,11 +314,16 @@ export function PerformanceChart({
               </span>
             )}
           </div>
-          <div className="display-number">
-            <NumberTicker value={displayValue} prefix={symbol} decimalPlaces={2} />
+          <div className="flex items-baseline gap-2 flex-wrap">
+            <div className="display-number">
+              <NumberTicker value={displayValue} prefix={symbol} decimalPlaces={2} />
+            </div>
+            <span className="text-sm font-mono uppercase tracking-wide text-muted-foreground">
+              {currency}
+            </span>
           </div>
           {stats && (
-            <div className="flex items-center gap-1.5 mt-1">
+            <div className="flex items-center gap-1.5 mt-1.5">
               <span className="text-xs text-muted-foreground">{PNL_LABELS[period]}</span>
               <span className={cn(
                 "text-xs font-semibold tabular-nums",
@@ -336,8 +341,8 @@ export function PerformanceChart({
           )}
         </div>
 
-        {/* Period selector */}
-        <div className="flex gap-0.5 rounded-full bg-secondary/40 p-0.5 shrink-0">
+        {/* Desktop period selector — top-right */}
+        <div className="hidden sm:flex gap-0.5 rounded-full bg-secondary/40 p-0.5 shrink-0">
           {periods.map((p) => (
             <button
               key={p}
@@ -367,6 +372,24 @@ export function PerformanceChart({
           </p>
         </div>
       )}
+
+      {/* Mobile period selector — below chart, OKX-style pill */}
+      <div className="mt-4 flex sm:hidden items-center justify-around">
+        {periods.map((p) => (
+          <button
+            key={p}
+            onClick={() => setPeriod(p)}
+            className={cn(
+              "px-4 py-1.5 text-xs font-mono font-medium rounded-full transition-colors",
+              period === p
+                ? "bg-foreground/90 text-background"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {PERIOD_LABELS[p]}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
