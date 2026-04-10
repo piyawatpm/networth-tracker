@@ -51,6 +51,7 @@ export function HoldingsBreakdown({
   holdings,
   totalValueUsd,
   livePrices,
+  coinImages = {},
   selectedTokens,
   setSelectedTokens,
   allChartTokens,
@@ -74,6 +75,7 @@ export function HoldingsBreakdown({
   holdings: CryptoHolding[];
   totalValueUsd: number;
   livePrices: Record<string, number>;
+  coinImages?: Record<string, string>;
   selectedTokens: Record<string, boolean>;
   setSelectedTokens: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
   allChartTokens: DonutChartItem[];
@@ -342,22 +344,32 @@ export function HoldingsBreakdown({
                       >
                         <td className="px-6 py-3">
                           <div className="flex items-center gap-2">
-                            <div
-                              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full"
-                              style={{
-                                backgroundColor:
-                                  ECHARTS_COLORS[i % ECHARTS_COLORS.length],
-                                opacity: 0.15,
-                              }}
-                            >
-                              <Bitcoin
-                                className="h-3 w-3"
-                                style={{
-                                  color:
-                                    ECHARTS_COLORS[i % ECHARTS_COLORS.length],
-                                }}
+                            {coinImages[h.token] ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={coinImages[h.token]}
+                                alt=""
+                                className="h-6 w-6 shrink-0 rounded-full object-contain"
+                                loading="lazy"
                               />
-                            </div>
+                            ) : (
+                              <div
+                                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full"
+                                style={{
+                                  backgroundColor:
+                                    ECHARTS_COLORS[i % ECHARTS_COLORS.length],
+                                  opacity: 0.15,
+                                }}
+                              >
+                                <Bitcoin
+                                  className="h-3 w-3"
+                                  style={{
+                                    color:
+                                      ECHARTS_COLORS[i % ECHARTS_COLORS.length],
+                                  }}
+                                />
+                              </div>
+                            )}
                             <span className="font-medium">{h.token}</span>
                           </div>
                         </td>

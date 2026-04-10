@@ -84,14 +84,19 @@ async function pickByMarketCap(candidates: CoinListEntry[]): Promise<CoinListEnt
   }
 }
 
+export interface ResolvedCoin {
+  symbol: string;
+  id: string;
+}
+
 /**
- * Resolve a list of token names/symbols to their canonical uppercased
- * trading symbols. Ambiguous names are disambiguated by market cap.
- * Returns a map of input token → resolved symbol (omits unresolvable tokens).
+ * Resolve a list of token names/symbols to their CoinGecko id + canonical
+ * uppercased trading symbol. Ambiguous names are disambiguated by market cap.
+ * Returns a map of input token → resolved info (omits unresolvable tokens).
  */
-export async function resolveTokenSymbols(
+export async function resolveTokens(
   tokens: string[],
-): Promise<Record<string, string>> {
+): Promise<Record<string, ResolvedCoin>> {
   if (tokens.length === 0) return {};
   const coins = await getCoinList();
   if (coins.length === 0) return {};
@@ -107,7 +112,7 @@ export async function resolveTokenSymbols(
     bySymbol.get(symKey)!.push(coin);
   }
 
-  const result: Record<string, string> = {};
+  const result: Record<string, ResolvedCoin> = {};
   const ambiguous: { token: string; candidates: CoinListEntry[] }[] = [];
 
   for (const token of tokens) {
@@ -117,7 +122,7 @@ export async function resolveTokenSymbols(
     // Exact symbol match takes priority (CSV already has "BTC")
     const symMatches = bySymbol.get(symKey) ?? [];
     if (symMatches.length === 1) {
-      result[token] = symMatches[0].symbol;
+      result[token] = { symbol: symMatches[0].symbol, id: symMatches[0].id };
       continue;
     }
     if (symMatches.length > 1) {
@@ -127,7 +132,7 @@ export async function resolveTokenSymbols(
 
     const nameMatches = byName.get(nameKey) ?? [];
     if (nameMatches.length === 1) {
-      result[token] = nameMatches[0].symbol;
+      result[token] = { symbol: nameMatches[0].symbol, id: nameMatches[0].id };
       continue;
     }
     if (nameMatches.length > 1) {
@@ -146,9 +151,56 @@ export async function resolveTokenSymbols(
       }),
     );
     for (const { token, winner } of picks) {
-      if (winner) result[token] = winner.symbol;
+      if (winner) result[token] = { symbol: winner.symbol, id: winner.id };
     }
   }
 
+  return result;
+}
+
+/**
+ * Backwards-compatible wrapper returning just `token → symbol`.
+ */
+export async function resolveTokenSymbols(
+  tokens: string[],
+): Promise<Record<string, string>> {
+  const resolved = await resolveTokens(tokens);
+  const out: Record<string, string> = {};
+  for (const [token, info] of Object.entries(resolved)) {
+    out[token] = info.symbol;
+  }
+  return out;
+}
+
+/**
+ * Fetch coin logo URLs from CoinGecko /coins/markets for a set of ids.
+ * Returns a map of `id → imageUrl`. Handles batching (250 ids per request).
+ */
+export async function fetchCoinImages(
+  ids: string[],
+): Promise<Record<string, string>> {
+  if (ids.length === 0) return {};
+  const unique = Array.from(new Set(ids));
+  const batches: string[][] = [];
+  for (let i = 0; i < unique.length; i += 250) {
+    batches.push(unique.slice(i, i + 250));
+  }
+
+  const result: Record<string, string> = {};
+  await Promise.all(
+    batches.map(async (batch) => {
+      try {
+        const url = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${encodeURIComponent(batch.join(","))}&per_page=${batch.length}&page=1&sparkline=false`;
+        const res = await fetch(url);
+        if (!res.ok) return;
+        const data = (await res.json()) as { id: string; image: string }[];
+        for (const row of data) {
+          if (row.image) result[row.id] = row.image;
+        }
+      } catch {
+        // silent — keep any earlier batches
+      }
+    }),
+  );
   return result;
 }

@@ -18,7 +18,7 @@ import {
   isCryptoPricesCacheStale,
   applyLivePrices,
 } from "@/lib/utils/crypto-prices";
-import { resolveTokenSymbols } from "@/lib/utils/crypto-symbol-resolver";
+import { resolveTokens, fetchCoinImages } from "@/lib/utils/crypto-symbol-resolver";
 import type { CryptoHolding } from "@/lib/utils/types";
 import { ECHARTS_COLORS } from "@/lib/utils/echarts";
 import ReactECharts from "echarts-for-react";
@@ -88,6 +88,12 @@ export default function CryptoPage() {
     {},
   );
 
+  // CSV token name → CoinGecko logo URL (populated by auto-resolver)
+  const [coinImages, setCoinImages] = useCloudStorage<Record<string, string>>(
+    "crypto_coin_images",
+    {},
+  );
+
   const getExchange = useCallback(
     (holding: CryptoHolding) => exchangeOverrides[holding.token] ?? holding.exchange ?? "",
     [exchangeOverrides],
@@ -110,36 +116,61 @@ export default function CryptoPage() {
     [csvText],
   );
 
-  // Auto-resolve ticker symbols from CoinGecko for tokens missing a mapping.
-  // Runs once per set of unmapped tokens; ambiguous names pick by market cap.
+  // Auto-resolve ticker symbols + logos from CoinGecko for tokens missing info.
+  // Runs when there are new unmapped tokens; ambiguous names pick by market cap.
   useEffect(() => {
     if (rawHoldings.length === 0) return;
     const skipStable = new Set(["CASH", "USD", "USDT", "USDC", "DAI", "BUSD", "TUSD", "FDUSD"]);
-    const unmapped = rawHoldings
+    const needsResolve = rawHoldings
       .map((h) => h.token)
       .filter((token) => {
-        if (tickerMappings[token]) return false;
         if (stablecoinTags[token]) return false;
-        return !skipStable.has(token.toUpperCase());
+        if (skipStable.has(token.toUpperCase())) return false;
+        return !tickerMappings[token] || !coinImages[token];
       });
-    if (unmapped.length === 0) return;
+    if (needsResolve.length === 0) return;
 
     let cancelled = false;
-    resolveTokenSymbols(unmapped).then((resolved) => {
-      if (cancelled) return;
-      if (Object.keys(resolved).length === 0) return;
+    (async () => {
+      const resolved = await resolveTokens(needsResolve);
+      if (cancelled || Object.keys(resolved).length === 0) return;
+
       setTickerMappings((prev) => {
         const next = { ...prev };
-        for (const [token, symbol] of Object.entries(resolved)) {
-          if (!next[token]) next[token] = symbol;
+        for (const [token, info] of Object.entries(resolved)) {
+          if (!next[token]) next[token] = info.symbol;
         }
         return next;
       });
-    });
+
+      // Fetch logos only for tokens that don't already have one
+      const idsToFetch: string[] = [];
+      const tokenByIdForFetch = new Map<string, string>();
+      for (const [token, info] of Object.entries(resolved)) {
+        if (!coinImages[token]) {
+          idsToFetch.push(info.id);
+          tokenByIdForFetch.set(info.id, token);
+        }
+      }
+      if (idsToFetch.length === 0) return;
+
+      const images = await fetchCoinImages(idsToFetch);
+      if (cancelled || Object.keys(images).length === 0) return;
+
+      setCoinImages((prev) => {
+        const next = { ...prev };
+        for (const [id, url] of Object.entries(images)) {
+          const token = tokenByIdForFetch.get(id);
+          if (token && !next[token]) next[token] = url;
+        }
+        return next;
+      });
+    })();
+
     return () => {
       cancelled = true;
     };
-  }, [rawHoldings, tickerMappings, stablecoinTags, setTickerMappings]);
+  }, [rawHoldings, tickerMappings, coinImages, stablecoinTags, setTickerMappings, setCoinImages]);
 
   const wsSymbols = useMemo(() => {
     if (rawHoldings.length === 0) return [];
@@ -535,6 +566,7 @@ export default function CryptoPage() {
         holdings={holdings}
         totalValueUsd={totalValueUsd}
         livePrices={livePrices}
+        coinImages={coinImages}
         selectedTokens={selectedTokens}
         setSelectedTokens={setSelectedTokens}
         allChartTokens={allChartTokens}

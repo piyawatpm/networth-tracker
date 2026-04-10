@@ -34,6 +34,7 @@ interface HoldingsTableProps {
   totals: PortfolioTotals;
   fundAllocations: FundAllocations;
   priceCache: PriceCache;
+  stockLogos?: Record<string, string>;
   searchQuery: string;
   setSearchQuery: (q: string) => void;
   sortKey: SortKey;
@@ -68,7 +69,7 @@ interface HoldingsTableProps {
 
 export function HoldingsTable({
   holdings, sortedHoldings, filteredHoldings, totals, fundAllocations,
-  priceCache, searchQuery, setSearchQuery, sortKey, setSortKey,
+  priceCache, stockLogos = {}, searchQuery, setSearchQuery, sortKey, setSortKey,
   typeFilter, setTypeFilter, accountFilter, setAccountFilter,
   isFetching, lastFetchStatus, format, convert,
   onSave, onDelete, onRefresh,
@@ -144,6 +145,12 @@ export function HoldingsTable({
               const pnlPct = invested > 0 ? (pnl / invested) * 100 : 0;
               const isExpanded = expandedId === h.id;
               const typeColor = HOLDING_TYPE_COLOR_MAP[h.type] ?? "#708090";
+              const logoKey = h.ticker
+                ? h.country?.toUpperCase() === "AU"
+                  ? `${h.ticker.toUpperCase()}.AX`
+                  : h.ticker.toUpperCase()
+                : null;
+              const logoUrl = logoKey ? stockLogos[logoKey] : undefined;
 
               return (
                 <div key={h.id} className={cn("finance-card overflow-hidden transition-shadow", isExpanded && "ring-1 ring-border")}>
@@ -153,12 +160,22 @@ export function HoldingsTable({
                     className="w-full text-left px-3 sm:px-4 py-3 flex items-center gap-2.5 sm:gap-3 hover:bg-muted/20 transition-colors overflow-hidden"
                   >
                     {/* Icon */}
-                    <div className="h-8 w-8 sm:h-9 sm:w-9 rounded-lg flex items-center justify-center shrink-0"
-                      style={{ backgroundColor: typeColor + "15" }}>
-                      <span className="text-[10px] font-bold font-mono leading-none" style={{ color: typeColor }}>
-                        {h.ticker ? h.ticker.slice(0, 4) : h.name.slice(0, 2).toUpperCase()}
-                      </span>
-                    </div>
+                    {logoUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={logoUrl}
+                        alt=""
+                        className="h-8 w-8 sm:h-9 sm:w-9 rounded-lg object-contain bg-secondary/40 shrink-0"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div className="h-8 w-8 sm:h-9 sm:w-9 rounded-lg flex items-center justify-center shrink-0"
+                        style={{ backgroundColor: typeColor + "15" }}>
+                        <span className="text-[10px] font-bold font-mono leading-none" style={{ color: typeColor }}>
+                          {h.ticker ? h.ticker.slice(0, 4) : h.name.slice(0, 2).toUpperCase()}
+                        </span>
+                      </div>
+                    )}
 
                     {/* Name + meta */}
                     <div className="flex-1 min-w-0">

@@ -65,10 +65,59 @@ export default function PortfolioPage() {
   const [transactions, setTransactions] = useCloudStorage<PortfolioTransaction[]>("portfolio_transactions", []);
   const [txHistoryHoldingId, setTxHistoryHoldingId] = useState<string | null>(null);
 
+  // Ticker → Finnhub logo URL (populated on mount + when new tickers appear)
+  const [stockLogos, setStockLogos] = useCloudStorage<Record<string, string>>(
+    "portfolio_stock_logos",
+    {},
+  );
+
   useEffect(() => {
     setPriceCacheState(getPriceCache());
     setUpdateLog(getUpdateLog());
   }, []);
+
+  // Fetch missing Finnhub logos for holdings with a ticker
+  useEffect(() => {
+    const buildLookupSymbol = (h: PortfolioHolding) => {
+      if (!h.ticker) return null;
+      const upper = h.ticker.toUpperCase();
+      return h.country?.toUpperCase() === "AU" ? `${upper}.AX` : upper;
+    };
+
+    const missing: string[] = [];
+    const seen = new Set<string>();
+    for (const h of holdings) {
+      const key = buildLookupSymbol(h);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      if (!stockLogos[key]) missing.push(key);
+    }
+    if (missing.length === 0) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/stock-logos?symbols=${encodeURIComponent(missing.join(","))}`,
+        );
+        if (!res.ok) return;
+        const data = (await res.json()) as { logos: Record<string, string> };
+        if (cancelled || Object.keys(data.logos ?? {}).length === 0) return;
+        setStockLogos((prev) => {
+          const next = { ...prev };
+          for (const [sym, url] of Object.entries(data.logos)) {
+            if (!next[sym]) next[sym] = url;
+          }
+          return next;
+        });
+      } catch {
+        // silent — table falls back to placeholder icons
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [holdings, stockLogos, setStockLogos]);
 
   const fetchPrices = useCallback(
     async (force = false) => {
@@ -492,6 +541,7 @@ export default function PortfolioPage() {
         totals={totals}
         fundAllocations={fundAllocations}
         priceCache={priceCache}
+        stockLogos={stockLogos}
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
         sortKey={sortKey}
