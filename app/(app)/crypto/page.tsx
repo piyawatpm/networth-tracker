@@ -18,12 +18,14 @@ import {
   isCryptoPricesCacheStale,
   applyLivePrices,
 } from "@/lib/utils/crypto-prices";
+import { resolveTokenSymbols } from "@/lib/utils/crypto-symbol-resolver";
 import type { CryptoHolding } from "@/lib/utils/types";
 import { ECHARTS_COLORS } from "@/lib/utils/echarts";
 import ReactECharts from "echarts-for-react";
 
-import { Settings2, Wifi, WifiOff } from "lucide-react";
+import { Settings2, Wifi, WifiOff, FileText, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { BlurFade } from "@/components/ui/blur-fade";
 import { cn } from "@/lib/utils";
 import { useBinanceWs } from "@/lib/hooks/use-binance-ws";
 import { PerformanceChart } from "@/components/ui/performance-chart";
@@ -51,6 +53,8 @@ export default function CryptoPage() {
 
   // Chart ref for highlight/downplay
   const donutRef = useRef<ReactECharts>(null);
+  // Hidden file input for Replace CSV action
+  const replaceInputRef = useRef<HTMLInputElement>(null);
   const highlightSlice = useCallback((name: string) => {
     donutRef.current?.getEchartsInstance()?.dispatchAction({ type: "highlight", name });
   }, []);
@@ -105,6 +109,37 @@ export default function CryptoPage() {
     () => (csvText ? parseAndComputeHoldings(csvText) : []),
     [csvText],
   );
+
+  // Auto-resolve ticker symbols from CoinGecko for tokens missing a mapping.
+  // Runs once per set of unmapped tokens; ambiguous names pick by market cap.
+  useEffect(() => {
+    if (rawHoldings.length === 0) return;
+    const skipStable = new Set(["CASH", "USD", "USDT", "USDC", "DAI", "BUSD", "TUSD", "FDUSD"]);
+    const unmapped = rawHoldings
+      .map((h) => h.token)
+      .filter((token) => {
+        if (tickerMappings[token]) return false;
+        if (stablecoinTags[token]) return false;
+        return !skipStable.has(token.toUpperCase());
+      });
+    if (unmapped.length === 0) return;
+
+    let cancelled = false;
+    resolveTokenSymbols(unmapped).then((resolved) => {
+      if (cancelled) return;
+      if (Object.keys(resolved).length === 0) return;
+      setTickerMappings((prev) => {
+        const next = { ...prev };
+        for (const [token, symbol] of Object.entries(resolved)) {
+          if (!next[token]) next[token] = symbol;
+        }
+        return next;
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [rawHoldings, tickerMappings, stablecoinTags, setTickerMappings]);
 
   const wsSymbols = useMemo(() => {
     if (rawHoldings.length === 0) return [];
@@ -376,88 +411,119 @@ export default function CryptoPage() {
   // ── Portfolio view ────────────────────────────────────────
   return (
     <div className="space-y-8 overflow-x-hidden">
-      {/* ── Live WebSocket Status ── */}
-      <div className="finance-card px-3 py-4 sm:p-5">
-        <div className="flex items-center gap-2 mb-3">
-          <p className="label-mono">Live Prices</p>
-          <span className={cn(
-            "flex items-center gap-1 text-[10px] font-mono",
-            wsConnected ? "text-income" : "text-muted-foreground/50",
-          )}>
-            {wsConnected ? <Wifi className="h-2.5 w-2.5" /> : <WifiOff className="h-2.5 w-2.5" />}
-            {wsConnected ? "LIVE" : "Connecting..."}
-          </span>
+      {/* ── Action Bar ── */}
+      <BlurFade delay={0}>
+        <div className="flex items-center justify-end gap-2 flex-wrap">
+          <button
+            onClick={refreshPrices}
+            disabled={isRefreshing}
+            className="flex items-center gap-1.5 rounded-full bg-secondary px-3 py-1.5 text-xs font-medium text-secondary-foreground transition-colors hover:bg-secondary/80 disabled:opacity-50 shrink-0"
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")} />
+            <span className="hidden sm:inline">{isRefreshing ? "Fetching..." : "Refresh Prices"}</span>
+            <span className="sm:hidden">{isRefreshing ? "..." : "Refresh"}</span>
+          </button>
+          <button
+            onClick={() => replaceInputRef.current?.click()}
+            className="flex items-center gap-1.5 rounded-full bg-secondary px-3 py-1.5 text-xs font-medium text-secondary-foreground transition-colors hover:bg-secondary/80 shrink-0"
+          >
+            <FileText className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Replace CSV</span>
+            <span className="sm:hidden">CSV</span>
+          </button>
+          <TickerMappingDialog
+            tokens={taggedHoldings.map((h) => h.token)}
+            mappings={tickerMappings}
+            onSave={setTickerMappings}
+            trigger={
+              <Button variant="outline" size="sm" className="gap-1.5 text-xs shrink-0">
+                <Settings2 className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Ticker Mapping</span>
+                <span className="sm:hidden">Tickers</span>
+              </Button>
+            }
+          />
+          <input
+            ref={replaceInputRef}
+            type="file"
+            accept=".csv,text/csv,text/plain,application/vnd.ms-excel"
+            onChange={onFileSelect}
+            className="hidden"
+          />
         </div>
-        <div className="flex flex-wrap gap-1.5">
-          {rawHoldings
-            .filter((h) => !stablecoinTags[h.token])
-            .map((h) => {
-              const mapped = tickerMappings[h.token];
-              const sym = mapped ? `${mapped.toUpperCase()}USDT` : null;
-              const isLive = sym ? !!wsLivePrices[sym] : false;
-              const hasMapping = !!mapped;
-              return (
-                <span
-                  key={h.token}
-                  className={cn(
-                    "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono",
-                    isLive
-                      ? "bg-income/10 text-income"
-                      : hasMapping
-                        ? "bg-accent/10 text-accent"
-                        : "bg-muted text-muted-foreground/50",
-                  )}
-                >
-                  <span className={cn(
-                    "h-1.5 w-1.5 rounded-full shrink-0",
-                    isLive ? "bg-income animate-pulse" : hasMapping ? "bg-accent" : "bg-muted-foreground/30",
-                  )} />
-                  {mapped?.toUpperCase() ?? h.token.slice(0, 6)}
-                </span>
-              );
-            })}
-        </div>
-      </div>
+      </BlurFade>
 
+      {/* ── Performance Chart (single source of the total value) ── */}
+      <BlurFade delay={0.05}>
+        <PerformanceChart
+          label="Crypto Portfolio"
+          currentValue={totalValueConverted}
+          snapshots={cryptoChartSnapshots}
+          isLive={wsSymbols.length > 0}
+          defaultPeriod="1D"
+        />
+      </BlurFade>
+
+      {/* ── Summary Tiles ── */}
       <PriceStatus
-        filteredValueUsd={filteredValueUsd}
         filteredCostUsd={filteredCostUsd}
         filteredPnlUsd={filteredPnlUsd}
         filteredCashUsd={filteredCashUsd}
         pricedHoldings={pricedHoldings}
         filteredHoldings={filteredHoldings}
-        csvUploadedAt={csvUploadedAt}
         allSelected={allSelected}
-        selectedTokens={selectedTokens}
         setSelectedTokens={setSelectedTokens}
-        onFileSelect={onFileSelect}
-        onRefreshPrices={refreshPrices}
-        isRefreshing={isRefreshing}
       />
 
-      {/* Ticker Mapping button */}
-      <div className="flex justify-end">
-        <TickerMappingDialog
-          tokens={taggedHoldings.map((h) => h.token)}
-          mappings={tickerMappings}
-          onSave={setTickerMappings}
-          trigger={
-            <Button variant="outline" size="sm" className="gap-1.5 text-xs">
-              <Settings2 className="h-3.5 w-3.5" />
-              Ticker Mapping
-            </Button>
-          }
-        />
-      </div>
-
-      {/* Performance Chart — TradingView-style with period selector */}
-      <PerformanceChart
-        label="Crypto Portfolio"
-        currentValue={totalValueConverted}
-        snapshots={cryptoChartSnapshots}
-        isLive={wsSymbols.length > 0}
-        defaultPeriod="1D"
-      />
+      {/* ── Live WebSocket Status (moved below overview) ── */}
+      <BlurFade delay={0.1}>
+        <div className="finance-card px-3 py-4 sm:p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <p className="label-mono">Live Prices</p>
+            <span className={cn(
+              "flex items-center gap-1 text-[10px] font-mono",
+              wsConnected ? "text-income" : "text-muted-foreground/50",
+            )}>
+              {wsConnected ? <Wifi className="h-2.5 w-2.5" /> : <WifiOff className="h-2.5 w-2.5" />}
+              {wsConnected ? "LIVE" : "Connecting..."}
+            </span>
+            {csvUploadedAt && (
+              <span className="ml-auto text-[10px] font-mono text-muted-foreground">
+                CSV · {new Date(csvUploadedAt).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" })}
+              </span>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {rawHoldings
+              .filter((h) => !stablecoinTags[h.token])
+              .map((h) => {
+                const mapped = tickerMappings[h.token];
+                const sym = mapped ? `${mapped.toUpperCase()}USDT` : null;
+                const isLive = sym ? !!wsLivePrices[sym] : false;
+                const hasMapping = !!mapped;
+                return (
+                  <span
+                    key={h.token}
+                    className={cn(
+                      "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono",
+                      isLive
+                        ? "bg-income/10 text-income"
+                        : hasMapping
+                          ? "bg-accent/10 text-accent"
+                          : "bg-muted text-muted-foreground/50",
+                    )}
+                  >
+                    <span className={cn(
+                      "h-1.5 w-1.5 rounded-full shrink-0",
+                      isLive ? "bg-income animate-pulse" : hasMapping ? "bg-accent" : "bg-muted-foreground/30",
+                    )} />
+                    {mapped?.toUpperCase() ?? h.token.slice(0, 6)}
+                  </span>
+                );
+              })}
+          </div>
+        </div>
+      </BlurFade>
 
       <HistoryChart
         portfolioHistory={portfolioHistory}

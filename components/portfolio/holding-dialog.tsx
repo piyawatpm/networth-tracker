@@ -44,6 +44,7 @@ interface TickerResult {
   type: string;
   exchange: string;
   country: string;
+  logo?: string;
 }
 
 export function HoldingDialog({ holding, onSave, trigger }: HoldingDialogProps) {
@@ -179,33 +180,30 @@ export function HoldingDialog({ holding, onSave, trigger }: HoldingDialogProps) 
         </DialogHeader>
 
         <div className="grid gap-4 py-2">
-          {/* Ticker search */}
+          {/* Name with search + logo dropdown */}
           <div className="grid gap-1.5 relative">
-            <Label htmlFor="holding-ticker">Search Ticker / Name</Label>
-            <div className="flex gap-2">
-              <div className="flex-1 relative">
-                <Input
-                  id="holding-ticker"
-                  value={ticker}
-                  onChange={(e) => {
-                    const val = e.target.value.toUpperCase();
-                    setTicker(val);
-                    searchTicker(val);
-                  }}
-                  onFocus={() => { if (tickerResults.length > 0) setShowResults(true); }}
-                  placeholder="Search: VAS, AAPL, VOO..."
-                  className="uppercase"
-                  autoComplete="off"
-                />
-                {searching && (
-                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">
-                    searching...
-                  </span>
-                )}
-              </div>
+            <Label htmlFor="holding-name">Name</Label>
+            <div className="relative">
+              <Input
+                id="holding-name"
+                value={name}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setName(val);
+                  searchTicker(val);
+                }}
+                onFocus={() => { if (tickerResults.length > 0) setShowResults(true); }}
+                placeholder="Search: Apple, Vanguard S&P 500..."
+                autoComplete="off"
+              />
+              {searching && (
+                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">
+                  searching...
+                </span>
+              )}
             </div>
 
-            {/* Search results dropdown */}
+            {/* Search results dropdown with logos */}
             {showResults && tickerResults.length > 0 && (
               <div
                 ref={resultsRef}
@@ -216,11 +214,25 @@ export function HoldingDialog({ holding, onSave, trigger }: HoldingDialogProps) 
                     key={`${r.symbol}-${r.exchange}`}
                     type="button"
                     onClick={() => selectTicker(r)}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-secondary/60 transition-colors"
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-secondary/60 transition-colors"
                   >
+                    <span className="h-6 w-6 shrink-0 rounded-full bg-secondary/60 overflow-hidden flex items-center justify-center">
+                      {r.logo ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={r.logo}
+                          alt=""
+                          className="h-full w-full object-contain"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <span className="text-[10px] font-mono text-muted-foreground">
+                          {r.symbol.slice(0, 2)}
+                        </span>
+                      )}
+                    </span>
                     <span className="font-mono text-xs font-semibold w-16 shrink-0">{r.symbol}</span>
                     <span className="text-xs truncate flex-1">{r.name}</span>
-                    <span className="text-[10px] text-muted-foreground shrink-0">{r.type}</span>
                     <span className="text-[10px] text-muted-foreground/50 shrink-0">{r.exchange}</span>
                   </button>
                 ))}
@@ -235,14 +247,16 @@ export function HoldingDialog({ holding, onSave, trigger }: HoldingDialogProps) 
             )}
           </div>
 
-          {/* Name (auto-filled from search or manual) */}
+          {/* Ticker (auto-filled from search, editable) */}
           <div className="grid gap-1.5">
-            <Label htmlFor="holding-name">Name</Label>
+            <Label htmlFor="holding-ticker">Ticker</Label>
             <Input
-              id="holding-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Vanguard S&P 500 ETF"
+              id="holding-ticker"
+              value={ticker}
+              onChange={(e) => setTicker(e.target.value.toUpperCase())}
+              placeholder="e.g. AAPL, VAS"
+              className="uppercase"
+              autoComplete="off"
             />
           </div>
 

@@ -1,11 +1,7 @@
 "use client";
 
-import { useCallback, useRef } from "react";
 import { useCurrency } from "@/components/providers/currency-provider";
-import { getCachedCryptoPrices } from "@/lib/utils/crypto-prices";
 import { BlurFade } from "@/components/ui/blur-fade";
-import { NumberTicker } from "@/components/ui/number-ticker";
-import { FileText, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { CryptoHolding } from "@/lib/utils/types";
 
@@ -21,9 +17,9 @@ function MetricCell({
   className?: string;
 }) {
   return (
-    <div className="flex-1 px-5 py-4 sm:px-6 sm:py-5">
+    <div className="min-w-0 px-4 py-3 sm:px-5 sm:py-4">
       <p className="label-mono mb-1">{label}</p>
-      <p className={cn("text-lg font-semibold tabular-nums", className)}>
+      <p className={cn("text-base sm:text-lg font-semibold tabular-nums truncate", className)}>
         {prefix}
         {value}
       </p>
@@ -32,93 +28,28 @@ function MetricCell({
 }
 
 export function PriceStatus({
-  filteredValueUsd,
   filteredCostUsd,
   filteredPnlUsd,
   filteredCashUsd,
   pricedHoldings,
   filteredHoldings,
-  csvUploadedAt,
   allSelected,
-  selectedTokens,
   setSelectedTokens,
-  onFileSelect,
-  onRefreshPrices,
-  isRefreshing,
 }: {
-  filteredValueUsd: number;
   filteredCostUsd: number;
   filteredPnlUsd: number;
   filteredCashUsd: number;
   pricedHoldings: CryptoHolding[];
   filteredHoldings: CryptoHolding[];
-  csvUploadedAt: number | null;
   allSelected: boolean;
-  selectedTokens: Record<string, boolean>;
   setSelectedTokens: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
-  onFileSelect: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  onRefreshPrices?: () => void;
-  isRefreshing?: boolean;
 }) {
-  const { format, convert, symbol } = useCurrency();
-  const replaceInputRef = useRef<HTMLInputElement>(null);
+  const { format } = useCurrency();
 
   return (
     <>
-      {/* Hero */}
-      <BlurFade delay={0}>
-        <div className="flex items-start justify-between">
-          <div>
-            <p className="label-mono mb-2">CRYPTO PORTFOLIO</p>
-            <div className="display-number">
-              {symbol}
-              <NumberTicker value={convert(filteredValueUsd, "USD")} decimalPlaces={2} />
-            </div>
-            {csvUploadedAt && (
-              <p className="text-xs text-muted-foreground mt-2">
-                CSV: {new Date(csvUploadedAt).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" })}
-                {getCachedCryptoPrices()?.fetchedAt && (
-                  <>
-                    {" \u00b7 Prices: "}
-                    {new Date(getCachedCryptoPrices()!.fetchedAt).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" })}
-                  </>
-                )}
-              </p>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            {onRefreshPrices && (
-              <button
-                onClick={onRefreshPrices}
-                disabled={isRefreshing}
-                className="flex items-center gap-1.5 rounded-full bg-secondary px-3 py-1.5 text-xs font-medium text-secondary-foreground transition-colors hover:bg-secondary/80 disabled:opacity-50"
-              >
-                <RefreshCw className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")} />
-                {isRefreshing ? "Fetching..." : "Refresh Prices"}
-              </button>
-            )}
-            <button
-              onClick={() => replaceInputRef.current?.click()}
-              className="flex items-center gap-1.5 rounded-full bg-secondary px-3 py-1.5 text-xs font-medium text-secondary-foreground transition-colors hover:bg-secondary/80"
-            >
-              <FileText className="h-3.5 w-3.5" />
-              Replace CSV
-            </button>
-          </div>
-          <input
-            ref={replaceInputRef}
-            type="file"
-            accept=".csv,text/csv,text/plain,application/vnd.ms-excel"
-            onChange={onFileSelect}
-            className="hidden"
-          />
-        </div>
-      </BlurFade>
-
-      {/* Metrics tile */}
-      <BlurFade delay={0.06}>
-        <div className="finance-card grid grid-cols-2 divide-y divide-border/60 sm:grid-cols-5 sm:divide-y-0 sm:divide-x">
-          <MetricCell label="Total Value" value={format(filteredValueUsd, "USD")} />
+      <BlurFade delay={0.05}>
+        <div className="finance-card grid grid-cols-2 divide-y divide-border/60 sm:grid-cols-4 sm:divide-y-0 sm:divide-x">
           <MetricCell label="Total Cost" value={format(filteredCostUsd, "USD")} />
           <MetricCell
             label="P&L"

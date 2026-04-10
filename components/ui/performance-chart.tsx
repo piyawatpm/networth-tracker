@@ -10,8 +10,6 @@ import {
   type UTCTimestamp,
   CrosshairMode,
   LineStyle,
-  createSeriesMarkers,
-  type SeriesMarker,
 } from "lightweight-charts";
 import { useTheme } from "next-themes";
 import { useCurrency } from "@/components/providers/currency-provider";
@@ -106,16 +104,18 @@ export function PerformanceChart({
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Area"> | null>(null);
 
-  // Convert + sort snapshots
+  // Convert + sort + dedupe snapshots (lightweight-charts requires strictly ascending time)
   const convertedSnapshots = useMemo(() => {
-    return snapshots
-      .map((s) => {
-        const cur = s.currency ?? "USD";
-        const value = cur !== currency
-          ? Math.round(convert(s.value, cur) * 100) / 100
-          : s.value;
-        return { time: parseToTimestamp(s.date), value };
-      })
+    const byTime = new Map<UTCTimestamp, number>();
+    for (const s of snapshots) {
+      const cur = s.currency ?? "USD";
+      const value = cur !== currency
+        ? Math.round(convert(s.value, cur) * 100) / 100
+        : s.value;
+      // Last write wins for duplicate timestamps
+      byTime.set(parseToTimestamp(s.date), value);
+    }
+    return Array.from(byTime, ([time, value]) => ({ time, value }))
       .sort((a, b) => a.time - b.time);
   }, [snapshots, currency, convert]);
 
@@ -170,11 +170,7 @@ export function PerformanceChart({
     const last = chartData[chartData.length - 1].value;
     const change = last - first;
     const changePct = first > 0 ? (change / first) * 100 : 0;
-    const high = Math.max(...chartData.map((d) => d.value));
-    const low = Math.min(...chartData.map((d) => d.value));
-    const highIdx = chartData.findIndex((d) => d.value === high);
-    const lowIdx = chartData.findIndex((d) => d.value === low);
-    return { first, last, change, changePct, high, low, highIdx, lowIdx };
+    return { first, last, change, changePct };
   }, [chartData]);
 
   const isPositive = (stats?.change ?? 0) >= 0;
@@ -288,7 +284,7 @@ export function PerformanceChart({
     });
   }, [period]);
 
-  // Set data + markers when chartData changes
+  // Set data when chartData changes
   useEffect(() => {
     if (!seriesRef.current || !chartRef.current) return;
     if (chartData.length === 0) {
@@ -296,35 +292,8 @@ export function PerformanceChart({
       return;
     }
     seriesRef.current.setData(chartData);
-
-    // Add high/low markers
-    if (stats && chartData.length > 1) {
-      const markers: SeriesMarker<UTCTimestamp>[] = [];
-      if (stats.highIdx >= 0) {
-        markers.push({
-          time: chartData[stats.highIdx].time,
-          position: "aboveBar",
-          color: isDark ? "#888" : "#666",
-          shape: "arrowDown",
-          text: `${symbol}${stats.high.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-        });
-      }
-      if (stats.lowIdx >= 0 && stats.lowIdx !== stats.highIdx) {
-        markers.push({
-          time: chartData[stats.lowIdx].time,
-          position: "belowBar",
-          color: isDark ? "#888" : "#666",
-          shape: "arrowUp",
-          text: `${symbol}${stats.low.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-        });
-      }
-      try {
-        createSeriesMarkers(seriesRef.current, markers);
-      } catch { /* markers may not be supported in all builds */ }
-    }
-
     chartRef.current.timeScale().fitContent();
-  }, [chartData, stats, isDark, symbol]);
+  }, [chartData]);
 
   const periods: Period[] = ["1D", "1W", "1M", "6M", "1Y"];
   const displayValue = currentValueCurrency
