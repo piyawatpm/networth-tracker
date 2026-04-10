@@ -4,7 +4,6 @@ import { useState, useMemo, useEffect } from "react";
 
 import { cn } from "@/lib/utils";
 import { BlurFade } from "@/components/ui/blur-fade";
-import { NumberTicker } from "@/components/ui/number-ticker";
 import { useCloudStorage } from "@/components/providers/data-provider";
 import { useCurrency } from "@/components/providers/currency-provider";
 import { GoalSection } from "@/components/dashboard/goal-section";
@@ -35,14 +34,14 @@ import type {
   RecurringExpense,
   RecurringIncome,
 } from "@/lib/utils/types";
-import { ArrowUpRight, ArrowDownRight, Wifi } from "lucide-react";
+import { ArrowUpRight, ArrowDownRight } from "lucide-react";
 import { useBinanceWs } from "@/lib/hooks/use-binance-ws";
 import { useFinnhubWs } from "@/lib/hooks/use-finnhub-ws";
 import { applyLivePrices } from "@/lib/utils/crypto-prices";
 import { canAutoUpdate } from "@/lib/utils/prices";
 
 // Sub-components
-import { NetWorthChart } from "./_components/net-worth-chart";
+import { PerformanceChart } from "@/components/ui/performance-chart";
 import { TopMovers } from "./_components/top-movers";
 import {
   UpcomingRecurring,
@@ -252,21 +251,17 @@ export default function DashboardPage() {
   const netWorthNoSuper = normalTotal + cryptoTotal + owedToMe - iOwe;
   const netWorth = includeSuper ? netWorthWithSuper : netWorthNoSuper;
 
-  // Net worth trend — convert snapshots to display currency at render time
-  const nwTrendData = useMemo(() => {
+  // Net worth snapshots for the chart (raw — chart handles conversion)
+  const nwChartSnapshots = useMemo(() => {
     return nwSnapshots.map((s) => {
-      const ext = s as { valueNoSuper?: number; currency?: string; portfolio?: number; crypto?: number };
-      const snapCur = ext.currency ?? "AUD";
-      const fx = (v: number) => snapCur !== currency ? Math.round(convert(v, snapCur) * 100) / 100 : v;
-      const rawNw = includeSuper ? s.value : (ext.valueNoSuper ?? s.value);
+      const ext = s as { valueNoSuper?: number; currency?: string };
       return {
-        date: s.date.slice(5),
-        value: fx(rawNw),
-        portfolio: ext.portfolio != null ? fx(ext.portfolio) : undefined,
-        crypto: ext.crypto != null ? fx(ext.crypto) : undefined,
+        date: s.date,
+        value: includeSuper ? s.value : (ext.valueNoSuper ?? s.value),
+        currency: ext.currency ?? "USD",
       };
     });
-  }, [nwSnapshots, includeSuper, currency, convert]);
+  }, [nwSnapshots, includeSuper]);
 
   // ---- Period-filtered income/expenses ------------------------------------
 
@@ -445,26 +440,12 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* 1. NET WORTH HERO */}
+      {/* 1. NET WORTH PERFORMANCE CHART */}
       <BlurFade delay={0}>
-        <section className="flex items-start justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2 mb-2">
-              <p className="label-mono">Net Worth</p>
-              {(stockWsConnected || cryptoWsConnected) && (
-                <span className="flex items-center gap-1 text-[10px] font-mono text-income">
-                  <Wifi className="h-2.5 w-2.5" />
-                  LIVE
-                </span>
-              )}
-            </div>
-            <div className="display-number">
-              <NumberTicker value={netWorth} prefix={symbol} decimalPlaces={0} className="display-number" />
-            </div>
-          </div>
+        <div className="flex items-center justify-end mb-2">
           <button
             onClick={() => setIncludeSuper(!includeSuper)}
-            className="flex items-center gap-2.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground mt-1"
+            className="flex items-center gap-2.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
           >
             <span className="hidden sm:inline">Include Super</span>
             <span className="sm:hidden">Super</span>
@@ -472,11 +453,15 @@ export default function DashboardPage() {
               <span className={cn("inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform", includeSuper ? "translate-x-[18px]" : "translate-x-[3px]")} />
             </span>
           </button>
-        </section>
+        </div>
+        <PerformanceChart
+          label="Net Worth"
+          currentValue={netWorth}
+          snapshots={nwChartSnapshots}
+          isLive={stockWsConnected || cryptoWsConnected}
+          defaultPeriod="1D"
+        />
       </BlurFade>
-
-      {/* 2. NET WORTH TREND */}
-      <NetWorthChart nwTrendData={nwTrendData} format={format} includeSuper={includeSuper} delay={D} />
 
       {/* 3. ASSET BREAKDOWN + WORLD DISTRIBUTION + MONEY FLOW */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-5">

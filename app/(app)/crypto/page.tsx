@@ -26,17 +26,17 @@ import { Settings2, Wifi, WifiOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useBinanceWs } from "@/lib/hooks/use-binance-ws";
+import { PerformanceChart } from "@/components/ui/performance-chart";
 import { UploadSection } from "./_components/upload-section";
 import { PriceStatus } from "./_components/price-status";
 import { HistoryChart } from "./_components/history-chart";
 import { CryptoDonut } from "./_components/crypto-donut";
 import { HoldingsBreakdown } from "./_components/holdings-breakdown";
-import { CryptoValueTrend } from "./_components/crypto-value-trend";
 import { TickerMappingDialog } from "./_components/ticker-mapping-dialog";
 
 export default function CryptoPage() {
   const [csvText, setCsvText] = useCloudStorage<string>("crypto_csv_text", "");
-  const { convert, currency, symbol, format } = useCurrency();
+  const { convert } = useCurrency();
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
 
@@ -242,12 +242,14 @@ export default function CryptoPage() {
   // Crypto snapshots — no longer auto-saved client-side.
   // Snapshots are created by: manual snapshot button (📷) or daily cron.
 
-  const cryptoTrendData = useMemo(() => {
-    return cryptoSnapshots.map((s) => {
-      const val = s.currency !== currency ? Math.round(convert(s.value, s.currency) * 100) / 100 : s.value;
-      return { date: s.date.slice(5), value: val };
-    });
-  }, [cryptoSnapshots, currency, convert]);
+  // Snapshots for PerformanceChart (raw — chart handles conversion)
+  const cryptoChartSnapshots = useMemo(() => {
+    return cryptoSnapshots.map((s) => ({
+      date: s.date,
+      value: s.value,
+      currency: s.currency ?? "USD",
+    }));
+  }, [cryptoSnapshots]);
 
   // Interactive legend -- tracks which tokens are visible
   const [selectedTokens, setSelectedTokens] = useState<Record<string, boolean>>({});
@@ -448,10 +450,14 @@ export default function CryptoPage() {
         />
       </div>
 
-      {/* Value Trend — daily snapshots */}
-      {cryptoTrendData.length > 0 && (
-        <CryptoValueTrend data={cryptoTrendData} isDark={isDark} symbol={symbol} format={format} />
-      )}
+      {/* Performance Chart — TradingView-style with period selector */}
+      <PerformanceChart
+        label="Crypto Portfolio"
+        currentValue={totalValueConverted}
+        snapshots={cryptoChartSnapshots}
+        isLive={wsSymbols.length > 0}
+        defaultPeriod="1D"
+      />
 
       <HistoryChart
         portfolioHistory={portfolioHistory}

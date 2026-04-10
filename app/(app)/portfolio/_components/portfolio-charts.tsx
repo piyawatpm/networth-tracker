@@ -1,22 +1,14 @@
 "use client";
 
 import { useMemo } from "react";
-import { useTheme } from "next-themes";
 import type { PortfolioHolding, HoldingType } from "@/lib/utils/types";
 import { HOLDING_TYPE_LABELS, CHART_COLORS } from "@/lib/utils/constants";
 import { BlurFade } from "@/components/ui/blur-fade";
 import { InteractiveDonut } from "@/components/ui/interactive-donut";
-import ReactECharts from "echarts-for-react";
-import {
-  ECHARTS_COLORS,
-  formatAxisValue,
-  getCartesianBaseOption,
-} from "@/lib/utils/echarts";
-import { cn } from "@/lib/utils";
-import { useCurrency } from "@/components/providers/currency-provider";
+import { ECHARTS_COLORS } from "@/lib/utils/echarts";
 import { LookThroughView } from "@/components/portfolio/look-through-view";
 import type { FundAllocations } from "@/components/portfolio/fund-breakdown";
-import { HOLDING_TYPE_COLOR_MAP, type TrendPeriod, type PortfolioTotals } from "./portfolio-constants";
+import { HOLDING_TYPE_COLOR_MAP, type PortfolioTotals } from "./portfolio-constants";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -24,9 +16,6 @@ import { HOLDING_TYPE_COLOR_MAP, type TrendPeriod, type PortfolioTotals } from "
 
 interface PortfolioChartsProps {
   filteredHoldings: PortfolioHolding[];
-  trendData: { date: string; value: number }[];
-  trendPeriod: TrendPeriod;
-  setTrendPeriod: (p: TrendPeriod) => void;
   totals: PortfolioTotals;
   fundAllocations: FundAllocations;
   format: (value: number, currency?: string) => string;
@@ -40,70 +29,12 @@ interface PortfolioChartsProps {
 
 export function PortfolioCharts({
   filteredHoldings,
-  trendData,
-  trendPeriod,
-  setTrendPeriod,
   totals,
   fundAllocations,
   format,
   convert,
   baseDelay,
 }: PortfolioChartsProps) {
-  const { resolvedTheme } = useTheme();
-  const isDark = resolvedTheme === "dark";
-  const { symbol } = useCurrency();
-
-  // ── Trend chart option ──
-  const trendChartOption = useMemo(() => {
-    const base = getCartesianBaseOption(isDark, symbol);
-    return {
-      ...base,
-      grid: { ...base.grid, left: 56 },
-      xAxis: {
-        ...base.xAxis,
-        type: "category" as const,
-        data: trendData.map((d) => d.date),
-        boundaryGap: false,
-      },
-      yAxis: {
-        ...base.yAxis,
-        type: "value" as const,
-        axisLabel: {
-          ...base.yAxis.axisLabel,
-          formatter: formatAxisValue,
-        },
-      },
-      tooltip: {
-        ...base.tooltip,
-        trigger: "axis" as const,
-      },
-      series: [
-        {
-          type: "line" as const,
-          data: trendData.map((d) => d.value),
-          smooth: true,
-          showSymbol: false,
-          lineStyle: { width: 2, color: ECHARTS_COLORS[0] },
-          itemStyle: { color: ECHARTS_COLORS[0] },
-          areaStyle: {
-            opacity: 0.15,
-            color: {
-              type: "linear" as const,
-              x: 0,
-              y: 0,
-              x2: 0,
-              y2: 1,
-              colorStops: [
-                { offset: 0, color: ECHARTS_COLORS[0] },
-                { offset: 1, color: "transparent" },
-              ],
-            },
-          },
-        },
-      ],
-    };
-  }, [trendData, isDark]);
-
   // ── Allocation by type ──
   const allocationData = useMemo(() => {
     const byType: Record<string, number> = {};
@@ -165,45 +96,6 @@ export function PortfolioCharts({
 
   return (
     <>
-      {/* ── Value Trend Chart ── */}
-      <BlurFade delay={baseDelay * 2}>
-        <div className="finance-card px-3 py-4 sm:p-6">
-          <div className="mb-4 flex items-center justify-between">
-            <p className="label-mono">Value Trend</p>
-            <div className="flex items-center gap-1">
-              {(["1W", "1M", "3M", "All"] as TrendPeriod[]).map((p) => (
-                <button
-                  key={p}
-                  onClick={() => setTrendPeriod(p)}
-                  className={cn(
-                    "rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors",
-                    trendPeriod === p
-                      ? "bg-foreground/[0.08] text-foreground"
-                      : "text-muted-foreground hover:text-foreground hover:bg-foreground/[0.03]"
-                  )}
-                >
-                  {p}
-                </button>
-              ))}
-            </div>
-          </div>
-          {trendData.length > 1 ? (
-            <ReactECharts
-              option={trendChartOption}
-              style={{ height: 192, width: "100%" }}
-            />
-          ) : (
-            <div className="flex h-48 items-center justify-center">
-              <p className="text-sm text-muted-foreground/50">
-                {trendData.length === 1
-                  ? "Come back tomorrow to see your trend line"
-                  : "Add holdings to start tracking value over time"}
-              </p>
-            </div>
-          )}
-        </div>
-      </BlurFade>
-
       {/* ── Charts Section (3-column) ── */}
       {filteredHoldings.length > 0 && (
         <div className="grid gap-6 md:grid-cols-3">

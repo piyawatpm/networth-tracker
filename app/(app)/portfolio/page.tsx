@@ -18,19 +18,18 @@ import {
 } from "@/lib/utils/prices";
 import { cn } from "@/lib/utils";
 import { BlurFade } from "@/components/ui/blur-fade";
-import { NumberTicker } from "@/components/ui/number-ticker";
 import { Button } from "@/components/ui/button";
 import { HoldingDialog } from "@/components/portfolio/holding-dialog";
 import type { FundAllocations } from "@/components/portfolio/fund-breakdown";
-import { Plus, Download, Wifi, WifiOff } from "lucide-react";
+import { Plus, Download } from "lucide-react";
 import { useFinnhubWs } from "@/lib/hooks/use-finnhub-ws";
+import { PerformanceChart } from "@/components/ui/performance-chart";
 
 import { PortfolioCharts } from "./_components/portfolio-charts";
 import { HoldingsTable } from "./_components/holdings-table";
 import { PriceUpdateStatus } from "./_components/price-update-status";
 import {
   type SortKey,
-  type TrendPeriod,
   type PortfolioSnapshot,
   exportPortfolioXls,
 } from "./_components/portfolio-constants";
@@ -56,7 +55,6 @@ export default function PortfolioPage() {
   const [accountFilter, setAccountFilter] = useState<AccountType | "all">("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("value");
-  const [trendPeriod, setTrendPeriod] = useState<TrendPeriod>("All");
   const [editingValueId, setEditingValueId] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState("");
   const [priceCache, setPriceCacheState] = useState<PriceCache>({});
@@ -303,38 +301,18 @@ export default function PortfolioPage() {
   // Portfolio snapshots — no longer auto-saved client-side.
   // Snapshots are created by: manual snapshot button (📷) or daily cron.
 
-  const trendData = useMemo(() => {
-    let filtered = snapshots;
-
-    if (trendPeriod !== "All") {
-      const now = new Date();
-      let cutoff: Date;
-      switch (trendPeriod) {
-        case "1W":
-          cutoff = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-          break;
-        case "1M":
-          cutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-          break;
-        case "3M":
-          cutoff = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
-          break;
-        default:
-          cutoff = new Date(0);
-      }
-      const cutoffStr = cutoff.toISOString().slice(0, 10);
-      filtered = snapshots.filter((s) => s.date >= cutoffStr);
-    }
-
-    return filtered.map((s) => {
-      const rawValue = includeSuper ? s.valueWithSuper : s.value;
-      const snapCurrency = (s as { currency?: string }).currency ?? "AUD";
-      if (snapCurrency !== currency) {
-        return { date: s.date.slice(5), value: Math.round(convert(rawValue, snapCurrency) * 100) / 100 };
-      }
-      return { date: s.date.slice(5), value: rawValue };
+  // Snapshots for the new PerformanceChart (raw — chart handles conversion)
+  const portfolioChartSnapshots = useMemo(() => {
+    return snapshots.map((s) => {
+      const ext = s as { valueWithSuper?: number; currency?: string };
+      return {
+        date: s.date,
+        value: includeSuper ? (ext.valueWithSuper ?? s.value) : s.value,
+        currency: ext.currency ?? "USD",
+      };
     });
-  }, [snapshots, includeSuper, trendPeriod, currency, convert]);
+  }, [snapshots, includeSuper]);
+
 
   function handleTransaction(tx: PortfolioTransaction) {
     setTransactions((prev) => [tx, ...prev]);
@@ -399,81 +377,59 @@ export default function PortfolioPage() {
 
   return (
     <div className="space-y-8 overflow-x-hidden">
-      {/* ── Hero ── */}
+      {/* ── Action Bar ── */}
       <BlurFade delay={0}>
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 mb-2">
-              <p className="label-mono">Portfolio</p>
-              {wsSymbols.length > 0 && (
-                <span className={cn(
-                  "flex items-center gap-1 text-[10px] font-mono",
-                  wsConnected ? "text-income" : "text-muted-foreground/50",
-                )}>
-                  {wsConnected ? <Wifi className="h-2.5 w-2.5" /> : <WifiOff className="h-2.5 w-2.5" />}
-                  {wsConnected ? "LIVE" : "Connecting..."}
-                </span>
+        <div className="flex items-center justify-end gap-2 flex-wrap">
+          <button
+            onClick={() => setIncludeSuper(!includeSuper)}
+            className="flex items-center gap-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground shrink-0"
+          >
+            <span>Super</span>
+            <span
+              className={cn(
+                "relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors",
+                includeSuper ? "bg-income" : "bg-border"
               )}
-            </div>
-            <div className="display-number">
-              {totals.totalValue > 0 ? (
-                <NumberTicker
-                  value={totals.totalValue}
-                  prefix={symbol}
-                  decimalPlaces={0}
-                />
-              ) : (
-                <span>{symbol}0</span>
-              )}
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 flex-wrap">
-            {/* Include Super Toggle */}
-            <button
-              onClick={() => setIncludeSuper(!includeSuper)}
-              className="flex items-center gap-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground shrink-0"
             >
-              <span>Super</span>
               <span
                 className={cn(
-                  "relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors",
-                  includeSuper ? "bg-income" : "bg-border"
+                  "inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform",
+                  includeSuper ? "translate-x-[18px]" : "translate-x-[3px]"
                 )}
-              >
-                <span
-                  className={cn(
-                    "inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform",
-                    includeSuper ? "translate-x-[18px]" : "translate-x-[3px]"
-                  )}
-                />
-              </span>
-            </button>
-
-            {/* Export XLS */}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleExportXls}
-              className="gap-1.5 shrink-0"
-            >
-              <Download className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">Export</span>
-            </Button>
-
-            {/* Add Holding */}
-            <HoldingDialog
-              onSave={handleSave}
-              trigger={
-                <Button className="gap-1.5 rounded-full px-4 shrink-0">
-                  <Plus className="h-4 w-4" />
-                  <span className="hidden sm:inline">Add Holding</span>
-                  <span className="sm:hidden">Add</span>
-                </Button>
-              }
-            />
-          </div>
+              />
+            </span>
+          </button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleExportXls}
+            className="gap-1.5 shrink-0"
+          >
+            <Download className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Export</span>
+          </Button>
+          <HoldingDialog
+            onSave={handleSave}
+            trigger={
+              <Button className="gap-1.5 rounded-full px-4 shrink-0">
+                <Plus className="h-4 w-4" />
+                <span className="hidden sm:inline">Add Holding</span>
+                <span className="sm:hidden">Add</span>
+              </Button>
+            }
+          />
         </div>
+      </BlurFade>
+
+      {/* ── Performance Chart ── */}
+      <BlurFade delay={DELAY}>
+        <PerformanceChart
+          label="Portfolio"
+          currentValue={totals.totalValue}
+          snapshots={portfolioChartSnapshots}
+          isLive={wsSymbols.length > 0 && wsConnected}
+          defaultPeriod="1D"
+        />
       </BlurFade>
 
       {/* ── Summary Tiles ── */}
@@ -518,12 +474,9 @@ export default function PortfolioPage() {
         </div>
       </BlurFade>
 
-      {/* ── Charts (trend, donuts, broker, look-through) ── */}
+      {/* ── Charts (donuts, broker, look-through) ── */}
       <PortfolioCharts
         filteredHoldings={filteredHoldings}
-        trendData={trendData}
-        trendPeriod={trendPeriod}
-        setTrendPeriod={setTrendPeriod}
         totals={totals}
         fundAllocations={fundAllocations}
         format={format}
