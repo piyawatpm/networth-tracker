@@ -8,6 +8,8 @@ import {
   type IChartApi,
   type ISeriesApi,
   type UTCTimestamp,
+  type MouseEventParams,
+  type Time,
   CrosshairMode,
   LineStyle,
 } from "lightweight-charts";
@@ -82,6 +84,28 @@ function parseToTimestamp(s: string): UTCTimestamp {
   return Math.floor(new Date(s.replace(" ", "T")).getTime() / 1000) as UTCTimestamp;
 }
 
+/** Format a hovered timestamp based on the active period granularity. */
+function formatHoverTime(time: UTCTimestamp, period: Period): string {
+  const date = new Date((time as number) * 1000);
+  if (period === "1D") {
+    return date.toLocaleTimeString("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+  }
+  if (period === "1W" || period === "1M") {
+    return date.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+    });
+  }
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    year: "numeric",
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -99,6 +123,11 @@ export function PerformanceChart({
   const isDark = resolvedTheme === "dark";
   const { format, convert, currency, symbol } = useCurrency();
   const [period, setPeriod] = useState<Period>(defaultPeriod);
+  const [hoverInfo, setHoverInfo] = useState<{
+    value: number;
+    time: UTCTimestamp;
+    x: number;
+  } | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -202,12 +231,11 @@ export function PerformanceChart({
         horzLines: { visible: false },
       },
       rightPriceScale: {
-        borderVisible: false,
-        scaleMargins: { top: 0.15, bottom: 0.1 },
+        visible: false,
       },
       timeScale: {
         borderVisible: false,
-        timeVisible: period === "1D",
+        timeVisible: true,
         secondsVisible: false,
         fixLeftEdge: true,
         fixRightEdge: true,
@@ -215,16 +243,14 @@ export function PerformanceChart({
       crosshair: {
         mode: CrosshairMode.Magnet,
         vertLine: {
-          color: isDark ? "#555" : "#aaa",
+          color: isDark ? "#a3e635" : "#65a30d",
           width: 1,
-          style: LineStyle.Dashed,
-          labelBackgroundColor: isDark ? "#2a2a2a" : "#f4f3ed",
+          style: LineStyle.Solid,
+          labelVisible: false,
         },
         horzLine: {
-          color: isDark ? "#555" : "#aaa",
-          width: 1,
-          style: LineStyle.Dashed,
-          labelBackgroundColor: isDark ? "#2a2a2a" : "#f4f3ed",
+          visible: false,
+          labelVisible: false,
         },
       },
       handleScale: false,
@@ -250,6 +276,27 @@ export function PerformanceChart({
     chartRef.current = chart;
     seriesRef.current = series;
 
+    // Crosshair tracking — drives the header value swap + time overlay
+    const handleCrosshair = (param: MouseEventParams<Time>) => {
+      if (!param.time || !param.point) {
+        setHoverInfo(null);
+        return;
+      }
+      const seriesInstance = seriesRef.current;
+      if (!seriesInstance) return;
+      const data = param.seriesData.get(seriesInstance);
+      if (!data || !("value" in data) || typeof data.value !== "number") {
+        setHoverInfo(null);
+        return;
+      }
+      setHoverInfo({
+        value: data.value,
+        time: param.time as UTCTimestamp,
+        x: param.point.x,
+      });
+    };
+    chart.subscribeCrosshairMove(handleCrosshair);
+
     // Handle resize
     const handleResize = () => {
       if (containerRef.current && chartRef.current) {
@@ -260,6 +307,7 @@ export function PerformanceChart({
 
     return () => {
       window.removeEventListener("resize", handleResize);
+      chart.unsubscribeCrosshairMove(handleCrosshair);
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
@@ -273,15 +321,9 @@ export function PerformanceChart({
     seriesRef.current.applyOptions({ lineColor, topColor, bottomColor });
   }, [lineColor, topColor, bottomColor]);
 
-  // Update timeScale visibility based on period
+  // Clear stale hover info when switching periods
   useEffect(() => {
-    if (!chartRef.current) return;
-    chartRef.current.applyOptions({
-      timeScale: {
-        timeVisible: period === "1D",
-        secondsVisible: false,
-      },
-    });
+    setHoverInfo(null);
   }, [period]);
 
   // Set data when chartData changes
@@ -296,9 +338,13 @@ export function PerformanceChart({
   }, [chartData]);
 
   const periods: Period[] = ["1D", "1W", "1M", "6M", "1Y"];
-  const displayValue = currentValueCurrency
+  const liveValue = currentValueCurrency
     ? convert(currentValue, currentValueCurrency)
     : currentValue;
+  // When hovering, display the value at the crosshair; the hover value comes
+  // from the already-converted series data so no extra conversion is needed.
+  const displayValue = hoverInfo ? hoverInfo.value : liveValue;
+  const hoverTimeLabel = hoverInfo ? formatHoverTime(hoverInfo.time, period) : null;
 
   return (
     <div className="finance-card px-4 py-5 sm:p-6">
@@ -316,28 +362,46 @@ export function PerformanceChart({
           </div>
           <div className="flex items-baseline gap-2 flex-wrap">
             <div className="display-number">
-              <NumberTicker value={displayValue} prefix={symbol} decimalPlaces={2} />
+              {hoverInfo ? (
+                <span>
+                  {symbol}
+                  {displayValue.toLocaleString("en-US", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </span>
+              ) : (
+                <NumberTicker value={displayValue} prefix={symbol} decimalPlaces={2} />
+              )}
             </div>
             <span className="text-sm font-mono uppercase tracking-wide text-muted-foreground">
               {currency}
             </span>
           </div>
-          {stats && (
+          {hoverInfo ? (
             <div className="flex items-center gap-1.5 mt-1.5">
-              <span className="text-xs text-muted-foreground">{PNL_LABELS[period]}</span>
-              <span className={cn(
-                "text-xs font-semibold tabular-nums",
-                isPositive ? "text-income" : "text-expense",
-              )}>
-                {isPositive ? "+" : ""}{format(stats.change)}
-              </span>
-              <span className={cn(
-                "text-[10px] font-mono tabular-nums",
-                isPositive ? "text-income" : "text-expense",
-              )}>
-                ({isPositive ? "+" : ""}{stats.changePct.toFixed(2)}%)
+              <span className="text-xs font-mono text-muted-foreground tabular-nums">
+                {hoverTimeLabel}
               </span>
             </div>
+          ) : (
+            stats && (
+              <div className="flex items-center gap-1.5 mt-1.5">
+                <span className="text-xs text-muted-foreground">{PNL_LABELS[period]}</span>
+                <span className={cn(
+                  "text-xs font-semibold tabular-nums",
+                  isPositive ? "text-income" : "text-expense",
+                )}>
+                  {isPositive ? "+" : ""}{format(stats.change)}
+                </span>
+                <span className={cn(
+                  "text-[10px] font-mono tabular-nums",
+                  isPositive ? "text-income" : "text-expense",
+                )}>
+                  ({isPositive ? "+" : ""}{stats.changePct.toFixed(2)}%)
+                </span>
+              </div>
+            )
           )}
         </div>
 
@@ -362,7 +426,20 @@ export function PerformanceChart({
 
       {/* Chart container */}
       {chartData.length > 1 ? (
-        <div ref={containerRef} style={{ height, width: "100%" }} />
+        <div className="relative">
+          <div ref={containerRef} style={{ height, width: "100%" }} />
+          {hoverInfo && hoverTimeLabel && (
+            <div
+              className="pointer-events-none absolute top-1 z-10 rounded bg-background/85 px-1.5 py-0.5 text-[10px] font-mono text-foreground backdrop-blur-sm"
+              style={{
+                left: hoverInfo.x,
+                transform: "translateX(-50%)",
+              }}
+            >
+              {hoverTimeLabel}
+            </div>
+          )}
+        </div>
       ) : (
         <div className="flex items-center justify-center" style={{ height }}>
           <p className="text-sm text-muted-foreground/50">
