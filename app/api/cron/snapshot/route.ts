@@ -179,7 +179,7 @@ export async function GET(request: Request) {
       .reduce((s, h) => s + toUsd(h.currentValue ?? 0, h.currency ?? "AUD"), 0);
 
     if (portfolioTotal > 0) {
-      const newSnapshots = [...portfolioSnapshots.slice(-2159), { date: sydneyTime, value: portfolioNoSuper, valueWithSuper: portfolioTotal, currency: "USD" }];
+      const newSnapshots = [...portfolioSnapshots, { date: sydneyTime, value: portfolioNoSuper, valueWithSuper: portfolioTotal, currency: "USD" }];
       updates.push({ key: "portfolio_snapshots", value: JSON.stringify(newSnapshots), updated_at: now });
       log.push(`Portfolio snapshot: w/super=$${portfolioTotal.toFixed(0)} no-super=$${portfolioNoSuper.toFixed(0)} USD`);
     } else {
@@ -369,7 +369,7 @@ export async function GET(request: Request) {
     if (cryptoTotalUsd > 0) {
       updates.push({
         key: "crypto_snapshots",
-        value: JSON.stringify([...cryptoSnapshots.slice(-2159), { date: sydneyTime, value: cryptoTotalUsd, currency: "USD" }]),
+        value: JSON.stringify([...cryptoSnapshots, { date: sydneyTime, value: cryptoTotalUsd, currency: "USD" }]),
         updated_at: now,
       });
       log.push(`Crypto snapshot: $${cryptoTotalUsd.toFixed(0)} USD`);
@@ -395,7 +395,7 @@ export async function GET(request: Request) {
     // Net worth snapshot — append new entry each run
     updates.push({
       key: "networth_snapshots",
-      value: JSON.stringify([...nwSnapshots.slice(-2159), { date: sydneyTime, value: netWorth, valueNoSuper: netWorthNoSuper, currency: "USD", portfolio: portfolioTotal, crypto: cryptoTotalUsd }]),
+      value: JSON.stringify([...nwSnapshots, { date: sydneyTime, value: netWorth, valueNoSuper: netWorthNoSuper, currency: "USD", portfolio: portfolioTotal, crypto: cryptoTotalUsd }]),
       updated_at: now,
     });
     log.push(`Net worth: $${netWorth.toFixed(0)} (portfolio=$${portfolioTotal.toFixed(0)} crypto=$${cryptoTotalUsd.toFixed(0)} owed=$${owedToMe.toFixed(0)} debt=$${iOwe.toFixed(0)}) USD`);
