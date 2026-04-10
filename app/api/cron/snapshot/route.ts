@@ -172,14 +172,14 @@ export async function GET(request: Request) {
     const portfolioNoSuper = holdings
       .filter((h) => h.type !== "savings" && h.accountType !== "super")
       .reduce((s, h) => s + toUsd(h.currentValue ?? 0, h.currency ?? "AUD"), 0);
-    const hasPortfolioToday = portfolioSnapshots.some((s) => s.date === today);
 
-    if (!hasPortfolioToday && portfolioTotal > 0) {
-      const newSnapshots = [...portfolioSnapshots.slice(-89), { date: today, value: portfolioNoSuper, valueWithSuper: portfolioTotal, currency: "USD" }];
+    if (portfolioTotal > 0) {
+      const withoutToday = portfolioSnapshots.filter((s) => s.date !== today);
+      const newSnapshots = [...withoutToday.slice(-89), { date: today, value: portfolioNoSuper, valueWithSuper: portfolioTotal, currency: "USD" }];
       updates.push({ key: "portfolio_snapshots", value: JSON.stringify(newSnapshots), updated_at: now });
       log.push(`Portfolio snapshot: w/super=$${portfolioTotal.toFixed(0)} no-super=$${portfolioNoSuper.toFixed(0)} USD`);
     } else {
-      log.push(`Portfolio snapshot: ${hasPortfolioToday ? "already exists" : "no holdings"}`);
+      log.push(`Portfolio snapshot: no holdings`);
     }
 
     // ── 2. Net worth snapshot ──
@@ -361,12 +361,12 @@ export async function GET(request: Request) {
       } catch { /* silent */ }
     }
 
-    // Crypto snapshot
-    const hasCryptoToday = cryptoSnapshots.some((s) => s.date === today);
-    if (!hasCryptoToday && cryptoTotalUsd > 0) {
+    // Crypto snapshot — update today's entry with latest prices
+    if (cryptoTotalUsd > 0) {
+      const withoutToday = cryptoSnapshots.filter((s) => s.date !== today);
       updates.push({
         key: "crypto_snapshots",
-        value: JSON.stringify([...cryptoSnapshots.slice(-89), { date: today, value: cryptoTotalUsd, currency: "USD" }]),
+        value: JSON.stringify([...withoutToday.slice(-89), { date: today, value: cryptoTotalUsd, currency: "USD" }]),
         updated_at: now,
       });
       log.push(`Crypto snapshot: $${cryptoTotalUsd.toFixed(0)} USD`);
@@ -389,15 +389,14 @@ export async function GET(request: Request) {
     const netWorth = portfolioTotal + cryptoTotalUsd + owedToMe - iOwe;
     const netWorthNoSuper = portfolioNoSuper + cryptoTotalUsd + owedToMe - iOwe;
 
-    const hasNwToday = nwSnapshots.some((s) => s.date === today);
-    if (!hasNwToday) {
-      updates.push({
-        key: "networth_snapshots",
-        value: JSON.stringify([...nwSnapshots.slice(-89), { date: today, value: netWorth, valueNoSuper: netWorthNoSuper, currency: "USD", portfolio: portfolioTotal, crypto: cryptoTotalUsd }]),
-        updated_at: now,
-      });
-      log.push(`Net worth: $${netWorth.toFixed(0)} (portfolio=$${portfolioTotal.toFixed(0)} crypto=$${cryptoTotalUsd.toFixed(0)} owed=$${owedToMe.toFixed(0)} debt=$${iOwe.toFixed(0)}) USD`);
-    }
+    // Net worth snapshot — update today's entry with latest values
+    const withoutNwToday = nwSnapshots.filter((s) => s.date !== today);
+    updates.push({
+      key: "networth_snapshots",
+      value: JSON.stringify([...withoutNwToday.slice(-89), { date: today, value: netWorth, valueNoSuper: netWorthNoSuper, currency: "USD", portfolio: portfolioTotal, crypto: cryptoTotalUsd }]),
+      updated_at: now,
+    });
+    log.push(`Net worth: $${netWorth.toFixed(0)} (portfolio=$${portfolioTotal.toFixed(0)} crypto=$${cryptoTotalUsd.toFixed(0)} owed=$${owedToMe.toFixed(0)} debt=$${iOwe.toFixed(0)}) USD`);
 
     // ── Write updates ──
     if (updates.length > 0) {
