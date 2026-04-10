@@ -388,17 +388,46 @@ export default function CryptoPage() {
               {wsConnected ? "LIVE" : "Connecting..."}
             </span>
           </div>
-          <p className="text-xs text-muted-foreground tabular-nums">
-            {Object.keys(wsLivePrices).length} streams
-          </p>
         </div>
-        <p className="text-2xl sm:text-3xl font-bold tabular-nums mb-2">
+        <p className="text-2xl sm:text-3xl font-bold tabular-nums mb-1">
           {format(totalValueConverted)}
         </p>
+
+        {/* Stream status — which coins are live vs not */}
+        <div className="flex flex-wrap gap-1.5 mb-3">
+          {rawHoldings
+            .filter((h) => !stablecoinTags[h.token])
+            .map((h) => {
+              const mapped = tickerMappings[h.token];
+              const sym = mapped ? `${mapped.toUpperCase()}USDT` : null;
+              const isLive = sym ? !!wsLivePrices[sym] : false;
+              const hasMapping = !!mapped;
+              return (
+                <span
+                  key={h.token}
+                  className={cn(
+                    "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono",
+                    isLive
+                      ? "bg-income/10 text-income"
+                      : hasMapping
+                        ? "bg-accent/10 text-accent"
+                        : "bg-muted text-muted-foreground/50",
+                  )}
+                >
+                  <span className={cn(
+                    "h-1.5 w-1.5 rounded-full shrink-0",
+                    isLive ? "bg-income animate-pulse" : hasMapping ? "bg-accent" : "bg-muted-foreground/30",
+                  )} />
+                  {mapped?.toUpperCase() ?? h.token.slice(0, 6)}
+                </span>
+              );
+            })}
+        </div>
+
         <LiveChart
           value={totalValueConverted}
           interval={3000}
-          height={200}
+          height={300}
           symbol={symbol}
         />
       </div>
