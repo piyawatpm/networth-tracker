@@ -41,7 +41,14 @@ import { applyLivePrices } from "@/lib/utils/crypto-prices";
 import { canAutoUpdate } from "@/lib/utils/prices";
 
 // Sub-components
-import { PerformanceChart } from "@/components/ui/performance-chart";
+import { PerformanceChart, type StackedCategory } from "@/components/ui/performance-chart";
+
+// Net worth stacked-area categories (ordered bottom → top in the chart)
+const NW_STACKED_CATEGORIES: StackedCategory[] = [
+  { key: "portfolio", label: "Portfolio", colorLight: "#4d7cc7", colorDark: "#6ea0e0" },
+  { key: "crypto", label: "Crypto", colorLight: "#d4a033", colorDark: "#e8b94a" },
+  { key: "other", label: "Other", colorLight: "#2ea598", colorDark: "#4fc1b4" },
+];
 import { TopMovers } from "./_components/top-movers";
 import {
   UpcomingRecurring,
@@ -251,14 +258,35 @@ export default function DashboardPage() {
   const netWorthNoSuper = normalTotal + cryptoTotal + owedToMe - iOwe;
   const netWorth = includeSuper ? netWorthWithSuper : netWorthNoSuper;
 
-  // Net worth snapshots for the chart (raw — chart handles conversion)
+  // Net worth snapshots for the chart (raw — chart handles conversion).
+  // Also derive per-category components for the stacked-area view:
+  //   - portfolio (from cron: portfolioTotal, includes super)
+  //   - crypto
+  //   - other = total − portfolio − crypto (net debts: owed − iOwe)
+  // When !includeSuper, subtract the super delta from the portfolio band.
   const nwChartSnapshots = useMemo(() => {
     return nwSnapshots.map((s) => {
-      const ext = s as { valueNoSuper?: number; currency?: string };
+      const ext = s as {
+        valueNoSuper?: number;
+        currency?: string;
+        portfolio?: number;
+        crypto?: number;
+      };
+      const total = includeSuper ? s.value : (ext.valueNoSuper ?? s.value);
+      const superDelta = ext.valueNoSuper != null ? s.value - ext.valueNoSuper : 0;
+      const portfolioPart = includeSuper
+        ? (ext.portfolio ?? 0)
+        : Math.max(0, (ext.portfolio ?? 0) - superDelta);
+      const cryptoPart = ext.crypto ?? 0;
+      const otherPart = Math.max(0, total - portfolioPart - cryptoPart);
+      const hasBreakdown = ext.portfolio != null || ext.crypto != null;
       return {
         date: s.date,
-        value: includeSuper ? s.value : (ext.valueNoSuper ?? s.value),
+        value: total,
         currency: ext.currency ?? "USD",
+        components: hasBreakdown
+          ? { portfolio: portfolioPart, crypto: cryptoPart, other: otherPart }
+          : undefined,
       };
     });
   }, [nwSnapshots, includeSuper]);
@@ -460,6 +488,9 @@ export default function DashboardPage() {
           snapshots={nwChartSnapshots}
           isLive={stockWsConnected || cryptoWsConnected}
           defaultPeriod="1D"
+          breakdownRows={assetRows.filter((r) => !hiddenSections.includes(r.key))}
+          breakdownLabel="Asset Breakdown"
+          stackedCategories={NW_STACKED_CATEGORIES}
         />
       </BlurFade>
 

@@ -13,6 +13,8 @@ import {
   CrosshairMode,
   LineStyle,
 } from "lightweight-charts";
+import { motion, AnimatePresence } from "motion/react";
+import { ChevronDown } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useCurrency } from "@/components/providers/currency-provider";
 import { cn } from "@/lib/utils";
@@ -31,6 +33,29 @@ export interface SnapshotPoint {
   value: number;
   /** Source currency, defaults to USD */
   currency?: string;
+  /** Optional per-category components in the same source currency (for stacked view) */
+  components?: Record<string, number>;
+}
+
+/** Definition of a category for stacked-area rendering (bottom → top order). */
+export interface StackedCategory {
+  /** Key matching `SnapshotPoint.components` */
+  key: string;
+  /** Display label (used in the tooltip/legend) */
+  label: string;
+  /** Area/line color in light mode */
+  colorLight: string;
+  /** Area/line color in dark mode */
+  colorDark: string;
+}
+
+export interface BreakdownRow {
+  key: string;
+  label: string;
+  /** Value in the user's preferred currency (already converted) */
+  value: number;
+  /** Render as a negative/expense-colored row */
+  negative?: boolean;
 }
 
 export interface PerformanceChartProps {
@@ -48,6 +73,16 @@ export interface PerformanceChartProps {
   defaultPeriod?: Period;
   /** Chart height */
   height?: number;
+  /** Optional breakdown rows revealed via a chevron toggle at the bottom */
+  breakdownRows?: BreakdownRow[];
+  /** Label above the breakdown list (defaults to "Holdings") */
+  breakdownLabel?: string;
+  /**
+   * Render as a stacked-area chart: one translucent area per category,
+   * ordered bottom-to-top. The chart still renders a single total line
+   * for PnL / hover tracking. Snapshots must include a `components` map.
+   */
+  stackedCategories?: StackedCategory[];
 }
 
 // ---------------------------------------------------------------------------
@@ -84,6 +119,19 @@ function parseToTimestamp(s: string): UTCTimestamp {
   return Math.floor(new Date(s.replace(" ", "T")).getTime() / 1000) as UTCTimestamp;
 }
 
+/** Convert a #rrggbb hex color to an rgba() string with the given alpha. */
+function hexToRgba(hex: string, alpha: number): string {
+  const h = hex.replace("#", "");
+  const full =
+    h.length === 3
+      ? h.split("").map((c) => c + c).join("")
+      : h;
+  const r = parseInt(full.slice(0, 2), 16);
+  const g = parseInt(full.slice(2, 4), 16);
+  const b = parseInt(full.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 /** Format a hovered timestamp based on the active period granularity. */
 function formatHoverTime(time: UTCTimestamp, period: Period): string {
   const date = new Date((time as number) * 1000);
@@ -118,11 +166,15 @@ export function PerformanceChart({
   isLive = false,
   defaultPeriod = "1D",
   height = 280,
+  breakdownRows,
+  breakdownLabel = "Holdings",
+  stackedCategories,
 }: PerformanceChartProps) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
   const { format, convert, currency, symbol } = useCurrency();
   const [period, setPeriod] = useState<Period>(defaultPeriod);
+  const [breakdownOpen, setBreakdownOpen] = useState(false);
   const [hoverInfo, setHoverInfo] = useState<{
     value: number;
     time: UTCTimestamp;
@@ -132,20 +184,38 @@ export function PerformanceChart({
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Area"> | null>(null);
+  // When stacked, one extra series per category (ordered top → bottom for draw order).
+  const stackedSeriesRefs = useRef<ISeriesApi<"Area">[]>([]);
+
+  const hasStacked = Boolean(stackedCategories && stackedCategories.length > 0);
 
   // Convert + sort + dedupe snapshots (lightweight-charts requires strictly ascending time)
   const convertedSnapshots = useMemo(() => {
-    const byTime = new Map<UTCTimestamp, number>();
+    type Entry = { value: number; components?: Record<string, number> };
+    const byTime = new Map<UTCTimestamp, Entry>();
     for (const s of snapshots) {
       const cur = s.currency ?? "USD";
-      const value = cur !== currency
+      const needsConvert = cur !== currency;
+      const value = needsConvert
         ? Math.round(convert(s.value, cur) * 100) / 100
         : s.value;
+      let components: Record<string, number> | undefined;
+      if (s.components) {
+        components = {};
+        for (const [k, v] of Object.entries(s.components)) {
+          components[k] = needsConvert
+            ? Math.round(convert(v, cur) * 100) / 100
+            : v;
+        }
+      }
       // Last write wins for duplicate timestamps
-      byTime.set(parseToTimestamp(s.date), value);
+      byTime.set(parseToTimestamp(s.date), { value, components });
     }
-    return Array.from(byTime, ([time, value]) => ({ time, value }))
-      .sort((a, b) => a.time - b.time);
+    return Array.from(byTime, ([time, entry]) => ({
+      time,
+      value: entry.value,
+      components: entry.components,
+    })).sort((a, b) => a.time - b.time);
   }, [snapshots, currency, convert]);
 
   // Filter by period
@@ -178,7 +248,7 @@ export function PerformanceChart({
   // Append the live current value as the latest data point
   const chartData = useMemo(() => {
     if (filteredData.length === 0) return [];
-    const data = [...filteredData];
+    const data = filteredData.map((s) => ({ time: s.time, value: s.value }));
     if (currentValue > 0) {
       const liveTime = Math.floor(Date.now() / 1000) as UTCTimestamp;
       const last = data[data.length - 1];
@@ -191,6 +261,24 @@ export function PerformanceChart({
     }
     return data;
   }, [filteredData, currentValue]);
+
+  // Per-category cumulative series for stacked rendering.
+  // Result is indexed the same as `stackedCategories` (bottom → top).
+  const stackedChartData = useMemo(() => {
+    if (!hasStacked || !stackedCategories) return null;
+    return stackedCategories.map((_cat, i) => {
+      const keysUpTo = stackedCategories.slice(0, i + 1).map((c) => c.key);
+      const points: { time: UTCTimestamp; value: number }[] = [];
+      for (const snap of filteredData) {
+        if (!snap.components) continue;
+        let cum = 0;
+        for (const k of keysUpTo) cum += snap.components[k] ?? 0;
+        if (cum <= 0) continue;
+        points.push({ time: snap.time, value: cum });
+      }
+      return points;
+    });
+  }, [filteredData, stackedCategories, hasStacked]);
 
   // Compute PnL stats
   const stats = useMemo(() => {
@@ -259,11 +347,34 @@ export function PerformanceChart({
       height,
     });
 
+    // Add stacked category series FIRST so the main total line sits on top.
+    // Draw order: top-category cumulative (largest) first → bottom-category last.
+    // Later-added series render visually ABOVE earlier ones, so the portfolio band
+    // (smallest cumulative) ends up on top of the crypto band, etc.
+    if (hasStacked && stackedCategories) {
+      const refs: ISeriesApi<"Area">[] = [];
+      for (let i = stackedCategories.length - 1; i >= 0; i--) {
+        const cat = stackedCategories[i];
+        const color = isDark ? cat.colorDark : cat.colorLight;
+        const stackSeries = chart.addSeries(AreaSeries, {
+          lineColor: color,
+          topColor: hexToRgba(color, 0.45),
+          bottomColor: hexToRgba(color, 0.02),
+          lineWidth: 1,
+          priceLineVisible: false,
+          lastValueVisible: false,
+          crosshairMarkerVisible: false,
+        });
+        refs.push(stackSeries);
+      }
+      stackedSeriesRefs.current = refs;
+    }
+
     const series = chart.addSeries(AreaSeries, {
       lineColor,
-      topColor,
-      bottomColor,
-      lineWidth: 2,
+      topColor: hasStacked ? "rgba(0,0,0,0)" : topColor,
+      bottomColor: hasStacked ? "rgba(0,0,0,0)" : bottomColor,
+      lineWidth: hasStacked ? 2 : 2,
       priceFormat: {
         type: "price",
         precision: 2,
@@ -311,33 +422,64 @@ export function PerformanceChart({
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
+      stackedSeriesRefs.current = [];
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDark, height]);
+  }, [isDark, height, hasStacked, stackedCategories?.map((c) => c.key).join("|")]);
 
-  // Update colors when PnL direction changes
+  // Update colors when PnL direction changes (keep main line colored; fills transparent when stacked)
   useEffect(() => {
     if (!seriesRef.current) return;
-    seriesRef.current.applyOptions({ lineColor, topColor, bottomColor });
-  }, [lineColor, topColor, bottomColor]);
+    seriesRef.current.applyOptions({
+      lineColor,
+      topColor: hasStacked ? "rgba(0,0,0,0)" : topColor,
+      bottomColor: hasStacked ? "rgba(0,0,0,0)" : bottomColor,
+    });
+  }, [lineColor, topColor, bottomColor, hasStacked]);
 
   // Clear stale hover info when switching periods
   useEffect(() => {
     setHoverInfo(null);
   }, [period]);
 
-  // Set data when chartData changes
+  // Set data when chartData changes (both main + stacked series)
   useEffect(() => {
     if (!seriesRef.current || !chartRef.current) return;
     if (chartData.length === 0) {
       seriesRef.current.setData([]);
+      for (const s of stackedSeriesRefs.current) s.setData([]);
       return;
     }
     seriesRef.current.setData(chartData);
+    // Stacked series are stored top→bottom draw order; stackedChartData is bottom→top.
+    if (stackedChartData && stackedCategories) {
+      // stackedSeriesRefs[0] = top category, stackedSeriesRefs[last] = bottom category
+      for (let i = 0; i < stackedCategories.length; i++) {
+        const drawIndex = stackedCategories.length - 1 - i; // top→bottom
+        const ref = stackedSeriesRefs.current[drawIndex];
+        if (ref) ref.setData(stackedChartData[i]);
+      }
+    }
     chartRef.current.timeScale().fitContent();
-  }, [chartData]);
+  }, [chartData, stackedChartData, stackedCategories]);
 
   const periods: Period[] = ["1D", "1W", "1M", "6M", "1Y"];
+
+  // Visible breakdown rows + percentage shares (denominator: positive-only total)
+  const visibleBreakdown = useMemo(() => {
+    if (!breakdownRows || breakdownRows.length === 0) return [];
+    const visible = breakdownRows.filter((r) => r.value !== 0 || r.negative);
+    const positiveTotal = visible
+      .filter((r) => !r.negative && r.value > 0)
+      .reduce((sum, r) => sum + r.value, 0);
+    return visible.map((r) => ({
+      ...r,
+      sharePct: positiveTotal > 0 && !r.negative ? (r.value / positiveTotal) * 100 : 0,
+    }));
+  }, [breakdownRows]);
+
+  const hasBreakdown = visibleBreakdown.length > 0;
+
   const liveValue = currentValueCurrency
     ? convert(currentValue, currentValueCurrency)
     : currentValue;
@@ -424,6 +566,46 @@ export function PerformanceChart({
         </div>
       </div>
 
+      {/* Stacked legend — shown only in stacked mode */}
+      {hasStacked && stackedCategories && chartData.length > 1 && (
+        <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1.5">
+          {stackedCategories.map((cat) => {
+            const color = isDark ? cat.colorDark : cat.colorLight;
+            // Use the latest cumulative-band value for display
+            const lastBand = (() => {
+              const idx = stackedCategories.indexOf(cat);
+              if (idx < 0) return 0;
+              const series = stackedChartData?.[idx];
+              if (!series || series.length === 0) return 0;
+              const prevSeries = idx > 0 ? stackedChartData?.[idx - 1] : null;
+              const last = series[series.length - 1].value;
+              const prevLast =
+                prevSeries && prevSeries.length > 0
+                  ? prevSeries[prevSeries.length - 1].value
+                  : 0;
+              return last - prevLast;
+            })();
+            return (
+              <div
+                key={cat.key}
+                className="flex items-center gap-1.5 text-[11px] font-mono text-muted-foreground"
+              >
+                <span
+                  className="h-2 w-2 rounded-sm shrink-0"
+                  style={{ backgroundColor: color }}
+                />
+                <span className="uppercase tracking-wide">{cat.label}</span>
+                {lastBand > 0 && (
+                  <span className="tabular-nums text-foreground/80">
+                    {format(lastBand)}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {/* Chart container */}
       {chartData.length > 1 ? (
         <div className="relative">
@@ -467,6 +649,101 @@ export function PerformanceChart({
           </button>
         ))}
       </div>
+
+      {/* Breakdown reveal — Binance-style chevron at card bottom */}
+      {hasBreakdown && (
+        <>
+          <AnimatePresence initial={false}>
+            {breakdownOpen && (
+              <motion.div
+                key="breakdown"
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.25, ease: [0.32, 0.72, 0, 1] }}
+                className="overflow-hidden"
+              >
+                <div className="mt-5 pt-4 border-t border-border/60">
+                  <div className="flex items-baseline justify-between mb-2">
+                    <p className="label-mono">{breakdownLabel}</p>
+                    <p className="text-[10px] font-mono uppercase tracking-wide text-muted-foreground/70">
+                      {visibleBreakdown.length} {visibleBreakdown.length === 1 ? "asset" : "assets"}
+                    </p>
+                  </div>
+                  <ul className="space-y-0.5">
+                    {visibleBreakdown.map((row, i) => {
+                      const barColor = row.negative
+                        ? (isDark ? "#f87171" : "#c95f3f")
+                        : (isDark ? "#a3e635" : "#65a30d");
+                      return (
+                        <motion.li
+                          key={row.key}
+                          initial={{ opacity: 0, y: 4 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.2, delay: 0.03 * i }}
+                          className="group relative flex items-center justify-between gap-4 py-2.5 px-2 -mx-2 rounded-md hover:bg-secondary/40 transition-colors"
+                        >
+                          {/* Share bar (absolute, full-width behind content) */}
+                          {!row.negative && row.sharePct > 0 && (
+                            <span
+                              className="pointer-events-none absolute inset-y-2 left-2 rounded-sm opacity-[0.08] group-hover:opacity-[0.14] transition-opacity"
+                              style={{
+                                width: `calc(${Math.min(100, row.sharePct)}% - 1rem)`,
+                                backgroundColor: barColor,
+                              }}
+                            />
+                          )}
+                          <div className="relative flex items-center gap-2.5 min-w-0">
+                            <span
+                              className="h-1.5 w-1.5 rounded-full shrink-0"
+                              style={{ backgroundColor: barColor }}
+                            />
+                            <span className="text-sm font-medium truncate">{row.label}</span>
+                          </div>
+                          <div className="relative flex items-baseline gap-2 shrink-0">
+                            <span
+                              className={cn(
+                                "font-mono text-sm tabular-nums",
+                                row.negative ? "text-expense" : "text-foreground",
+                              )}
+                            >
+                              {row.negative ? "-" : ""}
+                              {format(Math.abs(row.value))}
+                            </span>
+                            {!row.negative && row.sharePct > 0 && (
+                              <span className="text-[10px] font-mono tabular-nums text-muted-foreground/70 w-10 text-right">
+                                {row.sharePct.toFixed(1)}%
+                              </span>
+                            )}
+                          </div>
+                        </motion.li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <div className="mt-3 flex justify-center">
+            <button
+              type="button"
+              onClick={() => setBreakdownOpen((v) => !v)}
+              aria-expanded={breakdownOpen}
+              aria-label={breakdownOpen ? "Hide breakdown" : "Show breakdown"}
+              className="group flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-mono uppercase tracking-wide text-muted-foreground/70 hover:text-foreground hover:bg-secondary/50 transition-colors"
+            >
+              <span>{breakdownOpen ? "Hide" : "Breakdown"}</span>
+              <ChevronDown
+                className={cn(
+                  "h-3.5 w-3.5 transition-transform duration-300",
+                  breakdownOpen && "rotate-180",
+                )}
+              />
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

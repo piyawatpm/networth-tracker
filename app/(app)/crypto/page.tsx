@@ -136,11 +136,15 @@ export default function CryptoPage() {
       if (cancelled || Object.keys(resolved).length === 0) return;
 
       setTickerMappings((prev) => {
+        let changed = false;
         const next = { ...prev };
         for (const [token, info] of Object.entries(resolved)) {
-          if (!next[token]) next[token] = info.symbol;
+          if (!next[token]) {
+            next[token] = info.symbol;
+            changed = true;
+          }
         }
-        return next;
+        return changed ? next : prev;
       });
 
       // Fetch logos only for tokens that don't already have one
@@ -158,12 +162,16 @@ export default function CryptoPage() {
       if (cancelled || Object.keys(images).length === 0) return;
 
       setCoinImages((prev) => {
+        let changed = false;
         const next = { ...prev };
         for (const [id, url] of Object.entries(images)) {
           const token = tokenByIdForFetch.get(id);
-          if (token && !next[token]) next[token] = url;
+          if (token && !next[token]) {
+            next[token] = url;
+            changed = true;
+          }
         }
-        return next;
+        return changed ? next : prev;
       });
     })();
 

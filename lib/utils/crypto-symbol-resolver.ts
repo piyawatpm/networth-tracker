@@ -72,7 +72,7 @@ async function pickByMarketCap(candidates: CoinListEntry[]): Promise<CoinListEnt
 
   try {
     const ids = candidates.map((c) => c.id).join(",");
-    const url = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${encodeURIComponent(ids)}&order=market_cap_desc&per_page=${candidates.length}&page=1&sparkline=false`;
+    const url = `/api/crypto/markets?ids=${encodeURIComponent(ids)}&order=market_cap_desc&per_page=${candidates.length}&page=1`;
     const res = await fetch(url);
     if (!res.ok) return candidates[0];
     const data = (await res.json()) as { id: string; market_cap: number | null }[];
@@ -190,7 +190,7 @@ export async function fetchCoinImages(
   await Promise.all(
     batches.map(async (batch) => {
       try {
-        const url = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${encodeURIComponent(batch.join(","))}&per_page=${batch.length}&page=1&sparkline=false`;
+        const url = `/api/crypto/markets?ids=${encodeURIComponent(batch.join(","))}&per_page=${batch.length}&page=1`;
         const res = await fetch(url);
         if (!res.ok) return;
         const data = (await res.json()) as { id: string; image: string }[];
