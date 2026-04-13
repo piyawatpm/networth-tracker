@@ -175,6 +175,7 @@ export function PerformanceChart({
   const { format, convert, currency, symbol } = useCurrency();
   const [period, setPeriod] = useState<Period>(defaultPeriod);
   const [breakdownOpen, setBreakdownOpen] = useState(false);
+  const [showOverlay, setShowOverlay] = useState(true); // toggle category overlay lines
   const [hoverInfo, setHoverInfo] = useState<{
     value: number;
     time: UTCTimestamp;
@@ -187,13 +188,15 @@ export function PerformanceChart({
   // When stacked, one extra series per category (ordered top → bottom for draw order).
   const stackedSeriesRefs = useRef<ISeriesApi<"Area">[]>([]);
 
-  const hasStacked = Boolean(stackedCategories && stackedCategories.length > 0);
+  const hasStackedProp = Boolean(stackedCategories && stackedCategories.length > 0);
 
   // Convert + sort + dedupe snapshots (lightweight-charts requires strictly ascending time)
   const convertedSnapshots = useMemo(() => {
     type Entry = { value: number; components?: Record<string, number> };
     const byTime = new Map<UTCTimestamp, Entry>();
     for (const s of snapshots) {
+      // Skip zero/negative snapshots — they distort the y-axis range
+      if (s.value <= 0) continue;
       const cur = s.currency ?? "USD";
       const needsConvert = cur !== currency;
       const value = needsConvert
@@ -262,23 +265,46 @@ export function PerformanceChart({
     return data;
   }, [filteredData, currentValue]);
 
-  // Per-category cumulative series for stacked rendering.
-  // Result is indexed the same as `stackedCategories` (bottom → top).
+  // Per-category % change series (all on a shared hidden scale so they're comparable).
+  // Each category is normalised to % change from its first value in the period.
   const stackedChartData = useMemo(() => {
-    if (!hasStacked || !stackedCategories) return null;
-    return stackedCategories.map((_cat, i) => {
-      const keysUpTo = stackedCategories.slice(0, i + 1).map((c) => c.key);
-      const points: { time: UTCTimestamp; value: number }[] = [];
+    if (!hasStackedProp || !stackedCategories) return null;
+    return stackedCategories.map((cat) => {
+      const raw: { time: UTCTimestamp; value: number }[] = [];
       for (const snap of filteredData) {
         if (!snap.components) continue;
-        let cum = 0;
-        for (const k of keysUpTo) cum += snap.components[k] ?? 0;
-        if (cum <= 0) continue;
-        points.push({ time: snap.time, value: cum });
+        const val = snap.components[cat.key] ?? 0;
+        if (val <= 0) continue;
+        raw.push({ time: snap.time, value: val });
       }
-      return points;
+      if (raw.length === 0) return [];
+      const base = raw[0].value;
+      if (base === 0) return [];
+      return raw.map((pt) => ({
+        time: pt.time,
+        value: ((pt.value - base) / base) * 100, // % change
+      }));
     });
-  }, [filteredData, stackedCategories, hasStacked]);
+  }, [filteredData, stackedCategories, hasStackedProp]);
+
+  // Latest raw values per category (for the legend display)
+  const stackedLatestValues = useMemo(() => {
+    if (!hasStackedProp || !stackedCategories) return null;
+    return stackedCategories.map((cat) => {
+      let last = 0;
+      for (const snap of filteredData) {
+        if (!snap.components) continue;
+        const val = snap.components[cat.key] ?? 0;
+        if (val > 0) last = val;
+      }
+      return last;
+    });
+  }, [filteredData, stackedCategories, hasStackedProp]);
+
+  // Only render stacked mode when toggled ON and snapshots have component data
+  const hasStacked = showOverlay && hasStackedProp && Boolean(
+    stackedChartData && stackedChartData.some((band) => band.length > 0),
+  );
 
   // Compute PnL stats
   const stats = useMemo(() => {
@@ -292,16 +318,16 @@ export function PerformanceChart({
 
   const isPositive = (stats?.change ?? 0) >= 0;
 
-  // Chart colors based on PnL direction
+  // Chart colors based on PnL direction (OKX-style vibrant green / pink)
   const lineColor = isPositive
-    ? (isDark ? "#4ade80" : "#2e8b57")
-    : (isDark ? "#f87171" : "#c95f3f");
+    ? (isDark ? "#22c55e" : "#16a34a")
+    : (isDark ? "#f43f5e" : "#e11d48");
   const topColor = isPositive
-    ? (isDark ? "rgba(74, 222, 128, 0.30)" : "rgba(46, 139, 87, 0.30)")
-    : (isDark ? "rgba(248, 113, 113, 0.30)" : "rgba(201, 95, 63, 0.30)");
+    ? (isDark ? "rgba(34, 197, 94, 0.30)" : "rgba(22, 163, 74, 0.25)")
+    : (isDark ? "rgba(244, 63, 94, 0.30)" : "rgba(225, 29, 72, 0.25)");
   const bottomColor = isPositive
-    ? (isDark ? "rgba(74, 222, 128, 0.0)" : "rgba(46, 139, 87, 0.0)")
-    : (isDark ? "rgba(248, 113, 113, 0.0)" : "rgba(201, 95, 63, 0.0)");
+    ? (isDark ? "rgba(34, 197, 94, 0.0)" : "rgba(22, 163, 74, 0.0)")
+    : (isDark ? "rgba(244, 63, 94, 0.0)" : "rgba(225, 29, 72, 0.0)");
 
   // Initialize chart once
   useEffect(() => {
@@ -316,10 +342,24 @@ export function PerformanceChart({
       },
       grid: {
         vertLines: { visible: false },
-        horzLines: { visible: false },
+        horzLines: {
+          color: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)",
+          style: LineStyle.Dashed,
+        },
       },
       rightPriceScale: {
-        visible: false,
+        visible: true,
+        borderVisible: false,
+        scaleMargins: { top: 0.05, bottom: 0.02 },
+      },
+      localization: {
+        priceFormatter: (price: number) => {
+          const abs = Math.abs(price);
+          if (abs >= 10_000_000) return `${(price / 1_000_000).toFixed(0)}M`;
+          if (abs >= 1_000_000) return `${(price / 1_000_000).toFixed(1)}M`;
+          if (abs >= 1_000) return `${(price / 1_000).toFixed(0)}k`;
+          return price.toFixed(0);
+        },
       },
       timeScale: {
         borderVisible: false,
@@ -331,13 +371,15 @@ export function PerformanceChart({
       crosshair: {
         mode: CrosshairMode.Magnet,
         vertLine: {
-          color: isDark ? "#a3e635" : "#65a30d",
+          color: isDark ? "rgba(255,255,255,0.3)" : "rgba(0,0,0,0.2)",
           width: 1,
           style: LineStyle.Solid,
           labelVisible: false,
         },
         horzLine: {
-          visible: false,
+          color: isDark ? "rgba(255,255,255,0.15)" : "rgba(0,0,0,0.12)",
+          width: 1,
+          style: LineStyle.Dashed,
           labelVisible: false,
         },
       },
@@ -347,26 +389,28 @@ export function PerformanceChart({
       height,
     });
 
-    // Add stacked category series FIRST so the main total line sits on top.
-    // Draw order: top-category cumulative (largest) first → bottom-category last.
-    // Later-added series render visually ABOVE earlier ones, so the portfolio band
-    // (smallest cumulative) ends up on top of the crypto band, etc.
+    // Category lines show % change on a shared hidden scale (comparable trends).
     if (hasStacked && stackedCategories) {
       const refs: ISeriesApi<"Area">[] = [];
-      for (let i = stackedCategories.length - 1; i >= 0; i--) {
-        const cat = stackedCategories[i];
+      for (const cat of stackedCategories) {
         const color = isDark ? cat.colorDark : cat.colorLight;
         const stackSeries = chart.addSeries(AreaSeries, {
           lineColor: color,
-          topColor: hexToRgba(color, 0.45),
-          bottomColor: hexToRgba(color, 0.02),
+          topColor: "rgba(0,0,0,0)",
+          bottomColor: "rgba(0,0,0,0)",
           lineWidth: 1,
+          priceScaleId: "pct",
           priceLineVisible: false,
           lastValueVisible: false,
           crosshairMarkerVisible: false,
         });
         refs.push(stackSeries);
       }
+      // Shared % change scale — hidden, synced margins with the main scale
+      chart.priceScale("pct").applyOptions({
+        visible: false,
+        scaleMargins: { top: 0.05, bottom: 0.02 },
+      });
       stackedSeriesRefs.current = refs;
     }
 
@@ -374,11 +418,11 @@ export function PerformanceChart({
       lineColor,
       topColor: hasStacked ? "rgba(0,0,0,0)" : topColor,
       bottomColor: hasStacked ? "rgba(0,0,0,0)" : bottomColor,
-      lineWidth: hasStacked ? 2 : 2,
+      lineWidth: 2,
       priceFormat: {
-        type: "price",
-        precision: 2,
-        minMove: 0.01,
+        type: "price" as const,
+        precision: 0,
+        minMove: 10000,
       },
       priceLineVisible: false,
       lastValueVisible: false,
@@ -451,12 +495,10 @@ export function PerformanceChart({
       return;
     }
     seriesRef.current.setData(chartData);
-    // Stacked series are stored top→bottom draw order; stackedChartData is bottom→top.
+    // Each category series is independently scaled (1:1 with stackedCategories)
     if (stackedChartData && stackedCategories) {
-      // stackedSeriesRefs[0] = top category, stackedSeriesRefs[last] = bottom category
       for (let i = 0; i < stackedCategories.length; i++) {
-        const drawIndex = stackedCategories.length - 1 - i; // top→bottom
-        const ref = stackedSeriesRefs.current[drawIndex];
+        const ref = stackedSeriesRefs.current[i];
         if (ref) ref.setData(stackedChartData[i]);
       }
     }
@@ -547,22 +589,38 @@ export function PerformanceChart({
           )}
         </div>
 
-        {/* Desktop period selector — top-right */}
-        <div className="hidden sm:flex gap-0.5 rounded-full bg-secondary/40 p-0.5 shrink-0">
-          {periods.map((p) => (
+        {/* Desktop period selector + overlay toggle — top-right */}
+        <div className="hidden sm:flex items-center gap-2 shrink-0">
+          {hasStackedProp && (
             <button
-              key={p}
-              onClick={() => setPeriod(p)}
+              onClick={() => setShowOverlay((v) => !v)}
               className={cn(
                 "px-2.5 py-1 text-[11px] font-mono font-medium rounded-full transition-colors",
-                period === p
-                  ? "bg-foreground text-background"
-                  : "text-muted-foreground hover:text-foreground",
+                showOverlay
+                  ? "bg-foreground/10 text-foreground"
+                  : "text-muted-foreground/50 hover:text-foreground",
               )}
+              title={showOverlay ? "Hide category lines" : "Show category lines"}
             >
-              {PERIOD_LABELS[p]}
+              {showOverlay ? "Overlay" : "Overlay"}
             </button>
-          ))}
+          )}
+          <div className="flex gap-0.5 rounded-full bg-secondary/40 p-0.5">
+            {periods.map((p) => (
+              <button
+                key={p}
+                onClick={() => setPeriod(p)}
+                className={cn(
+                  "px-2.5 py-1 text-[11px] font-mono font-medium rounded-full transition-colors",
+                  period === p
+                    ? "bg-foreground text-background"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {PERIOD_LABELS[p]}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -571,20 +629,9 @@ export function PerformanceChart({
         <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1.5">
           {stackedCategories.map((cat) => {
             const color = isDark ? cat.colorDark : cat.colorLight;
-            // Use the latest cumulative-band value for display
-            const lastBand = (() => {
-              const idx = stackedCategories.indexOf(cat);
-              if (idx < 0) return 0;
-              const series = stackedChartData?.[idx];
-              if (!series || series.length === 0) return 0;
-              const prevSeries = idx > 0 ? stackedChartData?.[idx - 1] : null;
-              const last = series[series.length - 1].value;
-              const prevLast =
-                prevSeries && prevSeries.length > 0
-                  ? prevSeries[prevSeries.length - 1].value
-                  : 0;
-              return last - prevLast;
-            })();
+            // Show the actual latest value (not the % change used for charting)
+            const idx = stackedCategories.indexOf(cat);
+            const lastBand = stackedLatestValues?.[idx] ?? 0;
             return (
               <div
                 key={cat.key}
@@ -632,8 +679,21 @@ export function PerformanceChart({
         </div>
       )}
 
-      {/* Mobile period selector — below chart, OKX-style pill */}
+      {/* Mobile period selector — below chart */}
       <div className="mt-4 flex sm:hidden items-center justify-around">
+        {hasStackedProp && (
+          <button
+            onClick={() => setShowOverlay((v) => !v)}
+            className={cn(
+              "px-3 py-1.5 text-xs font-mono font-medium rounded-full transition-colors",
+              showOverlay
+                ? "bg-foreground/10 text-foreground"
+                : "text-muted-foreground/50 hover:text-foreground",
+            )}
+          >
+            Overlay
+          </button>
+        )}
         {periods.map((p) => (
           <button
             key={p}
@@ -673,8 +733,8 @@ export function PerformanceChart({
                   <ul className="space-y-0.5">
                     {visibleBreakdown.map((row, i) => {
                       const barColor = row.negative
-                        ? (isDark ? "#f87171" : "#c95f3f")
-                        : (isDark ? "#a3e635" : "#65a30d");
+                        ? (isDark ? "#f43f5e" : "#e11d48")
+                        : (isDark ? "#22c55e" : "#16a34a");
                       return (
                         <motion.li
                           key={row.key}
