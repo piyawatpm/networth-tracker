@@ -189,13 +189,24 @@ export default function ExpensesPage() {
   const thisMonthTotal = sumConverted(thisMonthEntries, convert);
   const lastMonthTotal = sumConverted(lastMonthEntries, convert);
 
-  // Daily average & velocity
+  // Daily average & velocity — exclude one-off expenses for projections
+  const thisMonthRecurring = useMemo(
+    () => thisMonthEntries.filter((e) => !e.isOneOff),
+    [thisMonthEntries],
+  );
+  const lastMonthRecurring = useMemo(
+    () => lastMonthEntries.filter((e) => !e.isOneOff),
+    [lastMonthEntries],
+  );
+  const thisMonthRecurringTotal = sumConverted(thisMonthRecurring, convert);
+  const lastMonthRecurringTotal = sumConverted(lastMonthRecurring, convert);
+
   const daysElapsed = getSydneyDayOfMonth();
-  const dailyAvg = daysElapsed > 0 ? thisMonthTotal / daysElapsed : 0;
+  const dailyAvg = daysElapsed > 0 ? thisMonthRecurringTotal / daysElapsed : 0;
   const daysInMonth = getDaysInMonth(currentMonth);
   const monthlyPace = dailyAvg * daysInMonth;
   const paceVsLast =
-    lastMonthTotal > 0 ? ((monthlyPace - lastMonthTotal) / lastMonthTotal) * 100 : 0;
+    lastMonthRecurringTotal > 0 ? ((monthlyPace - lastMonthRecurringTotal) / lastMonthRecurringTotal) * 100 : 0;
 
   // Breakdown by type (date-range-filtered)
   const dateFilteredEntries = useMemo(
@@ -727,6 +738,11 @@ export default function ExpensesPage() {
                             <span className="inline-flex items-center gap-1.5">
                               {entry.isRecurring && (
                                 <RefreshCw className="h-3 w-3 text-muted-foreground" />
+                              )}
+                              {entry.isOneOff && (
+                                <span className="inline-flex items-center rounded bg-amber-500/15 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400" title="One-off — excluded from averages">
+                                  one-off
+                                </span>
                               )}
                               <span
                                 className="inline-block h-2 w-2 rounded-full"

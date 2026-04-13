@@ -331,10 +331,11 @@ export default function DashboardPage() {
     return { emergencyFundTotal: allocs.reduce((s, a) => s + a.value, 0), efAllocations: allocs };
   }, [livePortfolioHoldings, rawCryptoHoldings, cryptoEmergencyTags, convert]);
 
-  // Weighted average monthly expenses (recent 3mo × 2 + older 3mo × 1)
+  // Weighted average monthly expenses (recent 3mo × 2 + older 3mo × 1) — excludes one-off expenses
   const weightedMonthlyExpenses = useMemo(() => {
+    const recurring = expenseEntries.filter((e) => !e.isOneOff);
     const monthlyTotals = last6Keys.map((mk) =>
-      expenseEntries.filter((e) => (e.date ?? "").startsWith(mk)).reduce((s, e) => s + convert(e.amount, e.currency), 0),
+      recurring.filter((e) => (e.date ?? "").startsWith(mk)).reduce((s, e) => s + convert(e.amount, e.currency), 0),
     );
     const recent3 = monthlyTotals.slice(-3);
     const older3 = monthlyTotals.slice(0, 3);
@@ -361,11 +362,16 @@ export default function DashboardPage() {
     return passiveIncome * 52;
   }, [passiveIncome, period]);
 
+  // Annualized expenses — exclude one-off for projection accuracy
+  const periodRecurringExpenseTotal = useMemo(
+    () => sumConverted(periodExpenses.filter((e) => !e.isOneOff), convert),
+    [periodExpenses, convert],
+  );
   const annualizedExpenses = useMemo(() => {
-    if (period === "Y") return periodExpenseTotal;
-    if (period === "M") return periodExpenseTotal * 12;
-    return periodExpenseTotal * 52;
-  }, [periodExpenseTotal, period]);
+    if (period === "Y") return periodRecurringExpenseTotal;
+    if (period === "M") return periodRecurringExpenseTotal * 12;
+    return periodRecurringExpenseTotal * 52;
+  }, [periodRecurringExpenseTotal, period]);
 
   const fiRatio = annualizedExpenses > 0 ? (passiveAnnualized / annualizedExpenses) * 100 : 0;
 

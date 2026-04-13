@@ -67,6 +67,9 @@ export function ExpenseDialog({ entry, onSave, onCreateRecurring, trigger, categ
   const [notes, setNotes] = useState(entry?.notes ?? "");
   const [images, setImages] = useState<string[]>(entry?.images ?? []);
 
+  // One-off flag
+  const [isOneOff, setIsOneOff] = useState(entry?.isOneOff ?? false);
+
   // Recurring fields (only for new entries)
   const [makeRecurring, setMakeRecurring] = useState(false);
   const [frequency, setFrequency] = useState<RecurringFrequency>("monthly");
@@ -83,6 +86,7 @@ export function ExpenseDialog({ entry, onSave, onCreateRecurring, trigger, categ
       setDate(entry?.date ?? getSydneyDateString());
       setNotes(entry?.notes ?? "");
       setImages(entry?.images ?? []);
+      setIsOneOff(entry?.isOneOff ?? false);
       setMakeRecurring(false);
       setFrequency("monthly");
     }
@@ -105,6 +109,7 @@ export function ExpenseDialog({ entry, onSave, onCreateRecurring, trigger, categ
       images,
       isRecurring: makeRecurring || entry?.isRecurring,
       recurringId: entry?.recurringId,
+      isOneOff,
       createdAt: entry?.createdAt ?? Date.now(),
     };
 
@@ -272,8 +277,23 @@ export function ExpenseDialog({ entry, onSave, onCreateRecurring, trigger, categ
             <DatePicker value={date} onChange={setDate} />
           </div>
 
+          {/* One-off toggle */}
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="checkbox"
+              checked={isOneOff}
+              onChange={(e) => {
+                setIsOneOff(e.target.checked);
+                if (e.target.checked) setMakeRecurring(false);
+              }}
+              className="rounded border-border"
+            />
+            <span>One-off expense</span>
+            <span className="text-[10px] text-muted-foreground">(excluded from monthly averages)</span>
+          </label>
+
           {/* Recurring toggle (new entries only) */}
-          {!entry && onCreateRecurring && (
+          {!entry && onCreateRecurring && !isOneOff && (
             <div className="space-y-2">
               <label className="flex items-center gap-2 text-sm cursor-pointer">
                 <input

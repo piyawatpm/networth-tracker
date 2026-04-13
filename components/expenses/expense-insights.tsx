@@ -27,14 +27,17 @@ export function ExpenseInsights({ entries, getLabel, getColor }: ExpenseInsights
 
   const monthKeys = useMemo(() => getLastNMonthKeys(6), []);
 
+  // Exclude one-off expenses from all insight calculations
+  const recurringEntries = useMemo(() => entries.filter((e) => !e.isOneOff), [entries]);
+
   // ── Monthly totals ──
   const monthlyTotals = useMemo(() =>
     monthKeys.map((mk) =>
-      entries
+      recurringEntries
         .filter((e) => getMonthKey(e.date) === mk)
         .reduce((s, e) => s + convert(e.amount, e.currency), 0),
     ),
-  [entries, convert, monthKeys]);
+  [recurringEntries, convert, monthKeys]);
 
   const monthsWithData = monthlyTotals.filter((v) => v > 0).length;
   const avgMonthly = monthsWithData > 0 ? monthlyTotals.reduce((s, v) => s + v, 0) / monthsWithData : 0;
@@ -55,7 +58,7 @@ export function ExpenseInsights({ entries, getLabel, getColor }: ExpenseInsights
 
   const fixedVsVariable = useMemo(() => {
     return monthKeys12.map((mk) => {
-      const monthEntries = entries.filter((e) => getMonthKey(e.date) === mk);
+      const monthEntries = recurringEntries.filter((e) => getMonthKey(e.date) === mk);
       let fixed = 0;
       let variable = 0;
       for (const e of monthEntries) {
@@ -65,7 +68,7 @@ export function ExpenseInsights({ entries, getLabel, getColor }: ExpenseInsights
       }
       return { fixed: Math.round(fixed * 100) / 100, variable: Math.round(variable * 100) / 100 };
     });
-  }, [entries, convert, monthKeys12]);
+  }, [recurringEntries, convert, monthKeys12]);
 
   const totalFixed = fixedVsVariable.reduce((s, d) => s + d.fixed, 0);
   const totalVariable = fixedVsVariable.reduce((s, d) => s + d.variable, 0);
@@ -104,7 +107,7 @@ export function ExpenseInsights({ entries, getLabel, getColor }: ExpenseInsights
   // ── Top Vendors ──
   const topVendors = useMemo(() => {
     const map: Record<string, { total: number; count: number }> = {};
-    for (const e of entries) {
+    for (const e of recurringEntries) {
       const vendor = (e.vendor ?? "").trim();
       if (!vendor) continue;
       if (!map[vendor]) map[vendor] = { total: 0, count: 0 };
@@ -115,7 +118,7 @@ export function ExpenseInsights({ entries, getLabel, getColor }: ExpenseInsights
       .map(([vendor, data]) => ({ vendor, ...data }))
       .sort((a, b) => b.total - a.total)
       .slice(0, 8);
-  }, [entries, convert]);
+  }, [recurringEntries, convert]);
 
   const maxVendorTotal = topVendors.length > 0 ? topVendors[0].total : 1;
 
@@ -123,7 +126,7 @@ export function ExpenseInsights({ entries, getLabel, getColor }: ExpenseInsights
   const categoryGrowth = useMemo(() => {
     const sources: Record<string, number[]> = {};
     for (const mk of monthKeys) {
-      const monthEntries = entries.filter((e) => getMonthKey(e.date) === mk);
+      const monthEntries = recurringEntries.filter((e) => getMonthKey(e.date) === mk);
       const byType: Record<string, number> = {};
       for (const e of monthEntries) {
         byType[e.type] = (byType[e.type] ?? 0) + convert(e.amount, e.currency);
@@ -148,7 +151,7 @@ export function ExpenseInsights({ entries, getLabel, getColor }: ExpenseInsights
       })
       .filter((s) => s.total > 0)
       .sort((a, b) => b.total - a.total);
-  }, [entries, convert, monthKeys, getLabel]);
+  }, [recurringEntries, convert, monthKeys, getLabel]);
 
   return (
     <div className="space-y-6">

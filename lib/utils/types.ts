@@ -135,6 +135,8 @@ export interface ExpenseEntry {
   paymentMethod: PaymentMethod;
   isRecurring?: boolean;
   recurringId?: string;
+  /** One-off (non-recurring) expense — excluded from monthly averages & pace projections */
+  isOneOff?: boolean;
 }
 
 export interface RecurringExpense {
@@ -267,5 +269,6 @@ export function normalizeExpenseEntry(e: Record<string, unknown>): ExpenseEntry 
     paymentMethod: (e.paymentMethod as PaymentMethod) ?? "other",
     isRecurring: (e.isRecurring as boolean) ?? false,
     recurringId: e.recurringId as string | undefined,
+    isOneOff: (e.isOneOff as boolean) ?? false,
   };
 }
