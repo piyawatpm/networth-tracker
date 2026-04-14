@@ -141,13 +141,20 @@
   body {
     @apply bg-background text-foreground;
     font-feature-settings: "rlig" 1, "calt" 1;
-    /* Subtle ambient gradient for depth — glass cards need a non-flat bg */
+  }
+  /* Subtle ambient gradient on a fixed pseudo-element —
+     avoids iOS PWA `background-attachment: fixed` bug that breaks position:fixed nav */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
     background-image:
       radial-gradient(ellipse 80% 60% at 20% 10%, rgba(201, 95, 63, 0.04) 0%, transparent 60%),
       radial-gradient(ellipse 60% 50% at 80% 90%, rgba(201, 95, 63, 0.03) 0%, transparent 50%);
-    background-attachment: fixed;
   }
-  .dark body {
+  .dark body::before {
     background-image:
       radial-gradient(ellipse 80% 60% at 20% 10%, rgba(224, 151, 112, 0.03) 0%, transparent 60%),
       radial-gradient(ellipse 60% 50% at 80% 90%, rgba(224, 151, 112, 0.02) 0%, transparent 50%);
