@@ -61,6 +61,10 @@ import { EmergencyFundCard } from "./_components/emergency-fund-card";
 import { KeyNumbersCard } from "./_components/key-numbers-card";
 import { FinancialFreedomCard } from "./_components/financial-freedom-card";
 import { InvestedVsCashCard } from "./_components/invested-vs-cash-card";
+import {
+  FinancialHealthSection,
+  type FinancialIndicator,
+} from "./_components/financial-health-section";
 import { totalInvestedInRange } from "@/lib/utils/portfolio-transactions";
 
 // ---------------------------------------------------------------------------
@@ -413,6 +417,158 @@ export default function DashboardPage() {
   const liquidAssets = normalTotal + cryptoTotal + emergencyFundTotal;
   const runwayMonths = weightedMonthlyExpenses > 0 ? liquidAssets / weightedMonthlyExpenses : 99;
 
+  // Extra metrics for the Financial Health gauges
+  const annualizedIncome = useMemo(() => {
+    if (period === "Y") return periodIncomeTotal;
+    if (period === "M") return periodIncomeTotal * 12;
+    return periodIncomeTotal * 52;
+  }, [periodIncomeTotal, period]);
+
+  const totalAssetsGross = portfolioTotal + cryptoTotal + owedToMe;
+  const debtToAssetRatio = totalAssetsGross > 0 ? (iOwe / totalAssetsGross) * 100 : 0;
+  const debtToIncomeRatio = annualizedIncome > 0 ? (iOwe / annualizedIncome) * 100 : 0;
+  const wealthToIncomeRatio = annualizedIncome > 0 ? netWorth / annualizedIncome : 0;
+  const netCashFlow = periodIncomeTotal - periodExpenseTotal;
+
+  const healthIndicators: FinancialIndicator[] = useMemo(() => [
+    {
+      label: "Debt / Assets",
+      value: debtToAssetRatio,
+      max: 100,
+      thresholds: [30, 60],
+      invert: true,
+      suffix: "%",
+      status: debtToAssetRatio <= 30 ? "Healthy" : debtToAssetRatio <= 60 ? "Moderate" : "High",
+      formula: "Total Liabilities ÷ Total Assets",
+      detail: `${format(iOwe)} ÷ ${format(totalAssetsGross)}`,
+      desc: "Measures how much of your assets are financed by debt. Lower is better — means you truly own more of what you have.",
+      tip: debtToAssetRatio <= 30
+        ? "You're in great shape. Keep debt low as you grow assets."
+        : debtToAssetRatio <= 60
+          ? "Consider paying down debt before taking on more."
+          : "Focus on debt reduction — pay off highest-interest debt first.",
+    },
+    {
+      label: "Debt / Income",
+      value: debtToIncomeRatio,
+      max: 100,
+      thresholds: [35, 50],
+      invert: true,
+      suffix: "%",
+      status: debtToIncomeRatio <= 35 ? "Healthy" : debtToIncomeRatio <= 50 ? "Caution" : "High",
+      formula: "Total Debt ÷ Annual Income",
+      detail: `${format(iOwe)} ÷ ${format(annualizedIncome)}`,
+      desc: "Shows your total debt burden relative to what you earn. Banks use this to assess lending risk — under 35% is ideal.",
+      tip: debtToIncomeRatio <= 35
+        ? "Lenders see you as low risk. Good position for future borrowing if needed."
+        : "Avoid new debt until this ratio drops. Focus on increasing income or paying down principal.",
+    },
+    {
+      label: "Savings Rate",
+      value: Math.max(0, savingsRate),
+      max: 100,
+      thresholds: [10, 20],
+      invert: false,
+      suffix: "%",
+      status: savingsRate >= 20 ? "Excellent" : savingsRate >= 10 ? "Good" : "Low",
+      formula: "(Income − Expenses) ÷ Income",
+      detail: `(${format(periodIncomeTotal)} − ${format(periodExpenseTotal)}) ÷ ${format(periodIncomeTotal)}`,
+      desc: "The percentage of income you keep. The single most important habit for building wealth. 20%+ puts you ahead of most people.",
+      tip: savingsRate >= 20
+        ? "Outstanding! Consider directing extra savings into investments."
+        : savingsRate >= 10
+          ? "Good start. Try automating an extra 5% into savings."
+          : "Track your top 3 expense categories and find one to cut by 10%.",
+    },
+    {
+      label: "Emergency Fund",
+      value: emergencyFundMonths,
+      max: 12,
+      thresholds: [3, 6],
+      invert: false,
+      suffix: "months",
+      status: emergencyFundMonths >= 6 ? "Strong" : emergencyFundMonths >= 3 ? "Adequate" : "Build up",
+      formula: "Liquid Assets ÷ Monthly Expenses",
+      detail: `${format(liquidAssets)} ÷ ${format(weightedMonthlyExpenses)}/mo`,
+      desc: "How many months you could survive without income. Includes cash, bonds, and stablecoins. 3–6 months is the standard target.",
+      tip: emergencyFundMonths >= 6
+        ? "Well protected! Anything above 6 months could be invested for growth."
+        : emergencyFundMonths >= 3
+          ? "You have a basic safety net. Build to 6 months for full protection."
+          : "This is your #1 priority. Set up auto-transfers to build this up.",
+    },
+    {
+      label: "Wealth / Income",
+      value: wealthToIncomeRatio,
+      max: 12,
+      thresholds: [1, 5],
+      invert: false,
+      suffix: "x annual",
+      status: wealthToIncomeRatio >= 5 ? "Strong" : wealthToIncomeRatio >= 1 ? "Growing" : "Early",
+      formula: "Net Worth ÷ Annual Income",
+      detail: `${format(netWorth)} ÷ ${format(annualizedIncome)}`,
+      desc: "How many years of income you've accumulated. Rule of thumb: 1× by 30, 3× by 40, 6× by 50, 10–12× by retirement.",
+      tip: wealthToIncomeRatio >= 5
+        ? "You're building real wealth. Stay the course."
+        : wealthToIncomeRatio >= 1
+          ? "Good progress! Focus on increasing both savings rate and investment returns."
+          : "You're in the accumulation phase. Every dollar saved now has the most compounding time.",
+    },
+    {
+      label: "Invest / Net Worth",
+      value: Math.min(investRate, 100),
+      max: 100,
+      thresholds: [40, 70],
+      invert: false,
+      suffix: "%",
+      status: investRate >= 70 ? "Great" : investRate >= 40 ? "Good" : "Grow",
+      formula: "Investment Assets ÷ Net Worth",
+      detail: `${format(investmentAssets)} ÷ ${format(netWorth)}`,
+      desc: "What portion of your wealth is actively invested (portfolio + crypto). Higher means more of your money is working for you.",
+      tip: investRate >= 70
+        ? "Your money is working hard. Ensure you're diversified across asset classes."
+        : "Consider moving idle cash into diversified investments for long-term growth.",
+    },
+    {
+      label: "FI Ratio",
+      value: Math.min(fiRatio, 100),
+      max: 100,
+      thresholds: [25, 100],
+      invert: false,
+      suffix: "%",
+      status: fiRatio >= 100 ? "Free!" : fiRatio >= 25 ? "On track" : "Building",
+      formula: "Passive Income ÷ Total Expenses",
+      detail: `${format(passiveAnnualized)}/yr ÷ ${format(annualizedExpenses)}/yr`,
+      desc: "The holy grail — when passive income (dividends, interest, rental, crypto yield) covers 100% of expenses, you're financially independent.",
+      tip: fiRatio >= 100
+        ? "Congratulations! You could live entirely on passive income."
+        : fiRatio >= 25
+          ? "Great progress toward FI. Keep growing passive income sources."
+          : "Focus on building dividend stocks, rental income, or yield-generating assets.",
+    },
+    {
+      label: "Net Cash Flow",
+      value: Math.max(0, savingsRate),
+      max: 100,
+      thresholds: [0, 15],
+      invert: false,
+      suffix: format(Math.abs(netCashFlow)).replace(/[A-Z$\s]/g, "").slice(0, 8),
+      status: netCashFlow >= 0 ? "Surplus" : "Deficit",
+      formula: "Income − Expenses",
+      detail: `${format(periodIncomeTotal)} − ${format(periodExpenseTotal)}`,
+      desc: "Are you earning more than you spend? A positive cash flow is the foundation of all wealth building.",
+      tip: netCashFlow >= 0
+        ? "You're cash-flow positive. Direct the surplus to savings and investments."
+        : "You're spending more than you earn. Review expenses immediately and find cuts.",
+    },
+  ], [
+    debtToAssetRatio, debtToIncomeRatio, savingsRate, emergencyFundMonths,
+    wealthToIncomeRatio, investRate, fiRatio, netCashFlow,
+    iOwe, totalAssetsGross, annualizedIncome, periodIncomeTotal, periodExpenseTotal,
+    liquidAssets, weightedMonthlyExpenses, netWorth, investmentAssets,
+    passiveAnnualized, annualizedExpenses, format,
+  ]);
+
   // ---- Asset breakdown rows -----------------------------------------------
 
   const portfolioDisplayTotal = (includeSuper ? portfolioTotal : normalTotal) - emergencyFundTotal;
@@ -621,6 +777,9 @@ export default function DashboardPage() {
           delay={D * 2.5}
         />
       </div>
+
+      {/* 4b. FINANCIAL HEALTH INDICATORS (8 gauges, click for detail modal) */}
+      <FinancialHealthSection indicators={healthIndicators} delay={D * 2.7} />
 
       {/* 5. GOAL SECTION */}
       <GoalSection netWorth={netWorth} symbol={symbol} format={format} />
