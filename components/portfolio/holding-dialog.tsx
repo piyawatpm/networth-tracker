@@ -62,6 +62,7 @@ export function HoldingDialog({ holding, onSave, trigger }: HoldingDialogProps) 
     holding?.accountType ?? "normal"
   );
   const [isEmergencyFund, setIsEmergencyFund] = useState(holding?.isEmergencyFund ?? false);
+  const [isCash, setIsCash] = useState(holding?.isCash ?? false);
   const [broker, setBroker] = useState(holding?.broker ?? "");
   const [country, setCountry] = useState(holding?.country ?? "");
   const [link, setLink] = useState(holding?.link ?? "");
@@ -158,6 +159,7 @@ export function HoldingDialog({ holding, onSave, trigger }: HoldingDialogProps) 
       notes: notes.trim(),
       createdAt: holding?.createdAt ?? Date.now(),
       isEmergencyFund,
+      isCash,
     };
 
     onSave(saved);
@@ -299,23 +301,41 @@ export function HoldingDialog({ holding, onSave, trigger }: HoldingDialogProps) 
             </div>
           </div>
 
-          {/* Emergency Fund toggle */}
-          <button
-            type="button"
-            onClick={() => setIsEmergencyFund(!isEmergencyFund)}
-            className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-secondary/50 hover:bg-secondary/80 transition-colors"
-          >
-            <span className="text-sm font-medium">Emergency Fund</span>
-            <span className={cn(
-              "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors",
-              isEmergencyFund ? "bg-income" : "bg-border"
-            )}>
+          {/* Emergency Fund + Cash/Dry Powder toggles */}
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => setIsEmergencyFund(!isEmergencyFund)}
+              className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-secondary/50 hover:bg-secondary/80 transition-colors"
+            >
+              <span className="text-sm font-medium">Emergency Fund</span>
               <span className={cn(
-                "inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform",
-                isEmergencyFund ? "translate-x-[18px]" : "translate-x-[3px]"
-              )} />
-            </span>
-          </button>
+                "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors",
+                isEmergencyFund ? "bg-income" : "bg-border"
+              )}>
+                <span className={cn(
+                  "inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform",
+                  isEmergencyFund ? "translate-x-[18px]" : "translate-x-[3px]"
+                )} />
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsCash(!isCash)}
+              className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-secondary/50 hover:bg-secondary/80 transition-colors"
+            >
+              <span className="text-sm font-medium">Dry Powder</span>
+              <span className={cn(
+                "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors",
+                isCash ? "bg-[#4d7cc7]" : "bg-border"
+              )}>
+                <span className={cn(
+                  "inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform",
+                  isCash ? "translate-x-[18px]" : "translate-x-[3px]"
+                )} />
+              </span>
+            </button>
+          </div>
 
           {/* Broker + Country row */}
           <div className="grid grid-cols-2 gap-3">

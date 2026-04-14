@@ -7,6 +7,17 @@ const FX_CACHE_KEY = "fx_rates_cache";
 const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours
 const FX_API_URL = "https://open.er-api.com/v6/latest/USD";
 
+export function readFxRatesSync(): CachedRates | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const cached = localStorage.getItem(FX_CACHE_KEY);
+    if (cached) return JSON.parse(cached) as CachedRates;
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
 export async function fetchFxRates(): Promise<CachedRates | null> {
   // Check cache first
   try {

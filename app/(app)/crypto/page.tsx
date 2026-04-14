@@ -82,6 +82,12 @@ export default function CryptoPage() {
     {},
   );
 
+  // Cash / dry-powder tag overrides
+  const [cashTags, setCashTags] = useCloudStorage<Record<string, boolean>>(
+    "crypto_cash_tags",
+    {},
+  );
+
   // Ticker mappings: CSV token name → Binance ticker symbol
   const [tickerMappings, setTickerMappings] = useCloudStorage<Record<string, string>>(
     "crypto_ticker_mappings",
@@ -406,10 +412,22 @@ export default function CryptoPage() {
           setCsvUploadedAt(Date.now());
           const h = parseAndComputeHoldings(text);
           if (h.length > 0) {
-            const tokens = h.map((holding) => holding.token);
-            fetchCryptoPrices(tokens).then((prices) => {
-              if (Object.keys(prices).length > 0) {
-                setLivePrices(prices);
+            // Only fetch prices for tokens that already have a ticker mapping —
+            // raw CSV names like "Bitcoin" are not valid Binance/CoinGecko keys.
+            const mappedTokens = h
+              .map((holding) => tickerMappings[holding.token])
+              .filter((t): t is string => Boolean(t));
+            if (mappedTokens.length === 0) return;
+            fetchCryptoPrices(mappedTokens).then((prices) => {
+              const remapped: Record<string, number> = {};
+              for (const holding of h) {
+                const ticker = tickerMappings[holding.token];
+                if (ticker && prices[ticker] != null) {
+                  remapped[holding.token] = prices[ticker];
+                }
+              }
+              if (Object.keys(remapped).length > 0) {
+                setLivePrices(remapped);
               }
             });
           }
@@ -417,7 +435,7 @@ export default function CryptoPage() {
       };
       reader.readAsText(file);
     },
-    [setCsvText, setCsvUploadedAt],
+    [setCsvText, setCsvUploadedAt, tickerMappings],
   );
 
   const onFileSelect = useCallback(
@@ -596,6 +614,8 @@ export default function CryptoPage() {
         setStablecoinTags={setStablecoinTags}
         emergencyTags={emergencyTags}
         setEmergencyTags={setEmergencyTags}
+        cashTags={cashTags}
+        setCashTags={setCashTags}
         clearCsv={clearCsv}
       />
     </div>

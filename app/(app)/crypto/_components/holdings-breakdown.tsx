@@ -6,7 +6,7 @@ import { useCurrency } from "@/components/providers/currency-provider";
 import type { CryptoHolding } from "@/lib/utils/types";
 import { ECHARTS_COLORS } from "@/lib/utils/echarts";
 import { BlurFade } from "@/components/ui/blur-fade";
-import { Bitcoin, ArrowUpDown, X, Tags, Shield } from "lucide-react";
+import { Bitcoin, ArrowUpDown, X, Tags, Shield, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -69,6 +69,8 @@ export function HoldingsBreakdown({
   setStablecoinTags,
   emergencyTags,
   setEmergencyTags,
+  cashTags,
+  setCashTags,
   clearCsv,
 }: {
   pricedHoldings: CryptoHolding[];
@@ -93,6 +95,8 @@ export function HoldingsBreakdown({
   setStablecoinTags: (updater: (prev: Record<string, boolean>) => Record<string, boolean>) => void;
   emergencyTags: Record<string, boolean>;
   setEmergencyTags: (updater: (prev: Record<string, boolean>) => Record<string, boolean>) => void;
+  cashTags: Record<string, boolean>;
+  setCashTags: (updater: (prev: Record<string, boolean>) => Record<string, boolean>) => void;
   clearCsv: () => void;
 }) {
   const { format } = useCurrency();
@@ -102,6 +106,7 @@ export function HoldingsBreakdown({
   const [showClearDialog, setShowClearDialog] = useState(false);
   const [showTagDialog, setShowTagDialog] = useState(false);
   const [showEmergencyDialog, setShowEmergencyDialog] = useState(false);
+  const [showCashDialog, setShowCashDialog] = useState(false);
 
   function toggleSort(field: SortField) {
     if (sortField === field) {
@@ -237,6 +242,13 @@ export function HoldingsBreakdown({
                 >
                   <Shield className="h-3 w-3" />
                   EF
+                </button>
+                <button
+                  onClick={() => setShowCashDialog(true)}
+                  className="flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                >
+                  <Wallet className="h-3 w-3" />
+                  Cash
                 </button>
                 <button
                   onClick={() => setShowClearDialog(true)}
@@ -578,6 +590,48 @@ export function HoldingsBreakdown({
                   />
                 </label>
               ))}
+          </div>
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline" />}>
+              Done
+            </DialogClose>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Cash / Dry powder tag dialog */}
+      <Dialog
+        open={showCashDialog}
+        onOpenChange={(open) => !open && setShowCashDialog(false)}
+      >
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Tag as Cash / Dry Powder</DialogTitle>
+            <DialogDescription>
+              Tokens you consider deployable capital — stablecoins, sweep
+              balances, anything you&apos;d spend on the next opportunity.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 max-h-60 overflow-y-auto py-2">
+            {holdings.map((h) => (
+              <label
+                key={h.token}
+                className="flex items-center justify-between px-2 py-1.5 rounded hover:bg-secondary/50 cursor-pointer"
+              >
+                <span className="text-sm font-medium">{h.token}</span>
+                <input
+                  type="checkbox"
+                  checked={cashTags[h.token] === true}
+                  onChange={(e) =>
+                    setCashTags((prev) => ({
+                      ...prev,
+                      [h.token]: e.target.checked,
+                    }))
+                  }
+                  className="h-4 w-4 rounded border-border accent-foreground"
+                />
+              </label>
+            ))}
           </div>
           <DialogFooter>
             <DialogClose render={<Button variant="outline" />}>

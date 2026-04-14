@@ -287,17 +287,22 @@ export function PerformanceChart({
     });
   }, [filteredData, stackedCategories, hasStackedProp]);
 
-  // Latest raw values per category (for the legend display)
+  // Latest raw values + % change per category (for the legend display)
   const stackedLatestValues = useMemo(() => {
     if (!hasStackedProp || !stackedCategories) return null;
     return stackedCategories.map((cat) => {
+      let first = 0;
       let last = 0;
       for (const snap of filteredData) {
         if (!snap.components) continue;
         const val = snap.components[cat.key] ?? 0;
-        if (val > 0) last = val;
+        if (val > 0) {
+          if (first === 0) first = val;
+          last = val;
+        }
       }
-      return last;
+      const changePct = first > 0 ? ((last - first) / first) * 100 : 0;
+      return { value: last, changePct };
     });
   }, [filteredData, stackedCategories, hasStackedProp]);
 
@@ -389,33 +394,43 @@ export function PerformanceChart({
       height,
     });
 
-    // Category lines show % change on a shared hidden scale (comparable trends).
+    // Category lines show % change on a shared scale (comparable trends).
     if (hasStacked && stackedCategories) {
       const refs: ISeriesApi<"Area">[] = [];
       for (const cat of stackedCategories) {
         const color = isDark ? cat.colorDark : cat.colorLight;
         const stackSeries = chart.addSeries(AreaSeries, {
           lineColor: color,
-          topColor: "rgba(0,0,0,0)",
-          bottomColor: "rgba(0,0,0,0)",
-          lineWidth: 1,
+          topColor: hexToRgba(color, 0.10),
+          bottomColor: hexToRgba(color, 0),
+          lineWidth: 2,
           priceScaleId: "pct",
           priceLineVisible: false,
           lastValueVisible: false,
           crosshairMarkerVisible: false,
+          priceFormat: {
+            type: "custom" as const,
+            formatter: (p: number) => `${p >= 0 ? "+" : ""}${p.toFixed(1)}%`,
+            minMove: 0.1,
+          },
         });
         refs.push(stackSeries);
       }
-      // Shared % change scale — hidden, synced margins with the main scale
+      // % change axis visible on the right in overlay mode; main $ axis hidden.
       chart.priceScale("pct").applyOptions({
-        visible: false,
-        scaleMargins: { top: 0.05, bottom: 0.02 },
+        visible: true,
+        borderVisible: false,
+        scaleMargins: { top: 0.1, bottom: 0.1 },
       });
+      chart.priceScale("right").applyOptions({ visible: false });
       stackedSeriesRefs.current = refs;
     }
 
+    // Main net-worth series. In overlay mode the line and area are hidden so
+    // only the % category lines are visible, but the series still exists so
+    // the crosshair can read its value for the header.
     const series = chart.addSeries(AreaSeries, {
-      lineColor,
+      lineColor: hasStacked ? "rgba(0,0,0,0)" : lineColor,
       topColor: hasStacked ? "rgba(0,0,0,0)" : topColor,
       bottomColor: hasStacked ? "rgba(0,0,0,0)" : bottomColor,
       lineWidth: 2,
@@ -426,6 +441,7 @@ export function PerformanceChart({
       },
       priceLineVisible: false,
       lastValueVisible: false,
+      crosshairMarkerVisible: !hasStacked,
     });
 
     chartRef.current = chart;
@@ -627,11 +643,12 @@ export function PerformanceChart({
       {/* Stacked legend — shown only in stacked mode */}
       {hasStacked && stackedCategories && chartData.length > 1 && (
         <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1.5">
-          {stackedCategories.map((cat) => {
+          {stackedCategories.map((cat, idx) => {
             const color = isDark ? cat.colorDark : cat.colorLight;
-            // Show the actual latest value (not the % change used for charting)
-            const idx = stackedCategories.indexOf(cat);
-            const lastBand = stackedLatestValues?.[idx] ?? 0;
+            const entry = stackedLatestValues?.[idx];
+            const lastBand = entry?.value ?? 0;
+            const pct = entry?.changePct ?? 0;
+            const pctPositive = pct >= 0;
             return (
               <div
                 key={cat.key}
@@ -643,9 +660,20 @@ export function PerformanceChart({
                 />
                 <span className="uppercase tracking-wide">{cat.label}</span>
                 {lastBand > 0 && (
-                  <span className="tabular-nums text-foreground/80">
-                    {format(lastBand)}
-                  </span>
+                  <>
+                    <span className="tabular-nums text-foreground/80">
+                      {format(lastBand)}
+                    </span>
+                    <span
+                      className={cn(
+                        "tabular-nums",
+                        pctPositive ? "text-income" : "text-expense",
+                      )}
+                    >
+                      {pctPositive ? "+" : ""}
+                      {pct.toFixed(2)}%
+                    </span>
+                  </>
                 )}
               </div>
             );

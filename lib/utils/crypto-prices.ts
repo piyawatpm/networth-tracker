@@ -41,10 +41,17 @@ export async function fetchCryptoPrices(
 
   if (toFetch.length === 0) return {};
 
+  // A valid Binance ticker is short, uppercase, and alphanumeric — raw CSV
+  // names like "Bitcoin" or "Ethena USDe" would produce invalid symbols and
+  // waste a CORS-blocked round trip. Route those straight to CoinGecko.
+  const isBinanceTicker = (t: string) => /^[A-Z0-9]{2,15}$/.test(t.toUpperCase());
+  const binanceTokens = toFetch.filter(isBinanceTicker);
+  const nonBinanceTokens = toFetch.filter((t) => !isBinanceTicker(t));
+
   try {
-    // Step 1: Fetch from Binance in parallel
+    // Step 1: Fetch from Binance in parallel (only for ticker-shaped symbols)
     const results = await Promise.all(
-      toFetch.map(async (token) => {
+      binanceTokens.map(async (token) => {
         const symbol = `${token.toUpperCase()}USDT`;
         try {
           const res = await fetch(
@@ -60,7 +67,7 @@ export async function fetchCryptoPrices(
     );
 
     const prices: Record<string, number> = {};
-    const failedTokens: string[] = [];
+    const failedTokens: string[] = [...nonBinanceTokens];
     for (const r of results) {
       if (r.price !== null && !isNaN(r.price)) {
         prices[r.token] = r.price;

@@ -1,8 +1,8 @@
 "use client";
 
-import { useRef, useState, useEffect } from "react";
+import { useRef, useEffect } from "react";
 import { cn } from "@/lib/utils";
-import { motion, AnimatePresence } from "motion/react";
+import { useInView, useMotionValue, useSpring } from "motion/react";
 
 interface NumberTickerProps {
   value: number;
@@ -21,36 +21,6 @@ function formatNumber(value: number, decimalPlaces: number): string {
   });
 }
 
-function DigitSlot({
-  digit,
-  goingUp,
-  changeKey,
-}: {
-  digit: string;
-  goingUp: boolean;
-  changeKey: number;
-}) {
-  return (
-    <span className="inline-block relative overflow-hidden" style={{ height: "1em" }}>
-      <AnimatePresence mode="popLayout">
-        <motion.span
-          key={changeKey}
-          className="inline-block"
-          initial={{ y: goingUp ? "100%" : "-100%", opacity: 0 }}
-          animate={{ y: "0%", opacity: 1 }}
-          exit={{ y: goingUp ? "-100%" : "100%", opacity: 0 }}
-          transition={{
-            y: { type: "spring", stiffness: 300, damping: 30, mass: 0.8 },
-            opacity: { duration: 0.15, ease: "easeOut" },
-          }}
-        >
-          {digit}
-        </motion.span>
-      </AnimatePresence>
-    </span>
-  );
-}
-
 export function NumberTicker({
   value,
   direction = "up",
@@ -60,65 +30,37 @@ export function NumberTicker({
   prefix = "",
   suffix = "",
 }: NumberTickerProps) {
-  const [visible, setVisible] = useState(delay === 0);
-  const prevValueRef = useRef<number | null>(null);
-  const prevFormattedRef = useRef("");
-  const digitKeysRef = useRef<number[]>([]);
+  const ref = useRef<HTMLSpanElement>(null);
+  const isInView = useInView(ref, { once: true, margin: "0px" });
+
+  const motionValue = useMotionValue(direction === "down" ? value : 0);
+  const springValue = useSpring(motionValue, {
+    damping: 30,
+    stiffness: 220,
+    mass: 0.6,
+  });
 
   useEffect(() => {
-    if (delay > 0) {
-      const t = setTimeout(() => setVisible(true), delay);
-      return () => clearTimeout(t);
-    }
-  }, [delay]);
+    if (!isInView) return;
+    const t = setTimeout(() => {
+      motionValue.set(direction === "down" ? 0 : value);
+    }, delay);
+    return () => clearTimeout(t);
+  }, [motionValue, isInView, delay, value, direction]);
 
-  const formatted = formatNumber(value, decimalPlaces);
-
-  // Determine slide direction from value comparison
-  const goingUp =
-    prevValueRef.current === null
-      ? direction === "up"
-      : value >= prevValueRef.current;
-
-  // Increment per-position keys only for digits that actually changed
-  if (visible && formatted !== prevFormattedRef.current) {
-    const prev = prevFormattedRef.current;
-    const keys = digitKeysRef.current;
-    for (let i = 0; i < formatted.length; i++) {
-      if (i >= prev.length || formatted[i] !== prev[i]) {
-        keys[i] = (keys[i] || 0) + 1;
+  useEffect(() => {
+    const unsubscribe = springValue.on("change", (latest) => {
+      if (ref.current) {
+        ref.current.textContent = formatNumber(latest, decimalPlaces);
       }
-    }
-    keys.length = formatted.length;
-    prevFormattedRef.current = formatted;
-    prevValueRef.current = value;
-  }
-
-  if (!visible) {
-    return (
-      <span className={cn("tabular-nums", className)}>
-        {prefix}{formatNumber(0, decimalPlaces)}{suffix}
-      </span>
-    );
-  }
-
-  const chars = formatted.split("");
+    });
+    return () => unsubscribe();
+  }, [springValue, decimalPlaces]);
 
   return (
-    <span className={cn("tabular-nums", className)}>
+    <span className={cn("inline-flex items-baseline tabular-nums", className)}>
       {prefix}
-      {chars.map((char, i) =>
-        /\d/.test(char) ? (
-          <DigitSlot
-            key={i}
-            digit={char}
-            goingUp={goingUp}
-            changeKey={digitKeysRef.current[i] || 0}
-          />
-        ) : (
-          <span key={i}>{char}</span>
-        )
-      )}
+      <span ref={ref}>{formatNumber(direction === "down" ? value : 0, decimalPlaces)}</span>
       {suffix}
     </span>
   );

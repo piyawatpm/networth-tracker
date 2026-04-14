@@ -172,6 +172,8 @@ export interface PortfolioHolding {
   notes: string;
   createdAt: number;
   isEmergencyFund?: boolean;
+  /** Counted as deployable cash / dry powder (sweep accounts, stable holdings) */
+  isCash?: boolean;
 }
 
 export interface PortfolioTransaction {

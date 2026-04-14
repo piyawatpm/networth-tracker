@@ -59,6 +59,8 @@ import { WorldDistributionChart } from "./_components/world-distribution-chart";
 import { MoneyFlowCard } from "./_components/money-flow-card";
 import { EmergencyFundCard } from "./_components/emergency-fund-card";
 import { KeyNumbersCard } from "./_components/key-numbers-card";
+import { FinancialFreedomCard } from "./_components/financial-freedom-card";
+import { InvestedVsCashCard } from "./_components/invested-vs-cash-card";
 import { totalInvestedInRange } from "@/lib/utils/portfolio-transactions";
 
 // ---------------------------------------------------------------------------
@@ -154,6 +156,7 @@ export default function DashboardPage() {
   const [nwSnapshots] = useCloudStorage<{ date: string; value: number }[]>("networth_snapshots", []);
   const [stablecoinTags] = useCloudStorage<Record<string, boolean>>("crypto_stablecoin_tags", {});
   const [cryptoEmergencyTags] = useCloudStorage<Record<string, boolean>>("crypto_emergency_tags", {});
+  const [cryptoCashTags] = useCloudStorage<Record<string, boolean>>("crypto_cash_tags", {});
   const [efTargetMonths] = useCloudStorage<number>("emergency_fund_target_months", 6);
 
   const { convert, format, symbol, currency } = useCurrency();
@@ -331,6 +334,33 @@ export default function DashboardPage() {
     return { emergencyFundTotal: allocs.reduce((s, a) => s + a.value, 0), efAllocations: allocs };
   }, [livePortfolioHoldings, rawCryptoHoldings, cryptoEmergencyTags, convert]);
 
+  // Dry powder / cash = manually-tagged portfolio holdings + tagged crypto
+  const { cashTotal, cashAllocations } = useMemo(() => {
+    const allocs: { label: string; sublabel?: string; value: number; source: "portfolio" | "crypto" }[] = [];
+    for (const h of livePortfolioHoldings) {
+      if (h.isCash) {
+        allocs.push({
+          label: h.ticker || h.name,
+          sublabel: h.ticker && h.name !== h.ticker ? h.name : h.broker || undefined,
+          value: convert(h.currentValue, h.currency),
+          source: "portfolio",
+        });
+      }
+    }
+    for (const h of rawCryptoHoldings) {
+      if (cryptoCashTags[h.token]) {
+        allocs.push({
+          label: h.token,
+          sublabel: h.exchange,
+          value: convert(h.currentValueUsd, "USD"),
+          source: "crypto",
+        });
+      }
+    }
+    allocs.sort((a, b) => b.value - a.value);
+    return { cashTotal: allocs.reduce((s, a) => s + a.value, 0), cashAllocations: allocs };
+  }, [livePortfolioHoldings, rawCryptoHoldings, cryptoCashTags, convert]);
+
   // Weighted average monthly expenses (recent 3mo × 2 + older 3mo × 1) — excludes one-off expenses
   const weightedMonthlyExpenses = useMemo(() => {
     const recurring = expenseEntries.filter((e) => !e.isOneOff);
@@ -500,19 +530,63 @@ export default function DashboardPage() {
         />
       </BlurFade>
 
-      {/* 3. ASSET BREAKDOWN + WORLD DISTRIBUTION + MONEY FLOW */}
+      {/* 2. FINANCIAL FREEDOM: passive income vs expenses for selected period */}
+      <FinancialFreedomCard
+        period={period}
+        passiveIncome={passiveIncome}
+        expenses={periodRecurringExpenseTotal}
+        passiveAnnualised={passiveAnnualized}
+        expensesAnnualised={annualizedExpenses}
+        format={format}
+        delay={D * 0.25}
+      />
+
+      {/* 3a. ASSET DISTRIBUTION (full width) */}
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
+        <WorldDistributionChart
+          normalTotal={normalTotal}
+          cryptoTotal={cryptoTotal}
+          superTotal={superTotal}
+          format={format}
+          delay={0.15}
+          cashTotal={cashTotal}
+          cashAllocations={cashAllocations}
+          breakdowns={{
+            normal: livePortfolioHoldings
+              .filter((h) => h.accountType === "normal")
+              .map((h) => ({
+                label: h.ticker || h.name,
+                sublabel: h.ticker && h.name !== h.ticker ? h.name : h.broker || undefined,
+                value: convert(h.currentValue, h.currency),
+              })),
+            super: livePortfolioHoldings
+              .filter((h) => h.accountType === "super")
+              .map((h) => ({
+                label: h.ticker || h.name,
+                sublabel: h.ticker && h.name !== h.ticker ? h.name : h.broker || undefined,
+                value: convert(h.currentValue, h.currency),
+              })),
+            crypto: cryptoHoldings.map((h) => ({
+              label: h.token,
+              sublabel: h.exchange,
+              value: convert(h.currentValueUsd, "USD"),
+            })),
+          }}
+        />
+      </div>
+
+      {/* 3a+. CAPITAL ALLOCATION (invested vs cash) */}
+      <InvestedVsCashCard
+        totalAssets={portfolioTotal + cryptoTotal + owedToMe}
+        cashTotal={cashTotal}
+        format={format}
+        delay={D * 0.5}
+      />
+
+      {/* 3b. ASSET BREAKDOWN + MONEY FLOW */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
         <AssetBreakdown rows={assetRows} hiddenSections={hiddenSections} onToggleSection={toggleSection} format={format} delay={D * 0.5} />
-        <div className="md:col-span-3">
-          <WorldDistributionChart
-            normalTotal={normalTotal}
-            cryptoTotal={cryptoTotal}
-            superTotal={superTotal}
-            format={format}
-            delay={0.15}
-          />
-        </div>
-        <div className="md:col-span-5">
+        <div className="md:col-span-8">
           <MoneyFlowCard
             periodLabel={period === "W" ? "This Week" : period === "M" ? "This Month" : "This Year"}
             periodIncome={periodIncomeTotal}

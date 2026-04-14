@@ -10,7 +10,7 @@ import {
 } from "react";
 import type { CachedRates } from "@/lib/utils/types";
 import { getCurrencySymbol, DEFAULT_CURRENCIES } from "@/lib/utils/types";
-import { fetchFxRates, convertCurrency, formatCurrency } from "@/lib/utils/fx";
+import { fetchFxRates, readFxRatesSync, convertCurrency, formatCurrency } from "@/lib/utils/fx";
 import { useCloudStorage } from "./data-provider";
 
 interface CurrencyContextValue {
@@ -32,9 +32,14 @@ const CurrencyContext = createContext<CurrencyContextValue | null>(null);
 export function CurrencyProvider({ children }: { children: ReactNode }) {
   const [currency, setCurrencyCloud] = useCloudStorage<string>("preferred_currency", "AUD");
   const [enabledCurrencies, setEnabledCurrenciesCloud] = useCloudStorage<string[]>("enabled_currencies", DEFAULT_CURRENCIES);
-  const [cachedRates, setCachedRates] = useState<CachedRates | null>(null);
+  // Seed synchronously from localStorage so the first render already has
+  // rates — prevents `convert` from returning raw amounts before the async
+  // fetch resolves (which was causing net-worth to jump on page load).
+  const [cachedRates, setCachedRates] = useState<CachedRates | null>(() =>
+    readFxRatesSync(),
+  );
 
-  // Fetch FX rates
+  // Refresh FX rates in the background
   useEffect(() => {
     fetchFxRates().then((r) => {
       if (r) setCachedRates(r);
