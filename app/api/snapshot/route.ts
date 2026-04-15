@@ -78,7 +78,7 @@ export async function POST(request: NextRequest) {
     const toUsd = (amount: number, fromCurrency: string) =>
       Math.round(convertCurrency(amount, fromCurrency, "USD", rates) * 100) / 100;
 
-    let holdings = parse<{ id: string; type: string; currentValue: number; currency: string; accountType: string }[]>("portfolio_holdings", []);
+    let holdings = parse<{ id: string; ticker?: string; country?: string; units?: number; type: string; currentValue: number; currency: string; accountType: string }[]>("portfolio_holdings", []);
     const portfolioSnapshots = parse<{ date: string; value: number }[]>("portfolio_snapshots", []);
     const nwSnapshots = parse<{ date: string; value: number }[]>("networth_snapshots", []);
     const cryptoSnapshots = parse<{ date: string; value: number; currency: string }[]>("crypto_snapshots", []);
@@ -91,6 +91,32 @@ export async function POST(request: NextRequest) {
         }
         return h;
       });
+    }
+
+    // Refresh stock prices via Finnhub (mirrors cron behavior)
+    let stockUpdatedCount = 0;
+    if (process.env.FINNHUB_API_KEY) {
+      const stockHoldings = holdings.filter((h) => h.ticker && (h.units ?? 0) > 0 && h.type !== "savings");
+      for (const h of stockHoldings) {
+        try {
+          const symbol = h.country?.toUpperCase() === "AU" ? `${h.ticker!.toUpperCase()}.AX` : h.ticker!.toUpperCase();
+          const res = await fetch(
+            `https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${process.env.FINNHUB_API_KEY}`,
+          );
+          if (res.ok) {
+            const data = await res.json();
+            if (data.c && data.c > 0) {
+              h.currentValue = (h.units ?? 0) * data.c;
+              if (h.country?.toUpperCase() === "US") h.currency = "USD";
+              stockUpdatedCount++;
+            }
+          }
+        } catch { /* skip individual failures */ }
+      }
+    }
+
+    // Persist holdings if anything changed (manual updates or stock refresh)
+    if ((manualUpdates && Object.keys(manualUpdates).length > 0) || stockUpdatedCount > 0) {
       await supabase.from("app_data").upsert({
         key: "portfolio_holdings",
         value: JSON.stringify(holdings),
@@ -200,6 +226,7 @@ export async function POST(request: NextRequest) {
       owedToMe: Math.round(owedToMe * 100) / 100,
       iOwe: Math.round(iOwe * 100) / 100,
       manualUpdatesApplied: manualUpdates ? Object.keys(manualUpdates).length : 0,
+      stockPricesUpdated: stockUpdatedCount,
       holdingsBreakdown: holdingsDebug,
     });
   } catch (e) {
