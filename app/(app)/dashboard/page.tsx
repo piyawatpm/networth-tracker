@@ -339,15 +339,20 @@ export default function DashboardPage() {
   }, [livePortfolioHoldings, rawCryptoHoldings, cryptoEmergencyTags, convert]);
 
   // Dry powder / cash = manually-tagged portfolio holdings + tagged crypto
-  const { cashTotal, cashAllocations } = useMemo(() => {
-    const allocs: { label: string; sublabel?: string; value: number; source: "portfolio" | "crypto" }[] = [];
+  const { cashTotal, cashAllocations, superCashTotal } = useMemo(() => {
+    const allocs: { label: string; sublabel?: string; value: number; source: "portfolio" | "crypto"; isSuper?: boolean }[] = [];
+    let superCash = 0;
     for (const h of livePortfolioHoldings) {
       if (h.isCash) {
+        const value = convert(h.currentValue, h.currency);
+        const isSuper = h.accountType === "super";
+        if (isSuper) superCash += value;
         allocs.push({
           label: h.ticker || h.name,
           sublabel: h.ticker && h.name !== h.ticker ? h.name : h.broker || undefined,
-          value: convert(h.currentValue, h.currency),
+          value,
           source: "portfolio",
+          isSuper,
         });
       }
     }
@@ -362,7 +367,7 @@ export default function DashboardPage() {
       }
     }
     allocs.sort((a, b) => b.value - a.value);
-    return { cashTotal: allocs.reduce((s, a) => s + a.value, 0), cashAllocations: allocs };
+    return { cashTotal: allocs.reduce((s, a) => s + a.value, 0), cashAllocations: allocs, superCashTotal: superCash };
   }, [livePortfolioHoldings, rawCryptoHoldings, cryptoCashTags, convert]);
 
   // Weighted average monthly expenses (recent 3mo × 2 + older 3mo × 1) — excludes one-off expenses
@@ -733,8 +738,8 @@ export default function DashboardPage() {
 
       {/* 3a+. CAPITAL ALLOCATION (invested vs cash) */}
       <InvestedVsCashCard
-        totalAssets={portfolioTotal + cryptoTotal + owedToMe}
-        cashTotal={cashTotal}
+        totalAssets={(includeSuper ? portfolioTotal : normalTotal) + cryptoTotal + owedToMe}
+        cashTotal={includeSuper ? cashTotal : cashTotal - superCashTotal}
         format={format}
         delay={D * 0.5}
       />
