@@ -175,9 +175,12 @@ function ActiveGoalRow({
           <span className={cn("text-lg font-bold tabular-nums tracking-tight", colors.text)}>
             {pct.toFixed(0)}%
           </span>
-          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          <div
+            className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+            onClick={(e) => e.stopPropagation()}
+          >
             <GoalDialog goal={g} onSave={onEdit} trigger={<Button variant="ghost" size="icon-xs"><Pencil className="h-3 w-3" /></Button>} />
-            <Button variant="ghost" size="icon-xs" onClick={onDelete}><Trash2 className="h-3 w-3" /></Button>
+            <Button variant="ghost" size="icon-xs" onClick={(e) => { e.stopPropagation(); onDelete(); }}><Trash2 className="h-3 w-3" /></Button>
           </div>
         </div>
       </div>
@@ -451,9 +454,12 @@ export function GoalSection({ netWorth, format }: GoalSectionProps) {
         </div>
 
         {next ? (
-          <button
+          <div
+            role="button"
+            tabIndex={0}
             onClick={() => setManageOpen(true)}
-            className="w-full text-left rounded-lg p-3 -m-3 hover:bg-secondary/40 transition-colors"
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setManageOpen(true); } }}
+            className="w-full cursor-pointer text-left rounded-lg p-3 -m-3 hover:bg-secondary/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <ActiveGoalRow
               g={next.goal}
@@ -465,11 +471,14 @@ export function GoalSection({ netWorth, format }: GoalSectionProps) {
               onEdit={(d) => editGoal(next.goal.id, d)}
               onDelete={() => removeGoal(next.goal.id)}
             />
-          </button>
+          </div>
         ) : latestAchieved ? (
-          <button
+          <div
+            role="button"
+            tabIndex={0}
             onClick={() => setManageOpen(true)}
-            className="w-full text-left rounded-lg bg-income/5 border border-income/10 p-3 hover:bg-income/10 transition-colors"
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setManageOpen(true); } }}
+            className="w-full cursor-pointer text-left rounded-lg bg-income/5 border border-income/10 p-3 hover:bg-income/10 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <div className="flex items-center gap-2">
               <div className="flex items-center justify-center h-6 w-6 rounded-full bg-income/15 shrink-0">
@@ -481,9 +490,11 @@ export function GoalSection({ netWorth, format }: GoalSectionProps) {
                   Last: {latestAchieved.goal.name} · {format(latestAchieved.goal.amount, latestAchieved.goal.currency, true)}
                 </p>
               </div>
-              <GoalDialog onSave={addGoal} trigger={<Button size="xs" className="gap-1"><Plus className="h-3 w-3" />New</Button>} />
+              <div onClick={(e) => e.stopPropagation()}>
+                <GoalDialog onSave={addGoal} trigger={<Button size="xs" className="gap-1"><Plus className="h-3 w-3" />New</Button>} />
+              </div>
             </div>
-          </button>
+          </div>
         ) : null}
       </div>
 
