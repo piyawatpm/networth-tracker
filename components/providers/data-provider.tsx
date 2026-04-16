@@ -62,83 +62,118 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     async function load() {
       try {
-        await Promise.all([
-          // Entity tables: SELECT * from each real table, convert to camelCase
-          ...Object.entries(ENTITY_TABLES).map(async ([key, cfg]) => {
-            const { data } = await supabase.from(cfg.table).select("*");
-            const camelRows = (data ?? []).map((r) =>
-              rowToCamel(r as Record<string, unknown>)
-            );
-            cache.current.set(key, JSON.stringify(camelRows));
-          }),
+        // Step 1: Always load app_data KV first (guaranteed to have data)
+        const { data: kvData } = await supabase
+          .from("app_data")
+          .select("key, value");
+        for (const row of kvData ?? []) {
+          cache.current.set(row.key, row.value);
+        }
 
-          // Snapshots: single query, split by type
-          (async () => {
-            const { data } = await supabase
-              .from("snapshots")
-              .select("*")
-              .order("date", { ascending: true });
-            const all = (data ?? []).map((r) =>
-              rowToCamel(r as Record<string, unknown>)
-            );
-            for (const [key, type] of Object.entries(SNAPSHOT_KEYS)) {
-              const filtered = all
-                .filter((s) => s.type === type)
-                .map((s) => {
-                  const {
-                    id: _id,
-                    type: _type,
-                    createdAt: _ca,
-                    ...rest
-                  } = s as Record<string, unknown>;
-                  return rest;
-                });
-              cache.current.set(key, JSON.stringify(filtered));
-            }
-          })(),
+        // Step 2: Try loading from relational tables — override KV if tables have data
+        let tablesAvailable = true;
 
-          // Custom categories: query once, split by kind
-          (async () => {
-            const { data } = await supabase
-              .from("custom_categories")
-              .select("*");
-            for (const [key, kind] of Object.entries(CATEGORY_KEYS)) {
-              const filtered = (data ?? [])
-                .filter((c) => c.kind === kind)
-                .map(({ kind: _, ...rest }) => rest);
-              cache.current.set(key, JSON.stringify(filtered));
-            }
-          })(),
+        // Probe one table to see if migration has been run
+        const { error: probeError } = await supabase
+          .from("income_entries")
+          .select("id", { count: "exact", head: true });
 
-          // Cron logs
-          (async () => {
-            const { data } = await supabase
-              .from("cron_logs")
-              .select("*")
-              .order("created_at", { ascending: false })
-              .limit(30);
-            const logs = (data ?? []).map((r) => ({
-              date: r.date,
-              timestamp: r.timestamp,
-              success: r.success,
-              log:
-                typeof r.log === "string" ? JSON.parse(r.log) : r.log,
-            }));
-            cache.current.set("cron_log", JSON.stringify(logs));
-          })(),
+        if (probeError) {
+          // Tables don't exist yet — keep using app_data KV data (already loaded)
+          tablesAvailable = false;
+          console.info("[DataProvider] New tables not found, using app_data KV fallback");
+        }
 
-          // KV settings: still from app_data, but only set if not already loaded
-          (async () => {
-            const { data } = await supabase
-              .from("app_data")
-              .select("key, value");
-            for (const row of data ?? []) {
-              if (!cache.current.has(row.key)) {
-                cache.current.set(row.key, row.value);
-              }
-            }
-          })(),
-        ]);
+        if (tablesAvailable) {
+          // Check if tables actually have data (migration endpoint may not have been run)
+          const { count } = await supabase
+            .from("income_entries")
+            .select("id", { count: "exact", head: true });
+          const tablesHaveData = (count ?? 0) > 0;
+
+          if (tablesHaveData) {
+            // Tables exist AND have data — load from them
+            await Promise.all([
+              // Entity tables
+              ...Object.entries(ENTITY_TABLES).map(async ([key, cfg]) => {
+                const { data } = await supabase.from(cfg.table).select("*");
+                const camelRows = (data ?? []).map((r) =>
+                  rowToCamel(r as Record<string, unknown>)
+                );
+                if (camelRows.length > 0) {
+                  cache.current.set(key, JSON.stringify(camelRows));
+                }
+              }),
+
+              // Snapshots
+              (async () => {
+                const { data } = await supabase
+                  .from("snapshots")
+                  .select("*")
+                  .order("date", { ascending: true });
+                const all = (data ?? []).map((r) =>
+                  rowToCamel(r as Record<string, unknown>)
+                );
+                if (all.length > 0) {
+                  for (const [key, type] of Object.entries(SNAPSHOT_KEYS)) {
+                    const filtered = all
+                      .filter((s) => s.type === type)
+                      .map((s) => {
+                        const {
+                          id: _id,
+                          type: _type,
+                          createdAt: _ca,
+                          ...rest
+                        } = s as Record<string, unknown>;
+                        return rest;
+                      });
+                    if (filtered.length > 0) {
+                      cache.current.set(key, JSON.stringify(filtered));
+                    }
+                  }
+                }
+              })(),
+
+              // Custom categories
+              (async () => {
+                const { data } = await supabase
+                  .from("custom_categories")
+                  .select("*");
+                if (data && data.length > 0) {
+                  for (const [key, kind] of Object.entries(CATEGORY_KEYS)) {
+                    const filtered = data
+                      .filter((c) => c.kind === kind)
+                      .map(({ kind: _, ...rest }) => rest);
+                    if (filtered.length > 0) {
+                      cache.current.set(key, JSON.stringify(filtered));
+                    }
+                  }
+                }
+              })(),
+
+              // Cron logs
+              (async () => {
+                const { data } = await supabase
+                  .from("cron_logs")
+                  .select("*")
+                  .order("created_at", { ascending: false })
+                  .limit(30);
+                if (data && data.length > 0) {
+                  const logs = data.map((r) => ({
+                    date: r.date,
+                    timestamp: r.timestamp,
+                    success: r.success,
+                    log:
+                      typeof r.log === "string" ? JSON.parse(r.log) : r.log,
+                  }));
+                  cache.current.set("cron_log", JSON.stringify(logs));
+                }
+              })(),
+            ]);
+          } else {
+            console.info("[DataProvider] Tables exist but are empty — using app_data KV fallback. Run /api/migrate to populate tables.");
+          }
+        }
       } catch {
         // Supabase unavailable — start with empty cache
       }
@@ -174,23 +209,24 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         setTimeout(async () => {
           pendingWrites.current.delete(key);
           try {
+            // Try writing to proper table first
             if (entityCfg) {
               const items = JSON.parse(value) as Record<string, unknown>[];
-              await syncEntityTable(supabase, entityCfg.table, items);
+              try { await syncEntityTable(supabase, entityCfg.table, items); } catch { /* table may not exist yet */ }
             } else if (snapshotType) {
               const items = JSON.parse(value) as Record<string, unknown>[];
-              await syncSnapshots(supabase, snapshotType, items);
+              try { await syncSnapshots(supabase, snapshotType, items); } catch { /* table may not exist yet */ }
             } else if (categoryKind) {
               const items = JSON.parse(value) as Record<string, unknown>[];
-              await syncCategories(supabase, categoryKind, items);
-            } else {
-              await supabase
-                .from("app_data")
-                .upsert(
-                  { key, value, updated_at: new Date().toISOString() },
-                  { onConflict: "key" }
-                );
+              try { await syncCategories(supabase, categoryKind, items); } catch { /* table may not exist yet */ }
             }
+            // Always dual-write to app_data KV as safety net
+            await supabase
+              .from("app_data")
+              .upsert(
+                { key, value, updated_at: new Date().toISOString() },
+                { onConflict: "key" }
+              );
           } catch (err) {
             console.warn(
               `Supabase write failed for ${key}:`,
@@ -208,42 +244,36 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     try {
       const now = new Date().toISOString();
 
-      // Entity tables
-      await Promise.all(
-        Object.entries(ENTITY_TABLES).map(async ([key, cfg]) => {
-          const raw = cache.current.get(key);
-          if (!raw) return;
-          const items = JSON.parse(raw) as Record<string, unknown>[];
-          await syncEntityTable(supabase, cfg.table, items);
-        })
-      );
+      // Try writing to proper tables (graceful — tables may not exist yet)
+      try {
+        await Promise.all([
+          ...Object.entries(ENTITY_TABLES).map(async ([key, cfg]) => {
+            const raw = cache.current.get(key);
+            if (!raw) return;
+            const items = JSON.parse(raw) as Record<string, unknown>[];
+            await syncEntityTable(supabase, cfg.table, items);
+          }),
+          ...Object.entries(SNAPSHOT_KEYS).map(async ([key, type]) => {
+            const raw = cache.current.get(key);
+            if (!raw) return;
+            const items = JSON.parse(raw) as Record<string, unknown>[];
+            await syncSnapshots(supabase, type, items);
+          }),
+          ...Object.entries(CATEGORY_KEYS).map(async ([key, kind]) => {
+            const raw = cache.current.get(key);
+            if (!raw) return;
+            const items = JSON.parse(raw) as Record<string, unknown>[];
+            await syncCategories(supabase, kind, items);
+          }),
+        ]);
+      } catch {
+        // Tables may not exist yet — that's fine, KV fallback below
+      }
 
-      // Snapshots
-      await Promise.all(
-        Object.entries(SNAPSHOT_KEYS).map(async ([key, type]) => {
-          const raw = cache.current.get(key);
-          if (!raw) return;
-          const items = JSON.parse(raw) as Record<string, unknown>[];
-          await syncSnapshots(supabase, type, items);
-        })
-      );
-
-      // Categories
-      await Promise.all(
-        Object.entries(CATEGORY_KEYS).map(async ([key, kind]) => {
-          const raw = cache.current.get(key);
-          if (!raw) return;
-          const items = JSON.parse(raw) as Record<string, unknown>[];
-          await syncCategories(supabase, kind, items);
-        })
-      );
-
-      // KV settings — everything not routed to a proper table
+      // Always save ALL keys to app_data KV as safety net
       const kvRows: { key: string; value: string; updated_at: string }[] = [];
       cache.current.forEach((value, key) => {
-        if (!TABLE_KEYS.has(key)) {
-          kvRows.push({ key, value, updated_at: now });
-        }
+        kvRows.push({ key, value, updated_at: now });
       });
 
       if (kvRows.length > 0) {
@@ -263,20 +293,18 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     }
   }, [supabase]);
 
-  // Save before tab close — only beacon KV settings
+  // Save before tab close — beacon ALL data to app_data KV as safety net
   useEffect(() => {
     function handleBeforeUnload() {
       // Flush all pending writes
       pendingWrites.current.forEach((timeout) => clearTimeout(timeout));
       pendingWrites.current.clear();
 
-      // Synchronous beacon — best effort, only KV settings
+      // Synchronous beacon — best effort, save everything to app_data
       const rows: { key: string; value: string; updated_at: string }[] = [];
       const now = new Date().toISOString();
       cache.current.forEach((value, key) => {
-        if (!TABLE_KEYS.has(key)) {
-          rows.push({ key, value, updated_at: now });
-        }
+        rows.push({ key, value, updated_at: now });
       });
 
       if (rows.length > 0) {
