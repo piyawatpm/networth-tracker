@@ -2,36 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
+import { getUsMarketSession, type MarketSession } from "@/lib/utils/market-session";
 
-type Session = "PRE" | "REGULAR" | "POST" | "CLOSED" | "WEEKEND";
-
-function getUsMarketSession(now = new Date()): Session {
-  // Build ET wall time via Intl — handles DST automatically
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    weekday: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(now);
-
-  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
-  const weekday = get("weekday");
-  const hour = parseInt(get("hour"), 10);
-  const minute = parseInt(get("minute"), 10);
-  const mins = hour * 60 + minute;
-
-  if (weekday === "Sat" || weekday === "Sun") return "WEEKEND";
-  // Pre-market: 4:00 AM – 9:30 AM ET
-  if (mins >= 4 * 60 && mins < 9 * 60 + 30) return "PRE";
-  // Regular: 9:30 AM – 4:00 PM ET
-  if (mins >= 9 * 60 + 30 && mins < 16 * 60) return "REGULAR";
-  // Post-market: 4:00 PM – 8:00 PM ET
-  if (mins >= 16 * 60 && mins < 20 * 60) return "POST";
-  return "CLOSED";
-}
-
-const CONFIG: Record<Session, { label: string; dotClass: string; textClass: string }> = {
+const CONFIG: Record<MarketSession, { label: string; dotClass: string; textClass: string }> = {
   REGULAR: { label: "Live", dotClass: "bg-income animate-pulse", textClass: "text-income" },
   PRE:     { label: "Pre-market", dotClass: "bg-[#b8860b] animate-pulse", textClass: "text-[#b8860b]" },
   POST:    { label: "After hours", dotClass: "bg-[#4d7cc7] animate-pulse", textClass: "text-[#4d7cc7]" },
@@ -40,7 +13,7 @@ const CONFIG: Record<Session, { label: string; dotClass: string; textClass: stri
 };
 
 export function MarketSessionBadge({ className }: { className?: string }) {
-  const [session, setSession] = useState<Session>("CLOSED");
+  const [session, setSession] = useState<MarketSession>("CLOSED");
 
   useEffect(() => {
     const tick = () => setSession(getUsMarketSession());

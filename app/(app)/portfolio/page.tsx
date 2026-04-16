@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useCloudStorage } from "@/components/providers/data-provider";
 import { useCurrency } from "@/components/providers/currency-provider";
 import type { PortfolioHolding, HoldingType, AccountType, PortfolioTransaction } from "@/lib/utils/types";
@@ -24,6 +24,7 @@ import { MarketSessionBadge } from "@/components/portfolio/market-session-badge"
 import type { FundAllocations } from "@/components/portfolio/fund-breakdown";
 import { Plus, Download } from "lucide-react";
 import { useFinnhubWs } from "@/lib/hooks/use-finnhub-ws";
+import { getUsMarketSession, pollIntervalForSession } from "@/lib/utils/market-session";
 import { PerformanceChart } from "@/components/ui/performance-chart";
 
 import { PortfolioCharts } from "./_components/portfolio-charts";
@@ -225,6 +226,41 @@ export default function PortfolioPage() {
       fetchPrices();
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Keep a stable ref to fetchPrices so the polling effect doesn't restart
+  // every time holdings change (WS trade updates mutate holdings).
+  const fetchPricesRef = useRef(fetchPrices);
+  useEffect(() => { fetchPricesRef.current = fetchPrices; }, [fetchPrices]);
+
+  // Session-aware polling so pre/post-market moves actually show while
+  // the page is open (Finnhub WS free tier doesn't stream extended hours).
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const tick = () => {
+      if (document.visibilityState !== "hidden") {
+        fetchPricesRef.current(true);
+      }
+      const next = pollIntervalForSession(getUsMarketSession());
+      timer = setTimeout(tick, next);
+    };
+
+    const initial = pollIntervalForSession(getUsMarketSession());
+    timer = setTimeout(tick, initial);
+
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        if (timer) clearTimeout(timer);
+        tick();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      if (timer) clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, []);
 
   // ── Finnhub WebSocket for real-time US stock prices ──
   const wsSymbols = useMemo(() => {
