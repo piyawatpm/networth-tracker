@@ -132,9 +132,25 @@ export default function AnalyticsPage() {
   const today = getSydneyDateString();
   const monthStart = today.slice(0, 7) + "-01";
 
+  // portfolio_snapshots stores the no-super value, so we must exclude super
+  // transactions from the cash-flow adjustment — otherwise super buys get
+  // subtracted without ever showing up in the snapshot, creating phantom losses.
+  const superHoldingIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const h of portfolioHoldings) {
+      if (h.accountType === "super") ids.add(h.id);
+    }
+    return ids;
+  }, [portfolioHoldings]);
+
+  const nonSuperTxns = useMemo(
+    () => portfolioTransactions.filter((tx) => !superHoldingIds.has(tx.holdingId)),
+    [portfolioTransactions, superHoldingIds],
+  );
+
   const dailyPnl = useMemo(
-    () => computeDailyPnl(portfolioSnapshots, cryptoSnapshots, portfolioTransactions, cryptoTxns, convert),
-    [portfolioSnapshots, cryptoSnapshots, portfolioTransactions, cryptoTxns, convert],
+    () => computeDailyPnl(portfolioSnapshots, cryptoSnapshots, nonSuperTxns, cryptoTxns, convert),
+    [portfolioSnapshots, cryptoSnapshots, nonSuperTxns, cryptoTxns, convert],
   );
 
   const todayPnl = dailyPnl.find((d) => d.date === today)?.totalPnl ?? 0;
