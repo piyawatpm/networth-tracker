@@ -11,7 +11,8 @@ import {
   parseAndComputeHoldings,
   getTotalCryptoValueUsd,
 } from "@/lib/utils/crypto-csv";
-import { applyLivePrices, applyStablecoinTags } from "@/lib/utils/crypto-prices";
+import { applyLivePrices } from "@/lib/utils/crypto-prices";
+import { applyStablecoinTags } from "@/lib/utils/crypto-csv";
 import { canAutoUpdate } from "@/lib/utils/prices";
 import { useAlpacaWs } from "@/lib/hooks/use-alpaca-ws";
 import { useBinanceWs } from "@/lib/hooks/use-binance-ws";
@@ -155,12 +156,12 @@ export default function AnalyticsPage() {
   }, [dailyPnl]);
 
   const portfolioPnl30d = useMemo(
-    () => last30.map((d) => ({ date: d.date, pnl: d.portfolioPnl })),
+    () => last30.reduce((s, d) => s + d.portfolioPnl, 0),
     [last30],
   );
 
   const cryptoPnl30d = useMemo(
-    () => last30.map((d) => ({ date: d.date, pnl: d.cryptoPnl })),
+    () => last30.reduce((s, d) => s + d.cryptoPnl, 0),
     [last30],
   );
 
