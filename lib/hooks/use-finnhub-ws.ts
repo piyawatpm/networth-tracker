@@ -16,15 +16,21 @@ export type FinnhubPrices = Record<string, FinnhubTrade>;
  * @param symbols Array of stock tickers, e.g. ["AAPL", "MSFT"]
  * @returns { livePrices, connected }
  */
+const MAX_ATTEMPTS = 4;
+const BACKOFF_MS = [3_000, 10_000, 30_000, 60_000];
+
 export function useFinnhubWs(symbols: string[]) {
   const [livePrices, setLivePrices] = useState<FinnhubPrices>({});
   const [connected, setConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const attemptsRef = useRef(0);
+  const gaveUpRef = useRef(false);
   const symbolsKey = symbols.sort().join(",");
 
   const connect = useCallback(() => {
     if (symbols.length === 0) return;
+    if (gaveUpRef.current) return;
 
     const apiKey = process.env.NEXT_PUBLIC_FINNHUB_API_KEY;
     if (!apiKey) return;
@@ -35,7 +41,7 @@ export function useFinnhubWs(symbols: string[]) {
 
     ws.onopen = () => {
       setConnected(true);
-      // Subscribe to each symbol
+      attemptsRef.current = 0;
       for (const sym of symbols) {
         ws.send(JSON.stringify({ type: "subscribe", symbol: sym }));
       }
@@ -46,11 +52,9 @@ export function useFinnhubWs(symbols: string[]) {
         const msg = JSON.parse(event.data);
         if (msg.type !== "trade" || !msg.data) return;
 
-        // Batch updates — msg.data is an array of trades
         const updates: FinnhubPrices = {};
         for (const trade of msg.data) {
           const sym = trade.s as string;
-          // Keep the latest trade per symbol in this batch
           if (!updates[sym] || trade.t > updates[sym].updatedAt) {
             updates[sym] = {
               price: trade.p,
@@ -70,22 +74,34 @@ export function useFinnhubWs(symbols: string[]) {
 
     ws.onclose = () => {
       setConnected(false);
-      // Auto-reconnect after 3s
-      reconnectTimer.current = setTimeout(() => connect(), 3000);
+      attemptsRef.current += 1;
+      if (attemptsRef.current >= MAX_ATTEMPTS) {
+        gaveUpRef.current = true;
+        console.info(
+          "[finnhub-ws] giving up after repeated connection failures — REST polling will cover pricing (likely WS not enabled on this Finnhub tier)",
+        );
+        return;
+      }
+      const delay = BACKOFF_MS[Math.min(attemptsRef.current - 1, BACKOFF_MS.length - 1)];
+      reconnectTimer.current = setTimeout(() => connect(), delay);
     };
 
     ws.onerror = () => {
-      ws.close();
+      // Close triggers onclose which handles backoff; avoid double-logging.
+      try { ws.close(); } catch { /* noop */ }
     };
   }, [symbolsKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    // Reset the "gave up" flag when the symbol set changes so the user gets
+    // a fresh chance after editing holdings.
+    gaveUpRef.current = false;
+    attemptsRef.current = 0;
     connect();
 
     return () => {
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
       if (wsRef.current) {
-        // Unsubscribe before closing
         for (const sym of symbols) {
           try {
             wsRef.current.send(JSON.stringify({ type: "unsubscribe", symbol: sym }));
