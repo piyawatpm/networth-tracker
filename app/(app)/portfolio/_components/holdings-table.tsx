@@ -187,6 +187,12 @@ export function HoldingsTable({
                       </div>
                       <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-muted-foreground">
                         {h.ticker && <span className="font-mono">{h.ticker}</span>}
+                        {h.units > 0 && (
+                          <>
+                            <span>·</span>
+                            <span className="tabular-nums">{format(h.currentValue / h.units, h.currency)}/u</span>
+                          </>
+                        )}
                         <span>·</span>
                         <span>{HOLDING_TYPE_LABELS[h.type]}</span>
                         {h.broker && <><span>·</span><span>{h.broker}</span></>}
@@ -213,9 +219,9 @@ export function HoldingsTable({
                       <div className="grid grid-cols-2 sm:grid-cols-4 sm:divide-x divide-border/30">
                         {[
                           { label: "Current Value", val: format(h.currentValue, h.currency), edit: true },
+                          { label: "Price / unit", val: h.units > 0 ? format(h.currentValue / h.units, h.currency) : "—" },
                           { label: "Invested", val: format(h.amountInvested, h.currency) },
                           { label: "Units", val: h.units.toLocaleString("en-US", { maximumFractionDigits: 6 }) },
-                          { label: "Currency", val: h.currency },
                         ].map((m) => (
                           <div key={m.label} className="px-3 sm:px-4 py-2.5 min-w-0">
                             <p className="text-[9px] text-muted-foreground uppercase tracking-wider">{m.label}</p>
