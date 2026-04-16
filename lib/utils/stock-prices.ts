@@ -38,7 +38,6 @@ async function fetchYahoo(symbol: string): Promise<ExtendedQuote | null> {
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
           Accept: "application/json",
         },
-        // Yahoo is unofficial — keep this short
         signal: AbortSignal.timeout(6000),
       },
     );
@@ -48,26 +47,30 @@ async function fetchYahoo(symbol: string): Promise<ExtendedQuote | null> {
     if (!meta?.regularMarketPrice) return null;
 
     const marketState: MarketState = meta.marketState ?? "CLOSED";
-    let price: number = meta.regularMarketPrice;
-    let extended = false;
 
-    if (marketState === "PRE" && meta.preMarketPrice) {
-      price = meta.preMarketPrice;
-      extended = true;
-    } else if (
-      (marketState === "POST" || marketState === "POSTPOST") &&
-      meta.postMarketPrice
-    ) {
-      price = meta.postMarketPrice;
-      extended = true;
+    // Pick the freshest trade across regular / pre / post sessions.
+    // Yahoo keeps post/pre prices populated even when marketState is CLOSED/POSTPOST/PREPRE,
+    // so comparing timestamps is more reliable than trusting marketState alone.
+    const candidates: { price: number; time: number; kind: "regular" | "pre" | "post" }[] = [];
+    if (typeof meta.regularMarketPrice === "number" && meta.regularMarketTime) {
+      candidates.push({ price: meta.regularMarketPrice, time: meta.regularMarketTime, kind: "regular" });
     }
+    if (typeof meta.preMarketPrice === "number" && meta.preMarketTime) {
+      candidates.push({ price: meta.preMarketPrice, time: meta.preMarketTime, kind: "pre" });
+    }
+    if (typeof meta.postMarketPrice === "number" && meta.postMarketTime) {
+      candidates.push({ price: meta.postMarketPrice, time: meta.postMarketTime, kind: "post" });
+    }
+    if (candidates.length === 0) return null;
+    candidates.sort((a, b) => b.time - a.time);
+    const best = candidates[0];
 
     return {
-      price,
+      price: best.price,
       currency: meta.currency ?? "USD",
       marketState,
       source: "yahoo",
-      extended,
+      extended: best.kind !== "regular",
     };
   } catch {
     return null;
