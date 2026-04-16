@@ -58,13 +58,17 @@ function dayOf(dateStr: string): string {
 /**
  * Build a map of day -> last snapshot value for that day.
  * If multiple snapshots fall on the same day, the latest one wins.
+ * Snapshots are stored in USD; convert applies the user's chosen currency.
  */
-function buildDailyMap(snapshots: Snapshot[]): Map<string, number> {
+function buildDailyMap(
+  snapshots: Snapshot[],
+  convert: (amount: number, currency: string) => number,
+): Map<string, number> {
   const map = new Map<string, number>();
   // Sort chronologically so the last occurrence per day is the latest.
   const sorted = [...snapshots].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
   for (const s of sorted) {
-    map.set(dayOf(s.date), s.value);
+    map.set(dayOf(s.date), convert(s.value, "USD"));
   }
   return map;
 }
@@ -122,8 +126,8 @@ export function computeDailyPnl(
   cryptoTxns: CryptoTransaction[],
   convert: (amount: number, currency: string) => number,
 ): DailyPnlEntry[] {
-  const portMap = buildDailyMap(portfolioSnapshots);
-  const cryptoMap = buildDailyMap(cryptoSnapshots);
+  const portMap = buildDailyMap(portfolioSnapshots, convert);
+  const cryptoMap = buildDailyMap(cryptoSnapshots, convert);
   const portCF = portfolioCashFlowByDay(portfolioTxns, convert);
   const cryptoCF = cryptoCashFlowByDay(cryptoTxns, convert);
 

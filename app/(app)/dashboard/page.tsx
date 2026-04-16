@@ -753,7 +753,8 @@ export default function DashboardPage() {
       {/* Combined all-assets allocation */}
       <CombinedAllocation
         portfolioHoldings={livePortfolioHoldings}
-        cryptoHoldings={cryptoHoldings}
+        rawCryptoHoldings={rawCryptoHoldings}
+        stablecoinTags={stablecoinTags}
         convert={convert}
         format={format}
         symbol={symbol}
