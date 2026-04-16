@@ -36,7 +36,7 @@ import type {
 } from "@/lib/utils/types";
 import { ArrowUpRight, ArrowDownRight } from "lucide-react";
 import { useBinanceWs } from "@/lib/hooks/use-binance-ws";
-import { useFinnhubWs } from "@/lib/hooks/use-finnhub-ws";
+import { useAlpacaWs } from "@/lib/hooks/use-alpaca-ws";
 import { applyLivePrices } from "@/lib/utils/crypto-prices";
 import { canAutoUpdate } from "@/lib/utils/prices";
 
@@ -182,7 +182,7 @@ export default function DashboardPage() {
       .filter((h) => h.ticker && canAutoUpdate(h.ticker) && h.country?.toUpperCase() === "US")
       .map((h) => h.ticker.toUpperCase());
   }, [portfolioHoldings]);
-  const { livePrices: finnhubPrices, connected: stockWsConnected } = useFinnhubWs(stockWsSymbols);
+  const { livePrices: finnhubPrices, connected: stockWsConnected } = useAlpacaWs(stockWsSymbols);
 
   // Binance WS for crypto
   const rawCryptoHoldings = useMemo(() => (cryptoCsvText ? parseAndComputeHoldings(cryptoCsvText) : []), [cryptoCsvText]);

@@ -18,8 +18,28 @@ export interface ExtendedQuote {
   price: number;
   currency: string;
   marketState: MarketState;
-  source: "yahoo" | "finnhub";
+  source: "alpaca" | "yahoo" | "finnhub";
   extended: boolean;
+}
+
+/** Classify a trade timestamp into a US market session (ET). */
+function classifyTradeTime(tradeIso: string): { state: MarketState; extended: boolean } {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date(tradeIso));
+  const weekday = parts.find((p) => p.type === "weekday")?.value ?? "";
+  const h = parseInt(parts.find((p) => p.type === "hour")?.value ?? "0", 10);
+  const m = parseInt(parts.find((p) => p.type === "minute")?.value ?? "0", 10);
+  if (weekday === "Sat" || weekday === "Sun") return { state: "CLOSED", extended: false };
+  const mins = h * 60 + m;
+  if (mins >= 240 && mins < 570) return { state: "PRE", extended: true };
+  if (mins >= 570 && mins < 960) return { state: "REGULAR", extended: false };
+  if (mins >= 960 && mins < 1200) return { state: "POST", extended: true };
+  return { state: "CLOSED", extended: false };
 }
 
 function toYahooSymbol(ticker: string, country?: string): string {
@@ -138,12 +158,55 @@ async function fetchFinnhub(
   }
 }
 
+async function fetchAlpaca(ticker: string): Promise<ExtendedQuote | null> {
+  const keyId = process.env.ALPACA_KEY_ID;
+  const secret = process.env.ALPACA_SECRET_KEY;
+  if (!keyId || !secret) return null;
+
+  try {
+    const res = await fetch(
+      `https://data.alpaca.markets/v2/stocks/${encodeURIComponent(ticker.toUpperCase())}/snapshot?feed=iex`,
+      {
+        headers: {
+          "APCA-API-KEY-ID": keyId,
+          "APCA-API-SECRET-KEY": secret,
+          Accept: "application/json",
+        },
+        cache: "no-store",
+        signal: AbortSignal.timeout(6000),
+      },
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    const latest = data?.latestTrade;
+    if (!latest || typeof latest.p !== "number" || !latest.t) return null;
+    const session = classifyTradeTime(latest.t);
+    return {
+      price: latest.p,
+      currency: "USD",
+      marketState: session.state,
+      source: "alpaca",
+      extended: session.extended,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchExtendedStockQuote(
   ticker: string,
   country?: string,
 ): Promise<ExtendedQuote | null> {
-  const symbol = toYahooSymbol(ticker, country);
+  const isAU = country?.toUpperCase() === "AU";
 
+  // Alpaca covers pre+regular+post for US equities with millisecond-accurate trade
+  // timestamps. ASX isn't available on Alpaca, so AU tickers skip straight to Yahoo.
+  if (!isAU) {
+    const alpaca = await fetchAlpaca(ticker);
+    if (alpaca) return alpaca;
+  }
+
+  const symbol = toYahooSymbol(ticker, country);
   const yahoo = await fetchYahoo(symbol);
   if (yahoo) return yahoo;
 

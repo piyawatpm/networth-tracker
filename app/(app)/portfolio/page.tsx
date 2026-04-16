@@ -23,7 +23,7 @@ import { HoldingDialog } from "@/components/portfolio/holding-dialog";
 import { MarketSessionBadge } from "@/components/portfolio/market-session-badge";
 import type { FundAllocations } from "@/components/portfolio/fund-breakdown";
 import { Plus, Download } from "lucide-react";
-import { useFinnhubWs } from "@/lib/hooks/use-finnhub-ws";
+import { useAlpacaWs } from "@/lib/hooks/use-alpaca-ws";
 import { getUsMarketSession, pollIntervalForSession } from "@/lib/utils/market-session";
 import { PerformanceChart } from "@/components/ui/performance-chart";
 
@@ -269,7 +269,7 @@ export default function PortfolioPage() {
       .map((h) => h.ticker.toUpperCase());
   }, [holdings]);
 
-  const { livePrices: finnhubPrices, connected: wsConnected } = useFinnhubWs(wsSymbols);
+  const { livePrices: finnhubPrices, connected: wsConnected } = useAlpacaWs(wsSymbols);
 
   // Apply Finnhub live prices to holdings
   useEffect(() => {

@@ -9,7 +9,7 @@ interface PriceResult {
   currency: string;
   marketState?: MarketState;
   extended?: boolean;
-  source?: "yahoo" | "finnhub";
+  source?: "alpaca" | "yahoo" | "finnhub";
   error?: string;
 }
 
