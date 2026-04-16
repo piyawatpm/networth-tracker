@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { computeOccurrences } from "@/lib/utils/timezone";
 import { fetchExtendedStockQuote } from "@/lib/utils/stock-prices";
+import { rowToCamel, rowToSnake } from "@/lib/supabase/tables";
 
 // Use secret key for server-side cron (bypasses RLS)
 const supabase = createClient(
@@ -105,50 +106,49 @@ export async function GET(request: Request) {
   log.push(`Cron started at ${new Date().toISOString()}, Sydney: ${sydneyTime}`);
 
   try {
-    // Read all needed data from Supabase
-    const keys = [
-      "portfolio_holdings",
-      "portfolio_snapshots",
-      "networth_snapshots",
-      "income_entries",
-      "expense_entries",
-      "recurring_income_templates",
-      "recurring_expense_templates",
-      "crypto_csv_text",
-      "crypto_prices",
-      "crypto_snapshots",
-      "crypto_ticker_mappings",
-      "debt_records",
-      "debt_transactions",
-    ];
+    // ── Load data from relational tables + KV for settings/cache ──
+    const [
+      { data: holdingsRaw },
+      { data: incomeEntriesRaw },
+      { data: expenseEntriesRaw },
+      { data: incomeTemplatesRaw },
+      { data: expenseTemplatesRaw },
+      { data: tickerMappingsRaw },
+      { data: cryptoCsvRaw },
+      { data: cryptoPricesRaw },
+    ] = await Promise.all([
+      supabase.from("portfolio_holdings").select("*"),
+      supabase.from("income_entries").select("id, date, recurring_id"),
+      supabase.from("expense_entries").select("id, date, recurring_id"),
+      supabase.from("recurring_income_templates").select("*"),
+      supabase.from("recurring_expense_templates").select("*"),
+      supabase.from("app_data").select("value").eq("key", "crypto_ticker_mappings").single(),
+      supabase.from("app_data").select("value").eq("key", "crypto_csv_text").single(),
+      supabase.from("app_data").select("value").eq("key", "crypto_prices").single(),
+    ]);
 
-    const { data: rows } = await supabase
-      .from("app_data")
-      .select("key, value")
-      .in("key", keys);
-
-    const dataMap: Record<string, string> = {};
-    for (const row of rows ?? []) {
-      dataMap[row.key] = row.value;
-    }
-
-    const parse = <T>(key: string, fallback: T): T => {
-      try {
-        return dataMap[key] ? JSON.parse(dataMap[key]) : fallback;
-      } catch {
-        return fallback;
-      }
-    };
-
-    const holdings = parse<{ id: string; ticker: string; country: string; units: number; currentValue: number; currency: string; type: string; accountType: string }[]>("portfolio_holdings", []);
-    const portfolioSnapshots = parse<{ date: string }[]>("portfolio_snapshots", []);
-    const nwSnapshots = parse<{ date: string; value: number }[]>("networth_snapshots", []);
-    const cryptoSnapshots = parse<{ date: string; value: number }[]>("crypto_snapshots", []);
-    const incomeEntries = parse<{ id: string; date: string; recurringId?: string }[]>("income_entries", []);
-    const expenseEntries = parse<{ id: string; date: string; recurringId?: string }[]>("expense_entries", []);
-    const incomeTemplates = parse<RecurringTemplate[]>("recurring_income_templates", []);
-    const expenseTemplates = parse<RecurringTemplate[]>("recurring_expense_templates", []);
-    const tickerMappings = parse<Record<string, string>>("crypto_ticker_mappings", {});
+    // Convert to camelCase for internal logic
+    const holdings = (holdingsRaw ?? []).map((r) => rowToCamel(r)) as {
+      id: string; ticker: string; country: string; units: number;
+      currentValue: number; currency: string; type: string; accountType: string;
+    }[];
+    const incomeEntries = (incomeEntriesRaw ?? []).map((r) => rowToCamel(r)) as {
+      id: string; date: string; recurringId?: string;
+    }[];
+    const expenseEntries = (expenseEntriesRaw ?? []).map((r) => rowToCamel(r)) as {
+      id: string; date: string; recurringId?: string;
+    }[];
+    const incomeTemplates = (incomeTemplatesRaw ?? []).map((r) => rowToCamel(r)) as RecurringTemplate[];
+    const expenseTemplates = (expenseTemplatesRaw ?? []).map((r) => rowToCamel(r)) as RecurringTemplate[];
+    const tickerMappings: Record<string, string> = tickerMappingsRaw?.value
+      ? JSON.parse(tickerMappingsRaw.value)
+      : {};
+    const cryptoCsvText: string = cryptoCsvRaw?.value
+      ? JSON.parse(cryptoCsvRaw.value)
+      : "";
+    const storedCryptoPrices: { prices: Record<string, number> } = cryptoPricesRaw?.value
+      ? JSON.parse(cryptoPricesRaw.value)
+      : { prices: {} };
 
     // ── Fetch FX rates live (same as manual snapshot API) ──
     let rates: Record<string, number> = {};
@@ -168,9 +168,6 @@ export async function GET(request: Request) {
       return amount / rates[fromCurrency];
     };
 
-    const updates: { key: string; value: string; updated_at: string }[] = [];
-    const now = new Date().toISOString();
-
     // ── 0. Update stock prices (Yahoo primary — includes pre/post, Finnhub fallback) ──
     const stockHoldings = holdings.filter((h) => h.ticker && h.units > 0 && h.type !== "savings");
     if (stockHoldings.length > 0) {
@@ -189,7 +186,12 @@ export async function GET(request: Request) {
         }
       }
       if (updatedCount > 0) {
-        updates.push({ key: "portfolio_holdings", value: JSON.stringify(holdings), updated_at: now });
+        // Write updated holdings directly to their table
+        for (const h of stockHoldings) {
+          await supabase.from("portfolio_holdings")
+            .update(rowToSnake({ currentValue: h.currentValue, currency: h.currency }))
+            .eq("id", h.id);
+        }
         const stateSummary = Object.entries(stateCounts).map(([k, v]) => `${k}:${v}`).join(" ");
         log.push(`Stock prices: ${updatedCount}/${stockHoldings.length} updated (${extendedCount} from pre/post; ${stateSummary})`);
       } else {
@@ -206,8 +208,13 @@ export async function GET(request: Request) {
       .reduce((s, h) => s + toUsd(h.currentValue ?? 0, h.currency ?? "AUD"), 0);
 
     if (portfolioTotal > 0) {
-      const newSnapshots = [...portfolioSnapshots, { date: sydneyTime, value: portfolioNoSuper, valueWithSuper: portfolioTotal, currency: "USD" }];
-      updates.push({ key: "portfolio_snapshots", value: JSON.stringify(newSnapshots), updated_at: now });
+      await supabase.from("snapshots").insert({
+        type: "portfolio",
+        date: sydneyTime,
+        value: portfolioNoSuper,
+        value_with_super: portfolioTotal,
+        currency: "USD",
+      });
       log.push(`Portfolio snapshot: w/super=$${portfolioTotal.toFixed(0)} no-super=$${portfolioNoSuper.toFixed(0)} USD`);
     } else {
       log.push(`Portfolio snapshot: no holdings`);
@@ -239,9 +246,18 @@ export async function GET(request: Request) {
       );
 
       if (newEntries.length > 0) {
-        const allIncome = [...incomeEntries, ...newEntries];
-        updates.push({ key: "income_entries", value: JSON.stringify(allIncome), updated_at: now });
-        updates.push({ key: "recurring_income_templates", value: JSON.stringify(updatedTemplates), updated_at: now });
+        const snakeEntries = newEntries.map((e) => rowToSnake(e));
+        const { error: insertErr } = await supabase.from("income_entries").insert(snakeEntries);
+        if (insertErr) log.push(`Recurring income insert error: ${insertErr.message}`);
+
+        // Update templates with lastGeneratedDate
+        for (const t of updatedTemplates) {
+          if (t.lastGeneratedDate) {
+            await supabase.from("recurring_income_templates")
+              .update({ last_generated_date: t.lastGeneratedDate })
+              .eq("id", t.id);
+          }
+        }
         log.push(`Recurring income: generated ${newEntries.length} entries`);
       } else {
         log.push(`Recurring income: no new entries needed`);
@@ -274,9 +290,18 @@ export async function GET(request: Request) {
       );
 
       if (newEntries.length > 0) {
-        const allExpenses = [...expenseEntries, ...newEntries];
-        updates.push({ key: "expense_entries", value: JSON.stringify(allExpenses), updated_at: now });
-        updates.push({ key: "recurring_expense_templates", value: JSON.stringify(updatedTemplates), updated_at: now });
+        const snakeEntries = newEntries.map((e) => rowToSnake(e));
+        const { error: insertErr } = await supabase.from("expense_entries").insert(snakeEntries);
+        if (insertErr) log.push(`Recurring expense insert error: ${insertErr.message}`);
+
+        // Update templates with lastGeneratedDate
+        for (const t of updatedTemplates) {
+          if (t.lastGeneratedDate) {
+            await supabase.from("recurring_expense_templates")
+              .update({ last_generated_date: t.lastGeneratedDate })
+              .eq("id", t.id);
+          }
+        }
         log.push(`Recurring expenses: generated ${newEntries.length} entries`);
       } else {
         log.push(`Recurring expenses: no new entries needed`);
@@ -288,17 +313,17 @@ export async function GET(request: Request) {
     // ── 5. Crypto price update via CoinGecko ──
     // Binance blocks Vercel server IPs, so we use CoinGecko as primary source.
     // Client-side (browser) still uses Binance WS for real-time streaming.
-    const cryptoCsvText = parse<string>("crypto_csv_text", "");
+    let freshCryptoPrices: Record<string, number> | null = null;
 
     if (cryptoCsvText) {
       try {
         const { parseAndComputeHoldings } = await import("@/lib/utils/crypto-csv");
         const { STABLECOINS, YIELD_PREFIXES, COINGECKO_IDS } = await import("@/lib/utils/constants");
 
-        const holdings = parseAndComputeHoldings(cryptoCsvText);
+        const cryptoHoldingsParsed = parseAndComputeHoldings(cryptoCsvText);
 
         // Filter non-stable tokens — use ticker mapping to detect stablecoins by mapped symbol too
-        const nonStableTokens = holdings.filter((h) => {
+        const nonStableTokens = cryptoHoldingsParsed.filter((h) => {
           const upper = h.token.toUpperCase();
           const mapped = (tickerMappings[h.token] ?? h.token).toUpperCase();
           if (STABLECOINS.has(upper) || STABLECOINS.has(mapped)) return false;
@@ -307,7 +332,7 @@ export async function GET(request: Request) {
           return h.amount > 0;
         });
 
-        log.push(`Holdings: ${holdings.length} total, ${nonStableTokens.length} to price`);
+        log.push(`Holdings: ${cryptoHoldingsParsed.length} total, ${nonStableTokens.length} to price`);
 
         if (nonStableTokens.length > 0 && process.env.COINGECKO_API_KEY) {
           // Map tokens to CoinGecko IDs via ticker mappings
@@ -345,11 +370,13 @@ export async function GET(request: Request) {
 
               const fetched = Object.keys(prices).length;
               if (fetched > 0) {
-                updates.push({
+                freshCryptoPrices = prices;
+                // Write crypto prices to app_data KV (it's a cache)
+                await supabase.from("app_data").upsert({
                   key: "crypto_prices",
                   value: JSON.stringify({ prices, fetchedAt: Date.now() }),
-                  updated_at: now,
-                });
+                  updated_at: new Date().toISOString(),
+                }, { onConflict: "key" });
                 log.push(`CoinGecko: ${fetched}/${cgMap.length} — ${Object.entries(prices).map(([t, p]) => `${t}=$${p.toFixed(2)}`).join(", ")}`);
               } else {
                 log.push(`CoinGecko: returned no prices`);
@@ -377,11 +404,10 @@ export async function GET(request: Request) {
       try {
         const { parseAndComputeHoldings: parseCrypto, getTotalCryptoValueUsd } = await import("@/lib/utils/crypto-csv");
         const cryptoHoldings = parseCrypto(cryptoCsvText);
-        // Apply prices we just fetched (stored in updates)
-        const latestPrices = parse<{ prices: Record<string, number> }>("crypto_prices", { prices: {} });
-        // Merge with any just-fetched prices
-        const priceUpdate = updates.find((u) => u.key === "crypto_prices");
-        const mergedPrices = priceUpdate ? { ...latestPrices.prices, ...JSON.parse(priceUpdate.value).prices } : latestPrices.prices;
+        // Merge stored prices with any just-fetched prices
+        const mergedPrices = freshCryptoPrices
+          ? { ...storedCryptoPrices.prices, ...freshCryptoPrices }
+          : storedCryptoPrices.prices;
 
         for (const h of cryptoHoldings) {
           const price = mergedPrices[h.token] ?? mergedPrices[tickerMappings[h.token] ?? h.token];
@@ -391,19 +417,29 @@ export async function GET(request: Request) {
       } catch { /* silent */ }
     }
 
-    // Crypto snapshot — append new entry each run
+    // Crypto snapshot — INSERT one row
     if (cryptoTotalUsd > 0) {
-      updates.push({
-        key: "crypto_snapshots",
-        value: JSON.stringify([...cryptoSnapshots, { date: sydneyTime, value: cryptoTotalUsd, currency: "USD" }]),
-        updated_at: now,
+      await supabase.from("snapshots").insert({
+        type: "crypto",
+        date: sydneyTime,
+        value: cryptoTotalUsd,
+        currency: "USD",
       });
       log.push(`Crypto snapshot: $${cryptoTotalUsd.toFixed(0)} USD`);
     }
 
-    // Debts (converted to USD)
-    const debtRecords = parse<{ id: string; direction: string; originalAmount: number; currency: string }[]>("debt_records", []);
-    const debtTransactions = parse<{ debtId: string; amount: number }[]>("debt_transactions", []);
+    // Debts (converted to USD) — read from relational tables
+    const [{ data: debtRecordsRaw }, { data: debtTxRaw }] = await Promise.all([
+      supabase.from("debt_records").select("id, direction, original_amount, currency"),
+      supabase.from("debt_transactions").select("debt_id, amount"),
+    ]);
+    const debtRecords = (debtRecordsRaw ?? []).map((r) => rowToCamel(r)) as {
+      id: string; direction: string; originalAmount: number; currency: string;
+    }[];
+    const debtTransactions = (debtTxRaw ?? []).map((r) => rowToCamel(r)) as {
+      debtId: string; amount: number;
+    }[];
+
     let owedToMe = 0;
     let iOwe = 0;
     for (const d of debtRecords) {
@@ -418,32 +454,24 @@ export async function GET(request: Request) {
     const netWorth = portfolioTotal + cryptoTotalUsd + owedToMe - iOwe;
     const netWorthNoSuper = portfolioNoSuper + cryptoTotalUsd + owedToMe - iOwe;
 
-    // Net worth snapshot — append new entry each run
-    updates.push({
-      key: "networth_snapshots",
-      value: JSON.stringify([...nwSnapshots, { date: sydneyTime, value: netWorth, valueNoSuper: netWorthNoSuper, currency: "USD", portfolio: portfolioTotal, crypto: cryptoTotalUsd }]),
-      updated_at: now,
+    // Net worth snapshot — INSERT one row
+    await supabase.from("snapshots").insert({
+      type: "networth",
+      date: sydneyTime,
+      value: netWorth,
+      value_no_super: netWorthNoSuper,
+      currency: "USD",
+      portfolio: portfolioTotal,
+      crypto: cryptoTotalUsd,
     });
     log.push(`Net worth: $${netWorth.toFixed(0)} (portfolio=$${portfolioTotal.toFixed(0)} crypto=$${cryptoTotalUsd.toFixed(0)} owed=$${owedToMe.toFixed(0)} debt=$${iOwe.toFixed(0)}) USD`);
 
-    // ── Write updates ──
-    if (updates.length > 0) {
-      const { error } = await supabase.from("app_data").upsert(updates, { onConflict: "key" });
-      if (error) {
-        log.push(`Supabase error: ${error.message}`);
-        // Still save the log
-        await saveCronLog(today, log, false);
-        return NextResponse.json({ error: error.message, log }, { status: 500 });
-      }
-    }
-
-    log.push(`Done. ${updates.length} keys updated.`);
+    log.push(`Done.`);
     await saveCronLog(today, log, true);
 
     return NextResponse.json({
       ok: true,
       date: today,
-      keysUpdated: updates.length,
       log,
     });
   } catch (e) {
@@ -455,22 +483,20 @@ export async function GET(request: Request) {
 
 async function saveCronLog(date: string, log: string[], success: boolean) {
   try {
-    const existing = await supabase
-      .from("app_data")
-      .select("value")
-      .eq("key", "cron_log")
-      .single();
+    await supabase.from("cron_logs").insert({
+      date,
+      success,
+      log: JSON.stringify(log),
+    });
 
-    const logs = existing.data ? JSON.parse(existing.data.value) : [];
-    logs.unshift({ date, timestamp: new Date().toISOString(), success, log });
-    // Keep last 30 runs
-    const trimmed = logs.slice(0, 30);
-
-    await supabase.from("app_data").upsert({
-      key: "cron_log",
-      value: JSON.stringify(trimmed),
-      updated_at: new Date().toISOString(),
-    }, { onConflict: "key" });
+    // Trim old logs (keep last 30)
+    const { data: old } = await supabase.from("cron_logs")
+      .select("id")
+      .order("created_at", { ascending: false })
+      .range(30, 99999);
+    if (old && old.length > 0) {
+      await supabase.from("cron_logs").delete().in("id", old.map((r) => r.id));
+    }
   } catch {
     // silently fail — log is best-effort
   }
