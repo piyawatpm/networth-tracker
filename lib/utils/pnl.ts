@@ -249,13 +249,12 @@ export function computePnlAnalysis(dailyPnl: DailyPnlEntry[]): PnlAnalysis {
  * Return all YYYY-MM-DD strings for a given month.
  * @param month 0-indexed (0 = January)
  */
+/** Get all days in a month as YYYY-MM-DD strings. Month is 1-indexed (1=Jan, 12=Dec). */
 export function getMonthDays(year: number, month: number): string[] {
   const days: string[] = [];
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const yy = String(year);
-  const mm = String(month + 1).padStart(2, "0");
+  const daysInMonth = new Date(year, month, 0).getDate();
   for (let d = 1; d <= daysInMonth; d++) {
-    days.push(`${yy}-${mm}-${String(d).padStart(2, "0")}`);
+    days.push(`${year}-${String(month).padStart(2, "0")}-${String(d).padStart(2, "0")}`);
   }
   return days;
 }
