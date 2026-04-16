@@ -56,6 +56,8 @@ import {
 } from "./_components/upcoming-recurring";
 import { AssetBreakdown } from "./_components/asset-breakdown";
 import { WorldDistributionChart } from "./_components/world-distribution-chart";
+import { CombinedAllocation } from "./_components/combined-allocation";
+import { DailyPnlStrip } from "./_components/daily-pnl-strip";
 import { MoneyFlowCard } from "./_components/money-flow-card";
 import { EmergencyFundCard } from "./_components/emergency-fund-card";
 import { KeyNumbersCard } from "./_components/key-numbers-card";
@@ -696,6 +698,13 @@ export default function DashboardPage() {
         />
       </BlurFade>
 
+      {/* Net Worth Daily PnL */}
+      <DailyPnlStrip
+        nwSnapshots={nwChartSnapshots}
+        format={format}
+        delay={D * 0.15}
+      />
+
       {/* 2. FINANCIAL FREEDOM: passive income vs expenses for selected period */}
       <FinancialFreedomCard
         period={period}
@@ -740,6 +749,16 @@ export default function DashboardPage() {
           }}
         />
       </div>
+
+      {/* Combined all-assets allocation */}
+      <CombinedAllocation
+        portfolioHoldings={livePortfolioHoldings}
+        cryptoHoldings={cryptoHoldings}
+        convert={convert}
+        format={format}
+        symbol={symbol}
+        delay={D * 3}
+      />
 
       {/* 3a+. CAPITAL ALLOCATION (invested vs cash) */}
       <InvestedVsCashCard
