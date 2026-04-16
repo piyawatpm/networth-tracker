@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
+import { rowToCamel, rowToSnake } from "@/lib/supabase/tables";
 
 // ---------------------------------------------------------------------------
 // Page
@@ -46,13 +47,53 @@ export default function SettingsPage() {
   async function handleExport() {
     try {
       const supabase = createClient();
-      const { data } = await supabase.from("app_data").select("key, value");
-      if (!data) return;
       const obj: Record<string, unknown> = {};
-      for (const row of data) {
-        try { obj[row.key] = JSON.parse(row.value); } catch { obj[row.key] = row.value; }
+
+      // Entity tables — read from proper tables, convert to camelCase
+      const entityTables = [
+        "income_entries", "expense_entries",
+        "recurring_income_templates", "recurring_expense_templates",
+        "portfolio_holdings", "portfolio_transactions",
+        "debt_records", "debt_transactions", "networth_goals",
+      ];
+
+      await Promise.all(
+        entityTables.map(async (table) => {
+          const { data } = await supabase.from(table).select("*");
+          obj[table] = (data ?? []).map((r) => rowToCamel(r as Record<string, unknown>));
+        }),
+      );
+
+      // Snapshots — export split by type (backward compatible key names)
+      const { data: snapshots } = await supabase.from("snapshots").select("*").order("date");
+      const allSnaps = (snapshots ?? []).map((r) => rowToCamel(r as Record<string, unknown>));
+      obj["portfolio_snapshots"] = allSnaps.filter((s) => s.type === "portfolio").map(({ id, type, createdAt, ...rest }) => rest);
+      obj["crypto_snapshots"] = allSnaps.filter((s) => s.type === "crypto").map(({ id, type, createdAt, ...rest }) => rest);
+      obj["networth_snapshots"] = allSnaps.filter((s) => s.type === "networth").map(({ id, type, createdAt, ...rest }) => rest);
+
+      // Custom categories — export split by kind (backward compatible)
+      const { data: cats } = await supabase.from("custom_categories").select("*");
+      obj["custom_income_categories"] = (cats ?? []).filter((c) => c.kind === "income").map(({ kind, ...r }) => r);
+      obj["custom_expense_categories"] = (cats ?? []).filter((c) => c.kind === "expense").map(({ kind, ...r }) => r);
+
+      // Cron logs
+      const { data: cronLogs } = await supabase.from("cron_logs").select("*").order("created_at", { ascending: false }).limit(30);
+      obj["cron_log"] = (cronLogs ?? []).map((r) => ({
+        date: r.date,
+        timestamp: r.timestamp,
+        success: r.success,
+        log: typeof r.log === "string" ? JSON.parse(r.log) : r.log,
+      }));
+
+      // KV settings (everything remaining in app_data)
+      const { data: kvData } = await supabase.from("app_data").select("key, value");
+      for (const row of kvData ?? []) {
+        if (!obj[row.key]) {
+          try { obj[row.key] = JSON.parse(row.value); } catch { obj[row.key] = row.value; }
+        }
       }
 
+      // Download as JSON
       const json = JSON.stringify(obj, null, 2);
       const blob = new Blob([json], { type: "application/json" });
       const url = URL.createObjectURL(blob);
@@ -76,22 +117,84 @@ export default function SettingsPage() {
     reader.onload = async (e) => {
       try {
         const obj = JSON.parse(e.target?.result as string);
-        if (typeof obj !== "object" || obj === null) {
-          throw new Error("Invalid backup format");
-        }
+        if (typeof obj !== "object" || obj === null) throw new Error("Invalid backup format");
 
         const supabase = createClient();
-        const rows = Object.entries(obj).map(([key, value]) => ({
-          key,
-          value: JSON.stringify(value),
-          updated_at: new Date().toISOString(),
-        }));
-        await supabase.from("app_data").upsert(rows, { onConflict: "key" });
 
-        setStatus({
-          type: "success",
-          message: `Imported ${rows.length} data entries. Reloading...`,
-        });
+        // Entity tables
+        const entityTables = [
+          "income_entries", "expense_entries",
+          "recurring_income_templates", "recurring_expense_templates",
+          "portfolio_holdings", "portfolio_transactions",
+          "debt_records", "debt_transactions", "networth_goals",
+        ];
+        for (const table of entityTables) {
+          if (obj[table] && Array.isArray(obj[table])) {
+            const snakeRows = (obj[table] as Record<string, unknown>[]).map(rowToSnake);
+            if (snakeRows.length > 0) {
+              await supabase.from(table).upsert(snakeRows);
+            }
+          }
+        }
+
+        // Snapshots
+        const snapshotKeys: Record<string, string> = {
+          portfolio_snapshots: "portfolio",
+          crypto_snapshots: "crypto",
+          networth_snapshots: "networth",
+        };
+        for (const [key, type] of Object.entries(snapshotKeys)) {
+          if (obj[key] && Array.isArray(obj[key])) {
+            // Delete existing, then insert
+            await supabase.from("snapshots").delete().eq("type", type);
+            const rows = (obj[key] as Record<string, unknown>[]).map((r) => {
+              const snake = rowToSnake(r);
+              delete snake["id"];
+              snake["type"] = type;
+              return snake;
+            });
+            if (rows.length > 0) {
+              // Insert in chunks of 500
+              for (let i = 0; i < rows.length; i += 500) {
+                await supabase.from("snapshots").insert(rows.slice(i, i + 500));
+              }
+            }
+          }
+        }
+
+        // Custom categories
+        const categoryKeys: Record<string, string> = {
+          custom_income_categories: "income",
+          custom_expense_categories: "expense",
+        };
+        for (const [key, kind] of Object.entries(categoryKeys)) {
+          if (obj[key] && Array.isArray(obj[key])) {
+            await supabase.from("custom_categories").delete().eq("kind", kind);
+            const rows = (obj[key] as Record<string, unknown>[]).map((r) => ({ ...r, kind }));
+            if (rows.length > 0) {
+              await supabase.from("custom_categories").insert(rows);
+            }
+          }
+        }
+
+        // KV settings — everything else goes to app_data
+        const tableKeys = new Set([
+          ...entityTables,
+          ...Object.keys(snapshotKeys),
+          ...Object.keys(categoryKeys),
+          "cron_log",
+        ]);
+        const kvRows: { key: string; value: string; updated_at: string }[] = [];
+        for (const [key, value] of Object.entries(obj)) {
+          if (!tableKeys.has(key)) {
+            kvRows.push({ key, value: JSON.stringify(value), updated_at: new Date().toISOString() });
+          }
+        }
+        if (kvRows.length > 0) {
+          await supabase.from("app_data").upsert(kvRows, { onConflict: "key" });
+        }
+
+        setStatus({ type: "success", message: `Imported data. Reloading...` });
         setTimeout(() => window.location.reload(), 1000);
       } catch {
         setStatus({ type: "error", message: "Failed to import — invalid file format" });
@@ -104,7 +207,21 @@ export default function SettingsPage() {
   async function handleClear() {
     try {
       const supabase = createClient();
+      const allTables = [
+        "income_entries", "expense_entries",
+        "recurring_income_templates", "recurring_expense_templates",
+        "portfolio_holdings", "portfolio_transactions",
+        "debt_records", "debt_transactions", "networth_goals",
+        "custom_categories",
+      ];
+      // Delete from entity tables (id-based)
+      await Promise.all(allTables.map((t) => supabase.from(t).delete().neq("id", "")));
+      // Delete from UUID-based tables
+      await supabase.from("snapshots").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+      await supabase.from("cron_logs").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+      // Delete KV
       await supabase.from("app_data").delete().neq("key", "");
+
       setShowClearConfirm(false);
       setStatus({ type: "success", message: "All data cleared. Reloading..." });
       setTimeout(() => window.location.reload(), 1000);
@@ -120,23 +237,50 @@ export default function SettingsPage() {
       const data = generateSampleData();
       const supabase = createClient();
 
-      const rows = [
-        { key: "income_entries", value: JSON.stringify(data.incomeEntries) },
-        { key: "expense_entries", value: JSON.stringify(data.expenseEntries) },
-        { key: "portfolio_holdings", value: JSON.stringify(data.portfolioHoldings) },
-        { key: "crypto_csv_text", value: JSON.stringify(data.cryptoCsvText) },
-        { key: "debt_records", value: JSON.stringify(data.debtRecords) },
-        { key: "debt_transactions", value: JSON.stringify(data.debtTransactions) },
-        { key: "networth_snapshots", value: JSON.stringify(data.networthSnapshots) },
-        { key: "portfolio_snapshots", value: JSON.stringify(data.portfolioSnapshots) },
-        { key: "networth_goals", value: JSON.stringify(data.networthGoals) },
-        { key: "recurring_income_templates", value: JSON.stringify(data.recurringIncomeTemplates) },
-        { key: "recurring_expense_templates", value: JSON.stringify(data.recurringExpenseTemplates) },
-        { key: "price_update_log", value: JSON.stringify(data.priceUpdateLog) },
-        { key: "enabled_currencies", value: JSON.stringify(["AUD", "USD", "THB", "EUR"]) },
-      ].map((r) => ({ ...r, updated_at: new Date().toISOString() }));
+      // Entity tables
+      const entityInserts = [
+        { table: "income_entries", data: data.incomeEntries },
+        { table: "expense_entries", data: data.expenseEntries },
+        { table: "portfolio_holdings", data: data.portfolioHoldings },
+        { table: "debt_records", data: data.debtRecords },
+        { table: "debt_transactions", data: data.debtTransactions },
+        { table: "recurring_income_templates", data: data.recurringIncomeTemplates },
+        { table: "recurring_expense_templates", data: data.recurringExpenseTemplates },
+        { table: "networth_goals", data: data.networthGoals },
+      ];
+      for (const { table, data: rows } of entityInserts) {
+        if (rows && Array.isArray(rows) && rows.length > 0) {
+          await supabase.from(table).upsert(rows.map(rowToSnake));
+        }
+      }
 
-      await supabase.from("app_data").upsert(rows, { onConflict: "key" });
+      // Snapshots
+      const snapshotTypes = [
+        { data: data.portfolioSnapshots, type: "portfolio" },
+        { data: data.networthSnapshots, type: "networth" },
+      ];
+      for (const { data: snapRows, type } of snapshotTypes) {
+        if (snapRows && Array.isArray(snapRows) && snapRows.length > 0) {
+          const insertRows = snapRows.map((r) => {
+            const snake = rowToSnake(r);
+            delete snake["id"];
+            snake["type"] = type;
+            return snake;
+          });
+          await supabase.from("snapshots").insert(insertRows);
+        }
+      }
+
+      // KV data (crypto CSV, settings)
+      const kvRows = [
+        { key: "crypto_csv_text", value: JSON.stringify(data.cryptoCsvText) },
+        { key: "enabled_currencies", value: JSON.stringify(["AUD", "USD", "THB", "EUR"]) },
+        data.priceUpdateLog ? { key: "price_update_log", value: JSON.stringify(data.priceUpdateLog) } : null,
+      ].filter(Boolean).map((r) => ({ ...r!, updated_at: new Date().toISOString() }));
+
+      if (kvRows.length > 0) {
+        await supabase.from("app_data").upsert(kvRows, { onConflict: "key" });
+      }
 
       setStatus({ type: "success", message: "Sample data loaded. Reloading..." });
       setTimeout(() => window.location.reload(), 1000);
