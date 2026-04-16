@@ -237,30 +237,29 @@ export function CombinedAllocation({
               return (
                 <div
                   key={`${item.name}-${i}`}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => toggleHidden(item.name)}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") toggleHidden(item.name); }}
                   onMouseEnter={() => !isHidden && handleHover(item.name)}
                   onMouseLeave={handleLeave}
                   className={cn(
-                    "group flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors",
+                    "group flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors cursor-pointer select-none",
                     isHidden
-                      ? "opacity-40"
+                      ? "opacity-40 hover:opacity-60"
                       : hoveredName === item.name
                         ? "bg-secondary/60"
                         : "hover:bg-secondary/40",
                   )}
+                  title={isHidden ? `Show ${item.name}` : `Hide ${item.name}`}
                 >
-                  {/* Visibility toggle */}
-                  <button
-                    type="button"
-                    onClick={() => toggleHidden(item.name)}
-                    className="shrink-0 text-muted-foreground/40 hover:text-foreground transition-colors"
-                    title={isHidden ? `Show ${item.name}` : `Hide ${item.name}`}
-                  >
+                  <span className="shrink-0 text-muted-foreground/40">
                     {isHidden ? (
                       <EyeOff className="h-3 w-3" />
                     ) : (
                       <Eye className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
                     )}
-                  </button>
+                  </span>
 
                   <span
                     className="h-2.5 w-2.5 shrink-0 rounded-full"
