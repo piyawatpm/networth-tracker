@@ -38,39 +38,74 @@ async function fetchYahoo(symbol: string): Promise<ExtendedQuote | null> {
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
           Accept: "application/json",
         },
+        cache: "no-store",
         signal: AbortSignal.timeout(6000),
       },
     );
     if (!res.ok) return null;
     const data = await res.json();
-    const meta = data?.chart?.result?.[0]?.meta;
+    const result = data?.chart?.result?.[0];
+    const meta = result?.meta;
     if (!meta?.regularMarketPrice) return null;
 
-    const marketState: MarketState = meta.marketState ?? "CLOSED";
+    const reportedState: MarketState = meta.marketState ?? "CLOSED";
+    const currency: string = meta.currency ?? "USD";
 
-    // Pick the freshest trade across regular / pre / post sessions.
-    // Yahoo keeps post/pre prices populated even when marketState is CLOSED/POSTPOST/PREPRE,
-    // so comparing timestamps is more reliable than trusting marketState alone.
-    const candidates: { price: number; time: number; kind: "regular" | "pre" | "post" }[] = [];
-    if (typeof meta.regularMarketPrice === "number" && meta.regularMarketTime) {
-      candidates.push({ price: meta.regularMarketPrice, time: meta.regularMarketTime, kind: "regular" });
+    // Yahoo clears meta.postMarketPrice/preMarketPrice after the session ends,
+    // but the raw 1-minute bars (indicators.quote[0]) still contain every trade.
+    // Walk the bars from the end to find the newest non-null close, then classify
+    // against currentTradingPeriod to decide regular vs pre vs post.
+    const timestamps: number[] | undefined = result?.timestamp;
+    const closes: (number | null)[] | undefined =
+      result?.indicators?.quote?.[0]?.close;
+
+    let bestTime: number | null = null;
+    let bestPrice: number | null = null;
+    if (Array.isArray(timestamps) && Array.isArray(closes)) {
+      for (let i = timestamps.length - 1; i >= 0; i--) {
+        const c = closes[i];
+        if (typeof c === "number" && isFinite(c)) {
+          bestTime = timestamps[i];
+          bestPrice = c;
+          break;
+        }
+      }
     }
-    if (typeof meta.preMarketPrice === "number" && meta.preMarketTime) {
-      candidates.push({ price: meta.preMarketPrice, time: meta.preMarketTime, kind: "pre" });
+
+    const period = meta.currentTradingPeriod;
+    const regEnd: number | undefined = period?.regular?.end;
+    const regStart: number | undefined = period?.regular?.start;
+    const preStart: number | undefined = period?.pre?.start;
+    const postEnd: number | undefined = period?.post?.end;
+
+    let price: number = meta.regularMarketPrice;
+    let kind: "regular" | "pre" | "post" = "regular";
+
+    if (bestTime != null && bestPrice != null) {
+      if (regEnd && bestTime >= regEnd && (!postEnd || bestTime <= postEnd + 60)) {
+        price = bestPrice;
+        kind = "post";
+      } else if (
+        regStart &&
+        preStart &&
+        bestTime < regStart &&
+        bestTime >= preStart
+      ) {
+        price = bestPrice;
+        kind = "pre";
+      } else if (regStart && regEnd && bestTime >= regStart && bestTime < regEnd) {
+        // Latest bar is intraday regular — use it so we track intraday moves.
+        price = bestPrice;
+        kind = "regular";
+      }
     }
-    if (typeof meta.postMarketPrice === "number" && meta.postMarketTime) {
-      candidates.push({ price: meta.postMarketPrice, time: meta.postMarketTime, kind: "post" });
-    }
-    if (candidates.length === 0) return null;
-    candidates.sort((a, b) => b.time - a.time);
-    const best = candidates[0];
 
     return {
-      price: best.price,
-      currency: meta.currency ?? "USD",
-      marketState,
+      price,
+      currency,
+      marketState: reportedState,
       source: "yahoo",
-      extended: best.kind !== "regular",
+      extended: kind !== "regular",
     };
   } catch {
     return null;
