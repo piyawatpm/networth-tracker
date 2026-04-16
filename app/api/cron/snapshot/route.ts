@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { computeOccurrences } from "@/lib/utils/timezone";
+import { fetchExtendedStockQuote } from "@/lib/utils/stock-prices";
 
 // Use secret key for server-side cron (bypasses RLS)
 const supabase = createClient(
@@ -170,38 +171,30 @@ export async function GET(request: Request) {
     const updates: { key: string; value: string; updated_at: string }[] = [];
     const now = new Date().toISOString();
 
-    // ── 0. Update stock prices via Finnhub REST API ──
-    if (process.env.FINNHUB_API_KEY) {
-      const stockHoldings = holdings.filter((h) => h.ticker && h.units > 0 && h.type !== "savings");
-      if (stockHoldings.length > 0) {
-        let updatedCount = 0;
-        // Fetch prices sequentially to respect rate limits (30/sec)
-        for (const h of stockHoldings) {
-          try {
-            const symbol = h.country?.toUpperCase() === "AU" ? `${h.ticker.toUpperCase()}.AX` : h.ticker.toUpperCase();
-            const res = await fetch(
-              `https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${process.env.FINNHUB_API_KEY}`,
-            );
-            if (res.ok) {
-              const data = await res.json();
-              if (data.c && data.c > 0) {
-                h.currentValue = h.units * data.c;
-                // Finnhub returns USD for US stocks, AUD for .AX stocks
-                if (h.country?.toUpperCase() === "US") h.currency = "USD";
-                updatedCount++;
-              }
-            }
-          } catch { /* skip individual failures */ }
-        }
-        if (updatedCount > 0) {
-          updates.push({ key: "portfolio_holdings", value: JSON.stringify(holdings), updated_at: now });
-          log.push(`Stock prices: updated ${updatedCount}/${stockHoldings.length} via Finnhub`);
-        } else {
-          log.push(`Stock prices: no updates from Finnhub`);
+    // ── 0. Update stock prices (Yahoo primary — includes pre/post, Finnhub fallback) ──
+    const stockHoldings = holdings.filter((h) => h.ticker && h.units > 0 && h.type !== "savings");
+    if (stockHoldings.length > 0) {
+      let updatedCount = 0;
+      let extendedCount = 0;
+      const stateCounts: Record<string, number> = {};
+      // Sequential to respect rate limits (Finnhub 30/sec, Yahoo soft-limited)
+      for (const h of stockHoldings) {
+        const quote = await fetchExtendedStockQuote(h.ticker, h.country);
+        if (quote) {
+          h.currentValue = h.units * quote.price;
+          if (quote.currency) h.currency = quote.currency;
+          updatedCount++;
+          if (quote.extended) extendedCount++;
+          stateCounts[quote.marketState] = (stateCounts[quote.marketState] ?? 0) + 1;
         }
       }
-    } else {
-      log.push(`Stock prices: FINNHUB_API_KEY not set`);
+      if (updatedCount > 0) {
+        updates.push({ key: "portfolio_holdings", value: JSON.stringify(holdings), updated_at: now });
+        const stateSummary = Object.entries(stateCounts).map(([k, v]) => `${k}:${v}`).join(" ");
+        log.push(`Stock prices: ${updatedCount}/${stockHoldings.length} updated (${extendedCount} from pre/post; ${stateSummary})`);
+      } else {
+        log.push(`Stock prices: no updates (yahoo+finnhub both failed)`);
+      }
     }
 
     // ── 1. Portfolio snapshot (converted to USD) ──

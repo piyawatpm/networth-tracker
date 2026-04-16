@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { fetchExtendedStockQuote } from "@/lib/utils/stock-prices";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -93,25 +94,17 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Refresh stock prices via Finnhub (mirrors cron behavior)
+    // Refresh stock prices — Yahoo primary (pre/post), Finnhub fallback (mirrors cron)
     let stockUpdatedCount = 0;
-    if (process.env.FINNHUB_API_KEY) {
-      const stockHoldings = holdings.filter((h) => h.ticker && (h.units ?? 0) > 0 && h.type !== "savings");
-      for (const h of stockHoldings) {
-        try {
-          const symbol = h.country?.toUpperCase() === "AU" ? `${h.ticker!.toUpperCase()}.AX` : h.ticker!.toUpperCase();
-          const res = await fetch(
-            `https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${process.env.FINNHUB_API_KEY}`,
-          );
-          if (res.ok) {
-            const data = await res.json();
-            if (data.c && data.c > 0) {
-              h.currentValue = (h.units ?? 0) * data.c;
-              if (h.country?.toUpperCase() === "US") h.currency = "USD";
-              stockUpdatedCount++;
-            }
-          }
-        } catch { /* skip individual failures */ }
+    let stockExtendedCount = 0;
+    const stockHoldings = holdings.filter((h) => h.ticker && (h.units ?? 0) > 0 && h.type !== "savings");
+    for (const h of stockHoldings) {
+      const quote = await fetchExtendedStockQuote(h.ticker!, h.country);
+      if (quote) {
+        h.currentValue = (h.units ?? 0) * quote.price;
+        if (quote.currency) h.currency = quote.currency;
+        stockUpdatedCount++;
+        if (quote.extended) stockExtendedCount++;
       }
     }
 
@@ -227,6 +220,7 @@ export async function POST(request: NextRequest) {
       iOwe: Math.round(iOwe * 100) / 100,
       manualUpdatesApplied: manualUpdates ? Object.keys(manualUpdates).length : 0,
       stockPricesUpdated: stockUpdatedCount,
+      stockExtendedHours: stockExtendedCount,
       holdingsBreakdown: holdingsDebug,
     });
   } catch (e) {

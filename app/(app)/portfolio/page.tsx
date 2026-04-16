@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils";
 import { BlurFade } from "@/components/ui/blur-fade";
 import { Button } from "@/components/ui/button";
 import { HoldingDialog } from "@/components/portfolio/holding-dialog";
+import { MarketSessionBadge } from "@/components/portfolio/market-session-badge";
 import type { FundAllocations } from "@/components/portfolio/fund-breakdown";
 import { Plus, Download } from "lucide-react";
 import { useFinnhubWs } from "@/lib/hooks/use-finnhub-ws";
@@ -429,6 +430,7 @@ export default function PortfolioPage() {
       {/* ── Action Bar ── */}
       <BlurFade delay={0}>
         <div className="flex items-center justify-end gap-2 flex-wrap">
+          <MarketSessionBadge className="mr-auto" />
           <button
             onClick={() => setIncludeSuper(!includeSuper)}
             className="flex items-center gap-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground shrink-0"
