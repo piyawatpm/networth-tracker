@@ -688,6 +688,11 @@ export default function DashboardPage() {
           breakdownRows={assetRows.filter((r) => !hiddenSections.includes(r.key))}
           breakdownLabel="Asset Breakdown"
           stackedCategories={NW_STACKED_CATEGORIES}
+          liveComponents={{
+            portfolio: includeSuper ? portfolioTotal : normalTotal,
+            crypto: cryptoTotal,
+            other: Math.max(0, netWorth - (includeSuper ? portfolioTotal : normalTotal) - cryptoTotal),
+          }}
         />
       </BlurFade>
 

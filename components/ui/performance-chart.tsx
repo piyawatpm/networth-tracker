@@ -67,6 +67,13 @@ export interface PerformanceChartProps {
   snapshots: SnapshotPoint[];
   /** Optional: source currency override for `currentValue` */
   currentValueCurrency?: string;
+  /**
+   * Live per-category component values (same currency as `currentValue`).
+   * When provided, the overlay lines append this as the latest point so they
+   * stay in sync with the main live total instead of lagging behind cron
+   * snapshots.
+   */
+  liveComponents?: Record<string, number>;
   /** Show LIVE indicator */
   isLive?: boolean;
   /** Default period selection */
@@ -169,6 +176,7 @@ export function PerformanceChart({
   breakdownRows,
   breakdownLabel = "Holdings",
   stackedCategories,
+  liveComponents,
 }: PerformanceChartProps) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
@@ -178,6 +186,7 @@ export function PerformanceChart({
   const [showOverlay, setShowOverlay] = useState(true); // toggle category overlay lines
   const [hoverInfo, setHoverInfo] = useState<{
     value: number;
+    components?: Record<string, number>;
     time: UTCTimestamp;
     x: number;
   } | null>(null);
@@ -248,22 +257,32 @@ export function PerformanceChart({
     return convertedSnapshots.filter((s) => s.time >= cutoff);
   }, [convertedSnapshots, period]);
 
+  // Compute the single live data point once — reused by the main line, the
+  // overlay lines, and the hover lookup so every series reflects the same
+  // "now" instead of diverging (main line live, overlays stuck at last cron).
+  const livePoint = useMemo(() => {
+    if (currentValue <= 0 || filteredData.length === 0) return null;
+    const liveTime = Math.floor(Date.now() / 1000) as UTCTimestamp;
+    const last = filteredData[filteredData.length - 1];
+    const time = (liveTime > last.time ? liveTime : last.time) as UTCTimestamp;
+    return { time, value: currentValue, components: liveComponents };
+  }, [currentValue, filteredData, liveComponents]);
+
   // Append the live current value as the latest data point
   const chartData = useMemo(() => {
     if (filteredData.length === 0) return [];
     const data = filteredData.map((s) => ({ time: s.time, value: s.value }));
-    if (currentValue > 0) {
-      const liveTime = Math.floor(Date.now() / 1000) as UTCTimestamp;
+    if (livePoint) {
       const last = data[data.length - 1];
       // Avoid duplicate timestamps (lightweight-charts requires strictly increasing)
-      if (liveTime > last.time) {
-        data.push({ time: liveTime, value: currentValue });
+      if (livePoint.time > last.time) {
+        data.push({ time: livePoint.time, value: livePoint.value });
       } else {
-        data[data.length - 1] = { time: last.time, value: currentValue };
+        data[data.length - 1] = { time: last.time, value: livePoint.value };
       }
     }
     return data;
-  }, [filteredData, currentValue]);
+  }, [filteredData, livePoint]);
 
   // Per-category % change series (all on a shared hidden scale so they're comparable).
   // Each category is normalised to % change from its first value in the period.
@@ -277,6 +296,20 @@ export function PerformanceChart({
         if (val <= 0) continue;
         raw.push({ time: snap.time, value: val });
       }
+      // Append live point so overlays move with the main line in real-time.
+      if (livePoint?.components) {
+        const liveVal = livePoint.components[cat.key] ?? 0;
+        if (liveVal > 0) {
+          const lastRaw = raw[raw.length - 1];
+          if (!lastRaw) {
+            raw.push({ time: livePoint.time, value: liveVal });
+          } else if (livePoint.time > lastRaw.time) {
+            raw.push({ time: livePoint.time, value: liveVal });
+          } else {
+            raw[raw.length - 1] = { time: lastRaw.time, value: liveVal };
+          }
+        }
+      }
       if (raw.length === 0) return [];
       const base = raw[0].value;
       if (base === 0) return [];
@@ -285,7 +318,7 @@ export function PerformanceChart({
         value: ((pt.value - base) / base) * 100, // % change
       }));
     });
-  }, [filteredData, stackedCategories, hasStackedProp]);
+  }, [filteredData, stackedCategories, hasStackedProp, livePoint]);
 
   // Latest raw values + % change per category (for the legend display)
   const stackedLatestValues = useMemo(() => {
@@ -301,10 +334,40 @@ export function PerformanceChart({
           last = val;
         }
       }
+      if (livePoint?.components) {
+        const liveVal = livePoint.components[cat.key] ?? 0;
+        if (liveVal > 0) {
+          if (first === 0) first = liveVal;
+          last = liveVal;
+        }
+      }
       const changePct = first > 0 ? ((last - first) / first) * 100 : 0;
       return { value: last, changePct };
     });
-  }, [filteredData, stackedCategories, hasStackedProp]);
+  }, [filteredData, stackedCategories, hasStackedProp, livePoint]);
+
+  // Time → full row lookup for the hover tooltip (main value + per-category).
+  const hoverLookup = useMemo(() => {
+    const map = new Map<number, { value: number; components?: Record<string, number> }>();
+    for (const s of filteredData) {
+      map.set(s.time as number, { value: s.value, components: s.components });
+    }
+    if (livePoint) {
+      const existing = map.get(livePoint.time as number);
+      map.set(livePoint.time as number, {
+        value: livePoint.value,
+        components: livePoint.components ?? existing?.components,
+      });
+    }
+    return map;
+  }, [filteredData, livePoint]);
+
+  // Keep a ref in sync so the crosshair handler (captured by useEffect) can
+  // always read the current lookup without re-binding the subscription.
+  const hoverLookupRef = useRef(hoverLookup);
+  useEffect(() => {
+    hoverLookupRef.current = hoverLookup;
+  }, [hoverLookup]);
 
   // Only render stacked mode when toggled ON and snapshots have component data
   const hasStacked = showOverlay && hasStackedProp && Boolean(
@@ -460,8 +523,10 @@ export function PerformanceChart({
         setHoverInfo(null);
         return;
       }
+      const lookup = hoverLookupRef.current.get(param.time as number);
       setHoverInfo({
         value: data.value,
+        components: lookup?.components,
         time: param.time as UTCTimestamp,
         x: param.point.x,
       });
@@ -687,13 +752,57 @@ export function PerformanceChart({
           <div ref={containerRef} style={{ height, width: "100%" }} />
           {hoverInfo && hoverTimeLabel && (
             <div
-              className="pointer-events-none absolute top-1 z-10 rounded bg-background/85 px-1.5 py-0.5 text-[10px] font-mono text-foreground backdrop-blur-sm"
+              className="pointer-events-none absolute top-1 z-10 rounded-md bg-background/95 px-2 py-1.5 text-[10px] font-mono text-foreground shadow-sm ring-1 ring-border/60 backdrop-blur-sm"
               style={{
                 left: hoverInfo.x,
                 transform: "translateX(-50%)",
+                minWidth: 140,
               }}
             >
-              {hoverTimeLabel}
+              <div className="text-muted-foreground">{hoverTimeLabel}</div>
+              <div className="mt-0.5 flex items-center justify-between gap-3">
+                <span className="uppercase tracking-wide text-muted-foreground/80">
+                  {label}
+                </span>
+                <span className="tabular-nums font-semibold">
+                  {symbol}
+                  {hoverInfo.value.toLocaleString("en-US", {
+                    minimumFractionDigits: 0,
+                    maximumFractionDigits: 0,
+                  })}
+                </span>
+              </div>
+              {hasStackedProp &&
+                stackedCategories &&
+                hoverInfo.components &&
+                stackedCategories.map((cat) => {
+                  const val = hoverInfo.components?.[cat.key] ?? 0;
+                  if (val <= 0) return null;
+                  const color = isDark ? cat.colorDark : cat.colorLight;
+                  return (
+                    <div
+                      key={cat.key}
+                      className="mt-0.5 flex items-center justify-between gap-3"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <span
+                          className="h-1.5 w-1.5 rounded-sm"
+                          style={{ backgroundColor: color }}
+                        />
+                        <span className="uppercase tracking-wide text-muted-foreground/80">
+                          {cat.label}
+                        </span>
+                      </span>
+                      <span className="tabular-nums">
+                        {symbol}
+                        {val.toLocaleString("en-US", {
+                          minimumFractionDigits: 0,
+                          maximumFractionDigits: 0,
+                        })}
+                      </span>
+                    </div>
+                  );
+                })}
             </div>
           )}
         </div>
