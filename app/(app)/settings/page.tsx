@@ -250,7 +250,7 @@ export default function SettingsPage() {
       ];
       for (const { table, data: rows } of entityInserts) {
         if (rows && Array.isArray(rows) && rows.length > 0) {
-          await supabase.from(table).upsert(rows.map(rowToSnake));
+          await supabase.from(table).upsert(rows.map((r) => rowToSnake(r as Record<string, unknown>)));
         }
       }
 
@@ -262,7 +262,7 @@ export default function SettingsPage() {
       for (const { data: snapRows, type } of snapshotTypes) {
         if (snapRows && Array.isArray(snapRows) && snapRows.length > 0) {
           const insertRows = snapRows.map((r) => {
-            const snake = rowToSnake(r);
+            const snake = rowToSnake(r as Record<string, unknown>);
             delete snake["id"];
             snake["type"] = type;
             return snake;
