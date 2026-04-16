@@ -11,6 +11,15 @@ import {
 } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { RefreshCw } from "lucide-react";
+import {
+  ENTITY_TABLES,
+  SNAPSHOT_KEYS,
+  CATEGORY_KEYS,
+  rowToCamel,
+  syncEntityTable,
+  syncSnapshots,
+  syncCategories,
+} from "@/lib/supabase/tables";
 
 // ---------------------------------------------------------------------------
 // Context
@@ -31,6 +40,14 @@ interface DataContextValue {
 
 const DataContext = createContext<DataContextValue | null>(null);
 
+// Set of all keys that are routed to proper tables (not app_data)
+const TABLE_KEYS = new Set([
+  ...Object.keys(ENTITY_TABLES),
+  ...Object.keys(SNAPSHOT_KEYS),
+  ...Object.keys(CATEGORY_KEYS),
+  "cron_log",
+]);
+
 // ---------------------------------------------------------------------------
 // Provider
 // ---------------------------------------------------------------------------
@@ -45,15 +62,83 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     async function load() {
       try {
-        const { data, error } = await supabase
-          .from("app_data")
-          .select("key, value");
+        await Promise.all([
+          // Entity tables: SELECT * from each real table, convert to camelCase
+          ...Object.entries(ENTITY_TABLES).map(async ([key, cfg]) => {
+            const { data } = await supabase.from(cfg.table).select("*");
+            const camelRows = (data ?? []).map((r) =>
+              rowToCamel(r as Record<string, unknown>)
+            );
+            cache.current.set(key, JSON.stringify(camelRows));
+          }),
 
-        if (!error && data) {
-          for (const row of data) {
-            cache.current.set(row.key, row.value);
-          }
-        }
+          // Snapshots: single query, split by type
+          (async () => {
+            const { data } = await supabase
+              .from("snapshots")
+              .select("*")
+              .order("date", { ascending: true });
+            const all = (data ?? []).map((r) =>
+              rowToCamel(r as Record<string, unknown>)
+            );
+            for (const [key, type] of Object.entries(SNAPSHOT_KEYS)) {
+              const filtered = all
+                .filter((s) => s.type === type)
+                .map((s) => {
+                  const {
+                    id: _id,
+                    type: _type,
+                    createdAt: _ca,
+                    ...rest
+                  } = s as Record<string, unknown>;
+                  return rest;
+                });
+              cache.current.set(key, JSON.stringify(filtered));
+            }
+          })(),
+
+          // Custom categories: query once, split by kind
+          (async () => {
+            const { data } = await supabase
+              .from("custom_categories")
+              .select("*");
+            for (const [key, kind] of Object.entries(CATEGORY_KEYS)) {
+              const filtered = (data ?? [])
+                .filter((c) => c.kind === kind)
+                .map(({ kind: _, ...rest }) => rest);
+              cache.current.set(key, JSON.stringify(filtered));
+            }
+          })(),
+
+          // Cron logs
+          (async () => {
+            const { data } = await supabase
+              .from("cron_logs")
+              .select("*")
+              .order("created_at", { ascending: false })
+              .limit(30);
+            const logs = (data ?? []).map((r) => ({
+              date: r.date,
+              timestamp: r.timestamp,
+              success: r.success,
+              log:
+                typeof r.log === "string" ? JSON.parse(r.log) : r.log,
+            }));
+            cache.current.set("cron_log", JSON.stringify(logs));
+          })(),
+
+          // KV settings: still from app_data, but only set if not already loaded
+          (async () => {
+            const { data } = await supabase
+              .from("app_data")
+              .select("key, value");
+            for (const row of data ?? []) {
+              if (!cache.current.has(row.key)) {
+                cache.current.set(row.key, row.value);
+              }
+            }
+          })(),
+        ]);
       } catch {
         // Supabase unavailable — start with empty cache
       }
@@ -64,69 +149,134 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   }, [supabase]);
 
   // Write a single key to Supabase (debounced per key)
-  const pendingWrites = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const pendingWrites = useRef<Map<string, ReturnType<typeof setTimeout>>>(
+    new Map()
+  );
 
   const persist = useCallback(
     (key: string, value: string) => {
       // Update in-memory cache immediately
       cache.current.set(key, value);
 
-      // Debounce the Supabase write (300ms)
+      // Debounce the Supabase write
       const existing = pendingWrites.current.get(key);
       if (existing) clearTimeout(existing);
 
+      const entityCfg = ENTITY_TABLES[key];
+      const snapshotType = SNAPSHOT_KEYS[key];
+      const categoryKind = CATEGORY_KEYS[key];
+
+      // 500ms debounce for table writes, 300ms for KV
+      const delay = entityCfg || snapshotType || categoryKind ? 500 : 300;
+
       pendingWrites.current.set(
         key,
-        setTimeout(() => {
+        setTimeout(async () => {
           pendingWrites.current.delete(key);
-          supabase
-            .from("app_data")
-            .upsert(
-              { key, value, updated_at: new Date().toISOString() },
-              { onConflict: "key" },
-            )
-            .then(({ error }) => {
-              if (error) console.warn(`Supabase write failed for ${key}:`, error.message);
-            });
-        }, 300),
+          try {
+            if (entityCfg) {
+              const items = JSON.parse(value) as Record<string, unknown>[];
+              await syncEntityTable(supabase, entityCfg.table, items);
+            } else if (snapshotType) {
+              const items = JSON.parse(value) as Record<string, unknown>[];
+              await syncSnapshots(supabase, snapshotType, items);
+            } else if (categoryKind) {
+              const items = JSON.parse(value) as Record<string, unknown>[];
+              await syncCategories(supabase, categoryKind, items);
+            } else {
+              await supabase
+                .from("app_data")
+                .upsert(
+                  { key, value, updated_at: new Date().toISOString() },
+                  { onConflict: "key" }
+                );
+            }
+          } catch (err) {
+            console.warn(
+              `Supabase write failed for ${key}:`,
+              err instanceof Error ? err.message : err
+            );
+          }
+        }, delay)
       );
     },
-    [supabase],
+    [supabase]
   );
 
   // Save all cached data to Supabase at once
   const saveAll = useCallback(async () => {
-    const rows: { key: string; value: string; updated_at: string }[] = [];
-    const now = new Date().toISOString();
+    try {
+      const now = new Date().toISOString();
 
-    cache.current.forEach((value, key) => {
-      rows.push({ key, value, updated_at: now });
-    });
+      // Entity tables
+      await Promise.all(
+        Object.entries(ENTITY_TABLES).map(async ([key, cfg]) => {
+          const raw = cache.current.get(key);
+          if (!raw) return;
+          const items = JSON.parse(raw) as Record<string, unknown>[];
+          await syncEntityTable(supabase, cfg.table, items);
+        })
+      );
 
-    if (rows.length === 0) return { success: true };
+      // Snapshots
+      await Promise.all(
+        Object.entries(SNAPSHOT_KEYS).map(async ([key, type]) => {
+          const raw = cache.current.get(key);
+          if (!raw) return;
+          const items = JSON.parse(raw) as Record<string, unknown>[];
+          await syncSnapshots(supabase, type, items);
+        })
+      );
 
-    const { error } = await supabase
-      .from("app_data")
-      .upsert(rows, { onConflict: "key" });
+      // Categories
+      await Promise.all(
+        Object.entries(CATEGORY_KEYS).map(async ([key, kind]) => {
+          const raw = cache.current.get(key);
+          if (!raw) return;
+          const items = JSON.parse(raw) as Record<string, unknown>[];
+          await syncCategories(supabase, kind, items);
+        })
+      );
 
-    if (error) return { success: false, error: error.message };
+      // KV settings — everything not routed to a proper table
+      const kvRows: { key: string; value: string; updated_at: string }[] = [];
+      cache.current.forEach((value, key) => {
+        if (!TABLE_KEYS.has(key)) {
+          kvRows.push({ key, value, updated_at: now });
+        }
+      });
 
-    setLastSaveTime(Date.now());
-    return { success: true };
+      if (kvRows.length > 0) {
+        const { error } = await supabase
+          .from("app_data")
+          .upsert(kvRows, { onConflict: "key" });
+        if (error) return { success: false, error: error.message };
+      }
+
+      setLastSaveTime(Date.now());
+      return { success: true };
+    } catch (err) {
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : "Unknown error",
+      };
+    }
   }, [supabase]);
 
-  // Save before tab close
+  // Save before tab close — only beacon KV settings
   useEffect(() => {
     function handleBeforeUnload() {
       // Flush all pending writes
       pendingWrites.current.forEach((timeout) => clearTimeout(timeout));
       pendingWrites.current.clear();
 
-      // Synchronous beacon — best effort
+      // Synchronous beacon — best effort, only KV settings
       const rows: { key: string; value: string; updated_at: string }[] = [];
       const now = new Date().toISOString();
       cache.current.forEach((value, key) => {
-        rows.push({ key, value, updated_at: now });
+        if (!TABLE_KEYS.has(key)) {
+          rows.push({ key, value, updated_at: now });
+        }
       });
 
       if (rows.length > 0) {
@@ -134,7 +284,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         const body = JSON.stringify(rows);
         navigator.sendBeacon?.(
           url,
-          new Blob([body], { type: "application/json" }),
+          new Blob([body], { type: "application/json" })
         );
       }
     }
@@ -155,7 +305,9 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <DataContext.Provider value={{ cache, isLoaded, persist, saveAll, lastSaveTime }}>
+    <DataContext.Provider
+      value={{ cache, isLoaded, persist, saveAll, lastSaveTime }}
+    >
       {children}
     </DataContext.Provider>
   );
