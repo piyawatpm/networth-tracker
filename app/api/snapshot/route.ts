@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { fetchExtendedStockQuote } from "@/lib/utils/stock-prices";
-import { rowToCamel, rowToSnake } from "@/lib/supabase/tables";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -40,43 +39,29 @@ export async function POST(request: NextRequest) {
     }).replace(",", "");
     const today = sydneyNow;
 
-    const [
-      { data: holdingsRaw },
-      { data: cryptoCsvRaw },
-      { data: cryptoPricesRaw },
-      { data: tickerMappingsRaw },
-      { data: debtRecordsRaw },
-      { data: debtTxRaw },
-      { data: prefCurrencyRaw },
-    ] = await Promise.all([
-      supabase.from("portfolio_holdings").select("*"),
-      supabase.from("app_data").select("value").eq("key", "crypto_csv_text").single(),
-      supabase.from("app_data").select("value").eq("key", "crypto_prices").single(),
-      supabase.from("app_data").select("value").eq("key", "crypto_ticker_mappings").single(),
-      supabase.from("debt_records").select("id, direction, original_amount, currency"),
-      supabase.from("debt_transactions").select("debt_id, amount"),
-      supabase.from("app_data").select("value").eq("key", "preferred_currency").single(),
-    ]);
+    const { data: rows } = await supabase
+      .from("app_data")
+      .select("key, value")
+      .in("key", [
+        "portfolio_holdings",
+        "portfolio_snapshots",
+        "networth_snapshots",
+        "crypto_snapshots",
+        "crypto_csv_text",
+        "crypto_prices",
+        "crypto_ticker_mappings",
+        "debt_records",
+        "debt_transactions",
+        "fx_rates_cache",
+        "preferred_currency",
+      ]);
 
-    let holdings = (holdingsRaw ?? []).map((r) => rowToCamel(r)) as {
-      id: string; ticker?: string; country?: string; units?: number;
-      type: string; currentValue: number; currency: string; accountType: string;
-    }[];
-    const debtRecords = (debtRecordsRaw ?? []).map((r) => rowToCamel(r)) as {
-      id: string; direction: string; originalAmount: number; currency: string;
-    }[];
-    const debtTransactions = (debtTxRaw ?? []).map((r) => rowToCamel(r)) as {
-      debtId: string; amount: number;
-    }[];
+    const dataMap: Record<string, string> = {};
+    for (const row of rows ?? []) dataMap[row.key] = row.value;
 
-    // Parse KV values same as before
-    const parse = <T>(raw: { value: string } | null, fallback: T): T => {
-      try { return raw?.value ? JSON.parse(raw.value) : fallback; } catch { return fallback; }
+    const parse = <T>(key: string, fallback: T): T => {
+      try { return dataMap[key] ? JSON.parse(dataMap[key]) : fallback; } catch { return fallback; }
     };
-
-    const csvText: string = parse<string>(cryptoCsvRaw, "");
-    const cachedPrices = parse<{ prices: Record<string, number> }>(cryptoPricesRaw, { prices: {} });
-    const tickerMappings: Record<string, string> = parse<Record<string, string>>(tickerMappingsRaw, {});
 
     // FX rates — fetch live from open.er-api.com (same source as client)
     let rates: Record<string, number> = {};
@@ -93,6 +78,11 @@ export async function POST(request: NextRequest) {
     const SNAPSHOT_CURRENCY = "USD";
     const toUsd = (amount: number, fromCurrency: string) =>
       Math.round(convertCurrency(amount, fromCurrency, "USD", rates) * 100) / 100;
+
+    let holdings = parse<{ id: string; ticker?: string; country?: string; units?: number; type: string; currentValue: number; currency: string; accountType: string }[]>("portfolio_holdings", []);
+    const portfolioSnapshots = parse<{ date: string; value: number }[]>("portfolio_snapshots", []);
+    const nwSnapshots = parse<{ date: string; value: number }[]>("networth_snapshots", []);
+    const cryptoSnapshots = parse<{ date: string; value: number; currency: string }[]>("crypto_snapshots", []);
 
     // Apply manual value updates
     if (manualUpdates && Object.keys(manualUpdates).length > 0) {
@@ -119,17 +109,12 @@ export async function POST(request: NextRequest) {
     }
 
     // Persist holdings if anything changed (manual updates or stock refresh)
-    const changed = (manualUpdates && Object.keys(manualUpdates).length > 0) || stockUpdatedCount > 0;
-    const modifiedHoldings = manualUpdates && Object.keys(manualUpdates).length > 0
-      ? holdings.filter((h) => manualUpdates[h.id] !== undefined || stockHoldings.some((s) => s.id === h.id && stockUpdatedCount > 0))
-      : stockHoldings;
-
-    if (changed) {
-      for (const h of modifiedHoldings) {
-        await supabase.from("portfolio_holdings")
-          .update(rowToSnake({ currentValue: h.currentValue, currency: h.currency }))
-          .eq("id", h.id);
-      }
+    if ((manualUpdates && Object.keys(manualUpdates).length > 0) || stockUpdatedCount > 0) {
+      await supabase.from("app_data").upsert({
+        key: "portfolio_holdings",
+        value: JSON.stringify(holdings),
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "key" });
     }
 
     // Portfolio totals — convert each holding to display currency
@@ -143,10 +128,13 @@ export async function POST(request: NextRequest) {
 
     // Crypto total
     let cryptoTotalUsd = 0;
+    const csvText = parse<string>("crypto_csv_text", "");
     if (csvText) {
       try {
         const { parseAndComputeHoldings, getTotalCryptoValueUsd } = await import("@/lib/utils/crypto-csv");
         const cryptoHoldings = parseAndComputeHoldings(csvText);
+        const cachedPrices = parse<{ prices: Record<string, number> }>("crypto_prices", { prices: {} });
+        const tickerMappings = parse<Record<string, string>>("crypto_ticker_mappings", {});
 
         for (const h of cryptoHoldings) {
           const mappedTicker = tickerMappings[h.token] ?? h.token;
@@ -158,7 +146,9 @@ export async function POST(request: NextRequest) {
     }
     const cryptoInUsd = toUsd(cryptoTotalUsd, "USD");
 
-    // Debts — convert each to USD
+    // Debts — convert each to display currency
+    const debtRecords = parse<{ id: string; direction: string; originalAmount: number; currency: string }[]>("debt_records", []);
+    const debtTransactions = parse<{ debtId: string; amount: number }[]>("debt_transactions", []);
     let owedToMe = 0;
     let iOwe = 0;
     for (const d of debtRecords) {
@@ -172,34 +162,35 @@ export async function POST(request: NextRequest) {
     const netWorth = portfolioTotal + cryptoInUsd + owedToMe - iOwe;
     const netWorthNoSuper = portfolioNoSuper + cryptoInUsd + owedToMe - iOwe;
 
-    // Portfolio snapshot — just INSERT
-    await supabase.from("snapshots").insert({
-      type: "portfolio",
-      date: today,
-      value: portfolioNoSuper,
-      value_with_super: portfolioTotal,
-      currency: SNAPSHOT_CURRENCY,
+    const updates: { key: string; value: string; updated_at: string }[] = [];
+    const now = new Date().toISOString();
+
+    // Portfolio snapshot
+    updates.push({
+      key: "portfolio_snapshots",
+      value: JSON.stringify([...portfolioSnapshots.slice(-89), { date: today, value: portfolioNoSuper, valueWithSuper: portfolioTotal, currency: SNAPSHOT_CURRENCY }]),
+      updated_at: now,
     });
 
-    // Net worth snapshot — just INSERT
-    await supabase.from("snapshots").insert({
-      type: "networth",
-      date: today,
-      value: netWorth,
-      value_no_super: netWorthNoSuper,
-      currency: SNAPSHOT_CURRENCY,
-      portfolio: portfolioTotal,
-      crypto: cryptoInUsd,
+    // Net worth snapshot
+    updates.push({
+      key: "networth_snapshots",
+      value: JSON.stringify([...nwSnapshots.slice(-89), { date: today, value: netWorth, valueNoSuper: netWorthNoSuper, currency: SNAPSHOT_CURRENCY, portfolio: portfolioTotal, crypto: cryptoInUsd }]),
+      updated_at: now,
     });
 
-    // Crypto snapshot — just INSERT
+    // Crypto snapshot
     if (cryptoInUsd > 0) {
-      await supabase.from("snapshots").insert({
-        type: "crypto",
-        date: today,
-        value: cryptoInUsd,
-        currency: SNAPSHOT_CURRENCY,
+      updates.push({
+        key: "crypto_snapshots",
+        value: JSON.stringify([...cryptoSnapshots.slice(-89), { date: today, value: cryptoInUsd, currency: SNAPSHOT_CURRENCY }]),
+        updated_at: now,
       });
+    }
+
+    const { error } = await supabase.from("app_data").upsert(updates, { onConflict: "key" });
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
     // Debug: list each holding for verification
