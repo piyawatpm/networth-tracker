@@ -23,6 +23,7 @@ import {
   Camera,
   ChevronDown,
   MoreHorizontal,
+  BarChart3,
   X,
 } from "lucide-react";
 import { useTheme } from "next-themes";
@@ -42,6 +43,7 @@ const PRIMARY_NAV = [
 ];
 
 const SECONDARY_NAV = [
+  { href: "/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/liabilities", label: "Liabilities", icon: Handshake },
   { href: "/emergency-fund", label: "Emergency", icon: Shield },
   { href: "/budget", label: "Budget", icon: FileSpreadsheet },
