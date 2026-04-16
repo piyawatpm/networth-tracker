@@ -198,17 +198,21 @@ export async function fetchExtendedStockQuote(
   country?: string,
 ): Promise<ExtendedQuote | null> {
   const isAU = country?.toUpperCase() === "AU";
+  const symbol = toYahooSymbol(ticker, country);
 
-  // Alpaca covers pre+regular+post for US equities with millisecond-accurate trade
-  // timestamps. ASX isn't available on Alpaca, so AU tickers skip straight to Yahoo.
+  // Yahoo's unofficial 1m-bar endpoint is on the consolidated SIP tape — so it
+  // reports the same number Google/investing.com/brokers display. Alpaca free
+  // tier is IEX-only and misses trades on every other exchange (~97% of
+  // volume), which makes it drift from the displayed market price especially
+  // during low-IEX-volume post/pre sessions. Keep Alpaca as fallback for when
+  // Yahoo hiccups, and Finnhub last.
+  const yahoo = await fetchYahoo(symbol);
+  if (yahoo) return yahoo;
+
   if (!isAU) {
     const alpaca = await fetchAlpaca(ticker);
     if (alpaca) return alpaca;
   }
-
-  const symbol = toYahooSymbol(ticker, country);
-  const yahoo = await fetchYahoo(symbol);
-  if (yahoo) return yahoo;
 
   return fetchFinnhub(symbol, country);
 }
