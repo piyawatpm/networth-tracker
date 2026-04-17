@@ -92,28 +92,44 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
           const tablesHaveData = (count ?? 0) > 0;
 
           if (tablesHaveData) {
+            // Paginated fetch helper — Supabase caps at max_rows (default 1000) per query
+            const fetchAll = async (
+              table: string,
+              orderCol = "date",
+              ascending = true,
+            ): Promise<Record<string, unknown>[]> => {
+              const PAGE = 1000;
+              const all: Record<string, unknown>[] = [];
+              for (let from = 0; ; from += PAGE) {
+                const { data, error } = await supabase
+                  .from(table)
+                  .select("*")
+                  .order(orderCol, { ascending })
+                  .range(from, from + PAGE - 1);
+                if (error || !data || data.length === 0) break;
+                all.push(...(data as Record<string, unknown>[]));
+                if (data.length < PAGE) break;
+              }
+              return all;
+            };
+
             // Tables exist AND have data — load from them
             await Promise.all([
-              // Entity tables
+              // Entity tables (paginated for safety)
               ...Object.entries(ENTITY_TABLES).map(async ([key, cfg]) => {
-                const { data } = await supabase.from(cfg.table).select("*");
-                const camelRows = (data ?? []).map((r) =>
-                  rowToCamel(r as Record<string, unknown>)
-                );
+                const rows = await fetchAll(cfg.table, "id");
+                const camelRows = rows.map((r) => rowToCamel(r));
                 if (camelRows.length > 0) {
                   cache.current.set(key, JSON.stringify(camelRows));
                 }
+                console.log(`[DataProvider] ${key}: ${camelRows.length} rows from table`);
               }),
 
-              // Snapshots
+              // Snapshots (paginated — can be 1000s per type)
               (async () => {
-                const { data } = await supabase
-                  .from("snapshots")
-                  .select("*")
-                  .order("date", { ascending: true });
-                const all = (data ?? []).map((r) =>
-                  rowToCamel(r as Record<string, unknown>)
-                );
+                const rows = await fetchAll("snapshots", "date");
+                const all = rows.map((r) => rowToCamel(r));
+                console.log(`[DataProvider] snapshots: ${all.length} total rows from table`);
                 if (all.length > 0) {
                   for (const [key, type] of Object.entries(SNAPSHOT_KEYS)) {
                     const filtered = all
@@ -127,6 +143,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
                         } = s as Record<string, unknown>;
                         return rest;
                       });
+                    console.log(`[DataProvider] ${key}: ${filtered.length} snapshots`);
                     if (filtered.length > 0) {
                       cache.current.set(key, JSON.stringify(filtered));
                     }
