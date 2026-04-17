@@ -426,7 +426,7 @@ export async function GET(request: Request) {
     });
     log.push(`Net worth: $${netWorth.toFixed(0)} (portfolio=$${portfolioTotal.toFixed(0)} crypto=$${cryptoTotalUsd.toFixed(0)} owed=$${owedToMe.toFixed(0)} debt=$${iOwe.toFixed(0)}) USD`);
 
-    // ── Write updates ──
+    // ── Write updates to KV ──
     if (updates.length > 0) {
       const { error } = await supabase.from("app_data").upsert(updates, { onConflict: "key" });
       if (error) {
@@ -435,6 +435,66 @@ export async function GET(request: Request) {
         await saveCronLog(today, log, false);
         return NextResponse.json({ error: error.message, log }, { status: 500 });
       }
+    }
+
+    // ── Also mirror to relational tables (graceful — tables may not exist) ──
+    try {
+      // Append new snapshots to the snapshots table
+      const snapshotInserts: Record<string, unknown>[] = [];
+      if (portfolioTotal > 0) {
+        snapshotInserts.push({ type: "portfolio", date: sydneyTime, value: portfolioNoSuper, value_with_super: portfolioTotal, currency: "USD" });
+      }
+      if (cryptoTotalUsd > 0) {
+        snapshotInserts.push({ type: "crypto", date: sydneyTime, value: cryptoTotalUsd, currency: "USD" });
+      }
+      snapshotInserts.push({ type: "networth", date: sydneyTime, value: netWorth, value_no_super: netWorthNoSuper, currency: "USD", portfolio: portfolioTotal, crypto: cryptoTotalUsd });
+      if (snapshotInserts.length > 0) {
+        await supabase.from("snapshots").insert(snapshotInserts);
+      }
+
+      // Update portfolio holdings that had prices refreshed
+      for (const h of stockHoldings) {
+        await supabase.from("portfolio_holdings")
+          .update({ current_value: h.currentValue, currency: h.currency })
+          .eq("id", h.id);
+      }
+
+      // Insert new recurring income/expense entries (if generated)
+      for (const update of updates) {
+        if (update.key === "income_entries" || update.key === "expense_entries") {
+          // Find new entries (those with recurringId set to a template from this run)
+          // For simplicity, we trust the updates array — parse new ones and insert
+          const all = JSON.parse(update.value);
+          // Get existing entry IDs from the table (only new ones need insertion)
+          const { data: existing } = await supabase.from(update.key).select("id");
+          const existingIds = new Set((existing ?? []).map((r: { id: string }) => r.id));
+          const newOnes = all.filter((e: { id: string }) => !existingIds.has(e.id));
+          if (newOnes.length > 0) {
+            const snakeNew = newOnes.map((e: Record<string, unknown>) => {
+              const out: Record<string, unknown> = {};
+              for (const [k, v] of Object.entries(e)) {
+                out[k.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`)] = v;
+              }
+              return out;
+            });
+            await supabase.from(update.key).insert(snakeNew);
+          }
+        }
+        // Update recurring template lastGeneratedDate
+        if (update.key === "recurring_income_templates" || update.key === "recurring_expense_templates") {
+          const templates = JSON.parse(update.value);
+          for (const t of templates) {
+            if (t.lastGeneratedDate) {
+              await supabase.from(update.key)
+                .update({ last_generated_date: t.lastGeneratedDate })
+                .eq("id", t.id);
+            }
+          }
+        }
+      }
+      log.push(`Mirrored to relational tables: ${snapshotInserts.length} snapshots`);
+    } catch (e) {
+      log.push(`Table mirror failed (KV write succeeded): ${String(e)}`);
     }
 
     log.push(`Done. ${updates.length} keys updated.`);
