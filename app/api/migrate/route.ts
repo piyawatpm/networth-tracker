@@ -132,11 +132,20 @@ export async function GET() {
         continue;
       }
 
+      // Only these columns exist in the snapshots table — strip anything else
+      const ALLOWED_SNAPSHOT_COLS = new Set([
+        "type", "date", "value", "value_no_super", "value_with_super",
+        "portfolio", "crypto", "currency",
+      ]);
       // Convert keys to snake_case, strip client-generated id, inject type
       const insertRows = rows.map((row) => {
         const snake = rowToSnake(row);
         delete snake["id"];
         snake["type"] = snapshotType;
+        // Remove any keys not in the allowed set (e.g. legacy 'time' field)
+        for (const k of Object.keys(snake)) {
+          if (!ALLOWED_SNAPSHOT_COLS.has(k)) delete snake[k];
+        }
         return snake;
       });
 
