@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useCallback } from "react";
 
 import { useCloudStorage } from "@/components/providers/data-provider";
 import { useCurrency } from "@/components/providers/currency-provider";
@@ -47,6 +47,7 @@ import { AssetAllocationDonut } from "./_components/asset-allocation-donut";
 interface Snapshot {
   date: string;
   value: number;
+  valueWithSuper?: number; // portfolio_snapshots only — total incl super
 }
 
 // ---------------------------------------------------------------------------
@@ -278,39 +279,85 @@ export default function AnalyticsPage() {
 
   const todayPnl = dailyPnl.find((d) => d.date === today)?.totalPnl ?? 0;
 
-  // PnL totals for several time ranges. Week/Month/Year sum the daily snapshot
-  // deltas. All-time uses cost-basis math (current value − cost basis + realized)
-  // including super, since summing daily deltas accumulates phantoms from
-  // unbalanced swap entries in the CSV (e.g. "buy syrupUSDC" rows whose matching
-  // "sell USDC" leg never got exported). Cost-basis matches the HoldingsPnl table.
+  // Single source of truth for ALL ranges: PnL_at(t) = totalValue_t − totalCost_t.
+  // Each range's PnL is the diff between today's PnL and the PnL on the range's
+  // start date. Guarantees Week/Month/Year/All-time are internally consistent —
+  // when "everything started this year" they agree by construction.
+  const pnlAtDate = useCallback(
+    (target: string): number => {
+      // Stocks (no super) — reconstructed from txns × Alpaca closes
+      const stockSnap = [...reconstructedStockSnapshots]
+        .reverse()
+        .find((s) => s.date <= target);
+      const stockUsd = stockSnap?.value ?? 0;
+
+      // Crypto — reconstructed from txns × Binance closes
+      const cryptoSnap = [...reconstructedCryptoSnapshots]
+        .reverse()
+        .find((s) => s.date.slice(0, 10) <= target);
+      const cryptoUsd = cryptoSnap?.value ?? 0;
+
+      // Super — extract from cron portfolio_snapshots (value_with_super − value).
+      // Daily reconstruction isn't possible (no historical price source for
+      // managed funds like HOSTPLUS), so we lean on the cron's manually-updated
+      // snapshot values for super.
+      let superUsd = 0;
+      const portSnapsSorted = [...portfolioSnapshots].sort((a, b) =>
+        a.date < b.date ? 1 : -1,
+      );
+      for (const s of portSnapsSorted) {
+        if (s.date.slice(0, 10) <= target && s.valueWithSuper != null) {
+          superUsd = s.valueWithSuper - s.value;
+          break;
+        }
+      }
+
+      const totalValue = convert(stockUsd + cryptoUsd + superUsd, "USD");
+
+      // Cost basis up to target = sum of all txn deposits (incl super), in user
+      // currency. Sells subtract their value, which preserves realized PnL: a
+      // BTC bought at $70k and sold at $74k adds $70k cost then subtracts $74k
+      // → net cost basis −$4k, exactly the realized profit.
+      let cost = 0;
+      for (const t of portfolioTransactions) {
+        if (t.date.slice(0, 10) > target) continue;
+        const sign = t.type === "buy" ? 1 : -1;
+        cost += sign * convert(t.totalAmount, t.currency);
+      }
+      for (const t of cryptoTxns) {
+        if (t.date.slice(0, 10) > target) continue;
+        if (t.totalValueUsd == null) continue;
+        const sign = t.type === "buy" || t.type === "transferIn" ? 1 : -1;
+        cost += sign * convert(t.totalValueUsd, "USD");
+      }
+
+      return totalValue - cost;
+    },
+    [
+      reconstructedStockSnapshots,
+      reconstructedCryptoSnapshots,
+      portfolioSnapshots,
+      portfolioTransactions,
+      cryptoTxns,
+      convert,
+    ],
+  );
+
   const rangePnls = useMemo(() => {
     const weekCutoff = new Date();
-    weekCutoff.setDate(weekCutoff.getDate() - 6); // last 7 days including today
+    weekCutoff.setDate(weekCutoff.getDate() - 7);
     const weekStart = weekCutoff.toISOString().slice(0, 10);
     const yearStart = today.slice(0, 4) + "-01-01";
-    const sumRange = (from: string) =>
-      dailyPnl
-        .filter((d) => d.date >= from && d.date <= today)
-        .reduce((sum, d) => sum + d.totalPnl, 0);
-
-    // All-time: include super by computing across ALL portfolio holdings, not the
-    // super-filtered set used for the daily delta calculation.
-    let allTime = 0;
-    for (const h of livePortfolioHoldings) {
-      allTime += convert(h.currentValue, h.currency) - convert(h.amountInvested, h.currency);
-    }
-    for (const h of cryptoHoldings) {
-      const realized = h.realizedPnlUsd ?? 0;
-      allTime += convert(h.currentValueUsd - h.totalCostUsd + realized, "USD");
-    }
-
+    // Day before earliest data — pnlAtDate returns 0 here, so All-time = today's PnL.
+    const beforeStart = "1970-01-01";
+    const todayPnl = pnlAtDate(today);
     return {
-      week: sumRange(weekStart),
-      month: sumRange(monthStart),
-      year: sumRange(yearStart),
-      all: allTime,
+      week: todayPnl - pnlAtDate(weekStart),
+      month: todayPnl - pnlAtDate(monthStart),
+      year: todayPnl - pnlAtDate(yearStart),
+      all: todayPnl - pnlAtDate(beforeStart),
     };
-  }, [dailyPnl, monthStart, today, livePortfolioHoldings, cryptoHoldings, convert]);
+  }, [pnlAtDate, monthStart, today]);
 
 
   // Last 30 days filter
