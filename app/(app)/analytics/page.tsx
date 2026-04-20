@@ -31,6 +31,7 @@ import type { PortfolioHolding, PortfolioTransaction } from "@/lib/utils/types";
 // Sub-components (some don't exist yet — other tasks will create them)
 import { PnlHeader } from "./_components/pnl-header";
 import { DailyCalendar } from "./_components/daily-calendar";
+import { ComparisonChart } from "./_components/comparison-chart";
 import { PnlByProduct } from "./_components/pnl-by-product";
 import { PnlAnalysisCard } from "./_components/pnl-analysis";
 import { HoldingsPnlTable } from "./_components/holdings-pnl-table";
@@ -254,6 +255,10 @@ export default function AnalyticsPage() {
 
       <BlurFade delay={D}>
         <DailyCalendar dailyPnl={dailyPnl} format={format} symbol={symbol} />
+      </BlurFade>
+
+      <BlurFade delay={D * 1.5}>
+        <ComparisonChart dailyPnl={dailyPnl} />
       </BlurFade>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">

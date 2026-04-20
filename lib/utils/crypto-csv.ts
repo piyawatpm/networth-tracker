@@ -333,14 +333,27 @@ export function computePortfolioHistory(csvText: string): PortfolioSnapshot[] {
   // Sort transactions by date ascending
   const sorted = [...transactions].sort((a, b) => a.date.localeCompare(b.date));
 
-  // Track cumulative holdings: token → { amount, costUsd, lastPriceUsd }
-  const state = new Map<string, { amount: number; costUsd: number; lastPriceUsd: number }>();
+  // Avg-buy-price method (mirrors computeHoldings). Selling at a profit must
+  // not collapse the cost basis of remaining units, so sells only reduce
+  // amount — totalBoughtAmount/Cost stay put so avgBuy = cost/amount is stable.
+  interface State {
+    amount: number;
+    totalBoughtAmount: number;
+    totalBoughtCost: number;
+    lastPriceUsd: number;
+  }
+  const state = new Map<string, State>();
   const snapshots: PortfolioSnapshot[] = [];
 
   for (const tx of sorted) {
     const token = tx.token;
     if (!state.has(token)) {
-      state.set(token, { amount: 0, costUsd: 0, lastPriceUsd: tx.priceUsd ?? 0 });
+      state.set(token, {
+        amount: 0,
+        totalBoughtAmount: 0,
+        totalBoughtCost: 0,
+        lastPriceUsd: tx.priceUsd ?? 0,
+      });
     }
     const s = state.get(token)!;
 
@@ -351,12 +364,16 @@ export function computePortfolioHistory(csvText: string): PortfolioSnapshot[] {
       case "buy":
       case "transferIn":
         s.amount += tx.amount;
-        if (tx.totalValueUsd) s.costUsd += tx.totalValueUsd;
+        // transferIn rows often have totalValueUsd = null; only shift avg-buy
+        // when the row carries USD, otherwise cost drifts on deposits.
+        if (tx.totalValueUsd != null) {
+          s.totalBoughtAmount += tx.amount;
+          s.totalBoughtCost += tx.totalValueUsd;
+        }
         break;
       case "sell":
       case "transferOut":
         s.amount -= tx.amount;
-        if (tx.totalValueUsd) s.costUsd -= tx.totalValueUsd;
         break;
     }
 
@@ -365,13 +382,20 @@ export function computePortfolioHistory(csvText: string): PortfolioSnapshot[] {
     let totalCost = 0;
     for (const [tk, holding] of state) {
       if (Math.abs(holding.amount) < 0.0001) continue;
-      // Stablecoins valued at $1 per unit
+      // Stablecoins pegged at $1 per unit (cost == value, unrealized PnL = 0)
       const isStable = tk.toUpperCase() === "USDC" || tk.toUpperCase() === "USDT" ||
         tk.toUpperCase() === "BUSD" || tk.toUpperCase() === "DAI" ||
         tk.toUpperCase() === "USD1" || tk.toUpperCase() === "TUSD";
-      const price = isStable ? 1 : holding.lastPriceUsd;
-      totalValue += holding.amount * price;
-      totalCost += Math.max(0, holding.costUsd);
+      if (isStable) {
+        totalValue += holding.amount;
+        totalCost += holding.amount;
+      } else {
+        const avgBuy = holding.totalBoughtAmount > 0
+          ? holding.totalBoughtCost / holding.totalBoughtAmount
+          : 0;
+        totalValue += holding.amount * holding.lastPriceUsd;
+        totalCost += Math.max(0, holding.amount * avgBuy);
+      }
     }
 
     // Extract date (YYYY-MM-DD from "YYYY-MM-DD HH:MM:SS")
