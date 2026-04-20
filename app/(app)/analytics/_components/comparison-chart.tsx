@@ -64,21 +64,22 @@ export function ComparisonChart({ pnlSeries }: ComparisonChartProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const range = useMemo(() => {
-    if (pnlSeries.length === 0) return null;
-    return { from: pnlSeries[0].date, to: pnlSeries[pnlSeries.length - 1].date };
-  }, [pnlSeries]);
+  // Depend on the from/to strings, not the range object reference, so an
+  // upstream pnlSeries reference change with identical dates doesn't refire
+  // the benchmark fetch.
+  const rangeFrom = pnlSeries[0]?.date ?? null;
+  const rangeTo = pnlSeries[pnlSeries.length - 1]?.date ?? null;
 
   useEffect(() => {
-    if (!range) return;
+    if (!rangeFrom || !rangeTo) return;
     setLoading(true);
     setError(null);
-    fetch(`/api/comparison?from=${range.from}&to=${range.to}`)
+    fetch(`/api/comparison?from=${rangeFrom}&to=${rangeTo}`)
       .then((r) => r.json())
       .then((j) => setBench(j.data ?? []))
       .catch((e: unknown) => setError(e instanceof Error ? e.message : "Fetch failed"))
       .finally(() => setLoading(false));
-  }, [range]);
+  }, [rangeFrom, rangeTo]);
 
   // Portfolio % each day = total PnL / cost basis active that day × 100.
   // Same denominator as HoldingsPnl% on the latest day, so the rightmost

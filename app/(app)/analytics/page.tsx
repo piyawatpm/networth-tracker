@@ -295,7 +295,12 @@ export default function AnalyticsPage() {
       portfolioTxns: portfolioTransactions,
       cryptoTxns,
       portfolioHoldings,
-      cryptoHoldings,
+      // Use rawCryptoHoldings (stable) instead of cryptoHoldings (live).
+      // The series only reads amount/totalCostUsd/realizedPnlUsd — fields that
+      // come from txn replay and don't change on WS price ticks. Using the
+      // live-priced version causes pnlSeries to recompute on every WS tick,
+      // which cascades into the comparison chart re-rendering constantly.
+      cryptoHoldings: rawCryptoHoldings,
       stockBars: stockHistory,
       cryptoBars: cryptoHistory,
       cronPortfolioSnaps: portfolioSnapshots,
@@ -305,7 +310,7 @@ export default function AnalyticsPage() {
     portfolioTransactions,
     cryptoTxns,
     portfolioHoldings,
-    cryptoHoldings,
+    rawCryptoHoldings,
     stockHistory,
     cryptoHistory,
     portfolioSnapshots,
