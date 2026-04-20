@@ -4,7 +4,7 @@ import { useCallback, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { BlurFade } from "@/components/ui/blur-fade";
 import { Upload } from "lucide-react";
-import { parseAndComputeHoldings } from "@/lib/utils/crypto-csv";
+import { parseAndComputeHoldings, detectFormat } from "@/lib/utils/crypto-csv";
 import { fetchCryptoPrices } from "@/lib/utils/crypto-prices";
 
 export function UploadSection({
@@ -27,11 +27,18 @@ export function UploadSection({
       reader.onload = (e) => {
         const text = e.target?.result as string;
         if (text && text.trim().length > 0) {
-          setCsvText(text);
-          setCsvUploadedAt(Date.now());
+          const format = detectFormat(text);
           const h = parseAndComputeHoldings(text);
           if (h.length > 0) {
-            setUploadStatus(`Loaded ${h.length} holdings`);
+            setCsvText(text);
+            setCsvUploadedAt(Date.now());
+            const formatLabel =
+              format === "transactions"
+                ? "Transaction History — full cost basis & realized PnL"
+                : format === "portfolio_overview"
+                  ? "Portfolio Overview — current holdings only (no realized PnL)"
+                  : "Unknown format";
+            setUploadStatus(`Loaded ${h.length} holdings · ${formatLabel}`);
             const tokens = h.map((holding) => holding.token);
             fetchCryptoPrices(tokens).then((prices) => {
               if (Object.keys(prices).length > 0) {
@@ -92,7 +99,9 @@ export function UploadSection({
           </h1>
           <p className="text-sm text-muted-foreground mt-1 max-w-md">
             Upload a CSV export from your exchange to track holdings,
-            allocations, and profit/loss.
+            allocations, and profit/loss. For accurate cost basis & realized
+            PnL, use the <span className="font-medium">Transaction History</span> export
+            (not Portfolio Overview).
           </p>
         </div>
       </BlurFade>

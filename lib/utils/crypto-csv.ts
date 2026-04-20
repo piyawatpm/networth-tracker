@@ -5,9 +5,9 @@ import { STABLECOINS, YIELD_PREFIXES, KNOWN_EXCHANGES } from "./constants";
 // Detect CSV format
 // ---------------------------------------------------------------------------
 
-type CsvFormat = "transactions" | "portfolio_overview" | "unknown";
+export type CsvFormat = "transactions" | "portfolio_overview" | "unknown";
 
-function detectFormat(csvText: string): CsvFormat {
+export function detectFormat(csvText: string): CsvFormat {
   const first200 = csvText.slice(0, 200).toLowerCase();
   if (first200.includes("last updated") && first200.includes("total value")) {
     return "portfolio_overview";

@@ -11,6 +11,7 @@ import {
   getCashValueUsd,
   computePortfolioHistory,
   applyStablecoinTags,
+  detectFormat,
 } from "@/lib/utils/crypto-csv";
 import {
   fetchCryptoPrices,
@@ -402,36 +403,44 @@ export default function CryptoPage() {
   }, [pricedHoldings, getExchange]);
 
   // File handler for Replace CSV
+  const [replaceStatus, setReplaceStatus] = useState<string | null>(null);
   const handleFile = useCallback(
     (file: File) => {
+      setReplaceStatus("Reading file…");
       const reader = new FileReader();
       reader.onload = (e) => {
         const text = e.target?.result as string;
-        if (text && text.trim().length > 0) {
-          setCsvText(text);
-          setCsvUploadedAt(Date.now());
-          const h = parseAndComputeHoldings(text);
-          if (h.length > 0) {
-            // Only fetch prices for tokens that already have a ticker mapping —
-            // raw CSV names like "Bitcoin" are not valid Binance/CoinGecko keys.
-            const mappedTokens = h
-              .map((holding) => tickerMappings[holding.token])
-              .filter((t): t is string => Boolean(t));
-            if (mappedTokens.length === 0) return;
-            fetchCryptoPrices(mappedTokens).then((prices) => {
-              const remapped: Record<string, number> = {};
-              for (const holding of h) {
-                const ticker = tickerMappings[holding.token];
-                if (ticker && prices[ticker] != null) {
-                  remapped[holding.token] = prices[ticker];
-                }
-              }
-              if (Object.keys(remapped).length > 0) {
-                setLivePrices(remapped);
-              }
-            });
-          }
+        if (!text || text.trim().length === 0) {
+          setReplaceStatus("File was empty");
+          return;
         }
+        const format = detectFormat(text);
+        const h = parseAndComputeHoldings(text);
+        if (h.length === 0) {
+          setReplaceStatus("Could not parse holdings — check CSV format");
+          return;
+        }
+        setCsvText(text);
+        setCsvUploadedAt(Date.now());
+        const formatLabel =
+          format === "transactions"
+            ? "Transaction History"
+            : format === "portfolio_overview"
+              ? "Portfolio Overview"
+              : "Unknown format";
+        setReplaceStatus(`Loaded ${h.length} holdings (${formatLabel})`);
+        // Use ticker mapping if set, otherwise the raw token name (which is
+        // already a valid Binance ticker for Transaction-format exports).
+        const mappedTokens = h.map((holding) => tickerMappings[holding.token] ?? holding.token);
+        fetchCryptoPrices(mappedTokens).then((prices) => {
+          const remapped: Record<string, number> = {};
+          for (const holding of h) {
+            const ticker = tickerMappings[holding.token] ?? holding.token;
+            if (prices[ticker] != null) remapped[holding.token] = prices[ticker];
+          }
+          if (Object.keys(remapped).length > 0) setLivePrices(remapped);
+        });
+        setTimeout(() => setReplaceStatus(null), 4000);
       };
       reader.readAsText(file);
     },
@@ -507,6 +516,11 @@ export default function CryptoPage() {
             onChange={onFileSelect}
             className="hidden"
           />
+          {replaceStatus && (
+            <span className="text-[10px] font-mono text-muted-foreground basis-full text-right">
+              {replaceStatus}
+            </span>
+          )}
         </div>
       </BlurFade>
 
