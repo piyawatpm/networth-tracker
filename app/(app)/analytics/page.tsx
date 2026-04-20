@@ -416,7 +416,7 @@ export default function AnalyticsPage() {
       </BlurFade>
 
       <BlurFade delay={D * 1.5}>
-        <ComparisonChart dailyPnl={dailyPnl} />
+        <ComparisonChart pnlSeries={pnlSeries} />
       </BlurFade>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">

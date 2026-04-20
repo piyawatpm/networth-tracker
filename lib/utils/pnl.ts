@@ -423,6 +423,7 @@ export interface DailyPnlPoint {
   stockUsd: number;   // unrealized + realized for stocks (incl super)
   cryptoUsd: number;  // unrealized + realized for crypto
   totalUsd: number;
+  costUsd: number;    // cumulative cost basis active on this day (for ROI %)
 }
 
 interface ReplayHolding {
@@ -642,6 +643,7 @@ export function computeDailyPnlSeries(params: {
 
     // ----- Stocks (non-super) -----
     let stockPnl = 0;
+    let stockCostActive = 0;
     for (const [ticker, s] of stockStates) {
       if (s.isSuper) continue;
       if (day < s.firstTxnDate) continue; // holding didn't exist yet
@@ -650,27 +652,31 @@ export function computeDailyPnlSeries(params: {
       if (close != null) {
         if (closeMap?.get(day) != null) lastStockClose.set(ticker, closeMap.get(day)!);
         stockPnl += s.amount * close - s.costUsd;
+        stockCostActive += s.costUsd;
       }
     }
 
     // ----- Super -----
-    // Use cron snapshot's super-only value (user manually updates HOSTPLUS).
-    // Cost basis is current amountInvested for super holdings.
-    let superCostUsd = 0;
+    let superCostTotal = 0;
     let superFirstDate = "9999-12-31";
     for (const [, s] of stockStates) {
       if (!s.isSuper) continue;
-      superCostUsd += s.costUsd;
+      superCostTotal += s.costUsd;
       if (s.firstTxnDate < superFirstDate) superFirstDate = s.firstTxnDate;
     }
     let superPnl = 0;
+    let superCostActive = 0;
     if (day >= superFirstDate) {
       const superValue = superValueAt(day);
-      if (superValue > 0) superPnl = superValue - superCostUsd;
+      if (superValue > 0) {
+        superPnl = superValue - superCostTotal;
+        superCostActive = superCostTotal;
+      }
     }
 
     // ----- Crypto -----
     let cryptoPnl = 0;
+    let cryptoCostActive = 0;
     for (const [token, s] of cryptoStates) {
       if (day < s.firstTxnDate) continue;
       const upper = token.toUpperCase();
@@ -688,6 +694,7 @@ export function computeDailyPnlSeries(params: {
       }
       if (price === 0) continue;
       cryptoPnl += s.amount * price - s.costUsd + s.realizedUsd;
+      cryptoCostActive += s.costUsd;
     }
 
     out.push({
@@ -695,6 +702,7 @@ export function computeDailyPnlSeries(params: {
       stockUsd: stockPnl + superPnl,
       cryptoUsd: cryptoPnl,
       totalUsd: stockPnl + superPnl + cryptoPnl,
+      costUsd: stockCostActive + superCostActive + cryptoCostActive,
     });
   }
 

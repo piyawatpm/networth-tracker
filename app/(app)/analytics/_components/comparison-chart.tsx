@@ -15,10 +15,11 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart";
-import type { DailyPnlEntry } from "@/lib/utils/pnl";
+import type { DailyPnlPoint } from "@/lib/utils/pnl";
 
 interface ComparisonChartProps {
-  dailyPnl: DailyPnlEntry[];
+  /** Per-day PnL series anchored to current holdings (from computeDailyPnlSeries). */
+  pnlSeries: DailyPnlPoint[];
 }
 
 interface BenchmarkPoint {
@@ -29,41 +30,21 @@ interface BenchmarkPoint {
 
 interface SeriesPoint {
   date: string;
-  stocks: number | null;
-  crypto: number | null;
+  portfolio: number | null;
   btc: number | null;
   spy: number | null;
 }
 
 const config: ChartConfig = {
-  stocks: { label: "My Stocks", color: "hsl(220 90% 60%)" },
-  crypto: { label: "My Crypto", color: "hsl(280 80% 60%)" },
+  portfolio: { label: "My Portfolio", color: "hsl(220 90% 60%)" },
   btc: { label: "BTC", color: "hsl(35 95% 55%)" },
   spy: { label: "S&P 500", color: "hsl(140 60% 45%)" },
 };
 
 /**
- * TWRR — Time-Weighted Rate of Return.
- *
- * For each day:   r_t = (V_t − V_{t-1} − F_t) / V_{t-1}
- * Cumulative:     R = ∏(1 + r_t) − 1
- *
- * Subtracting the day's net cash flow (F_t) before dividing by yesterday's
- * value strips out the effect of deposits/withdrawals, which is exactly
- * how indices like BTC and SPY are quoted (no user cash flows). That makes
- * "My Stocks +5%" directly comparable to "BTC +12%" over the same window.
+ * Convert a closing-price series → cumulative % vs the first non-null point.
+ * BTC and SPY have no user cash flows so this is just (close_t/close_first − 1).
  */
-function cumulativeFromPcts(entries: { date: string; pct: number }[]): { date: string; cum: number }[] {
-  const out: { date: string; cum: number }[] = [];
-  let factor = 1;
-  for (const e of entries) {
-    factor *= 1 + e.pct / 100;
-    out.push({ date: e.date, cum: (factor - 1) * 100 });
-  }
-  return out;
-}
-
-/** Convert closing-price series → cumulative % vs the first point. */
 function cumulativeFromCloses(map: Map<string, number>): Map<string, number> {
   const out = new Map<string, number>();
   const dates = [...map.keys()].sort();
@@ -78,18 +59,15 @@ function cumulativeFromCloses(map: Map<string, number>): Map<string, number> {
   return out;
 }
 
-export function ComparisonChart({ dailyPnl }: ComparisonChartProps) {
+export function ComparisonChart({ pnlSeries }: ComparisonChartProps) {
   const [bench, setBench] = useState<BenchmarkPoint[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Range is whatever dailyPnl spans — both reconstructions in pnl.ts now
-  // extend back to the earliest stock/crypto transaction.
   const range = useMemo(() => {
-    if (dailyPnl.length === 0) return null;
-    const dates = dailyPnl.map((d) => d.date).sort();
-    return { from: dates[0], to: dates[dates.length - 1] };
-  }, [dailyPnl]);
+    if (pnlSeries.length === 0) return null;
+    return { from: pnlSeries[0].date, to: pnlSeries[pnlSeries.length - 1].date };
+  }, [pnlSeries]);
 
   useEffect(() => {
     if (!range) return;
@@ -102,20 +80,14 @@ export function ComparisonChart({ dailyPnl }: ComparisonChartProps) {
       .finally(() => setLoading(false));
   }, [range]);
 
+  // Portfolio % each day = total PnL / cost basis active that day × 100.
+  // Same denominator as HoldingsPnl% on the latest day, so the rightmost
+  // point of the chart matches your All-time PnL%.
   const series = useMemo<SeriesPoint[]>(() => {
-    const sorted = [...dailyPnl].sort((a, b) => (a.date < b.date ? -1 : 1));
-
-    const stocksCum = new Map(
-      cumulativeFromPcts(sorted.map((d) => ({ date: d.date, pct: d.portfolioPnlPct }))).map(
-        (p) => [p.date, p.cum],
-      ),
-    );
-    const cryptoCum = new Map(
-      cumulativeFromPcts(sorted.map((d) => ({ date: d.date, pct: d.cryptoPnlPct }))).map(
-        (p) => [p.date, p.cum],
-      ),
-    );
-
+    const portMap = new Map<string, number>();
+    for (const p of pnlSeries) {
+      portMap.set(p.date, p.costUsd > 0 ? (p.totalUsd / p.costUsd) * 100 : 0);
+    }
     const btcMap = cumulativeFromCloses(
       new Map((bench ?? []).filter((p) => p.btc != null).map((p) => [p.date, p.btc as number])),
     );
@@ -124,19 +96,17 @@ export function ComparisonChart({ dailyPnl }: ComparisonChartProps) {
     );
 
     const dates = new Set<string>([
-      ...stocksCum.keys(),
-      ...cryptoCum.keys(),
+      ...portMap.keys(),
       ...btcMap.keys(),
       ...spyMap.keys(),
     ]);
     return [...dates].sort().map((date) => ({
       date,
-      stocks: stocksCum.get(date) ?? null,
-      crypto: cryptoCum.get(date) ?? null,
+      portfolio: portMap.get(date) ?? null,
       btc: btcMap.get(date) ?? null,
       spy: spyMap.get(date) ?? null,
     }));
-  }, [bench, dailyPnl]);
+  }, [bench, pnlSeries]);
 
   const latest = useMemo(() => {
     const last = (k: keyof Omit<SeriesPoint, "date">) => {
@@ -147,8 +117,7 @@ export function ComparisonChart({ dailyPnl }: ComparisonChartProps) {
       return null;
     };
     return {
-      stocks: last("stocks"),
-      crypto: last("crypto"),
+      portfolio: last("portfolio"),
       btc: last("btc"),
       spy: last("spy"),
     };
@@ -160,9 +129,9 @@ export function ComparisonChart({ dailyPnl }: ComparisonChartProps) {
   return (
     <div className="finance-card p-5">
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <p className="label-mono">Performance — TWRR (deposit-adjusted)</p>
+        <p className="label-mono">Performance — ROI vs cost basis</p>
         <div className="flex flex-wrap items-center gap-3 text-xs font-mono">
-          {(["stocks", "crypto", "btc", "spy"] as const).map((k) => {
+          {(["portfolio", "btc", "spy"] as const).map((k) => {
             const v = latest[k];
             const positive = (v ?? 0) >= 0;
             return (
@@ -224,16 +193,8 @@ export function ComparisonChart({ dailyPnl }: ComparisonChartProps) {
             />
             <Line
               type="monotone"
-              dataKey="stocks"
-              stroke="var(--color-stocks)"
-              strokeWidth={2.5}
-              dot={false}
-              connectNulls
-            />
-            <Line
-              type="monotone"
-              dataKey="crypto"
-              stroke="var(--color-crypto)"
+              dataKey="portfolio"
+              stroke="var(--color-portfolio)"
               strokeWidth={2.5}
               dot={false}
               connectNulls
