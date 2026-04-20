@@ -38,13 +38,27 @@ export function UploadSection({
                 : format === "portfolio_overview"
                   ? "Portfolio Overview — current holdings only (no realized PnL)"
                   : "Unknown format";
-            setUploadStatus(`Loaded ${h.length} holdings · ${formatLabel}`);
+            setUploadStatus(`Loaded ${h.length} holdings · ${formatLabel} — snapshotting…`);
             const tokens = h.map((holding) => holding.token);
             fetchCryptoPrices(tokens).then((prices) => {
               if (Object.keys(prices).length > 0) {
                 setLivePrices(prices);
               }
             });
+            // Auto-trigger snapshot so the cron's next tick has fresh data.
+            window.setTimeout(() => {
+              fetch("/api/snapshot", { method: "POST" })
+                .then((r) => {
+                  setUploadStatus(
+                    r.ok
+                      ? `Loaded ${h.length} holdings · ${formatLabel} — snapshot updated`
+                      : `Loaded ${h.length} holdings · ${formatLabel} — snapshot failed`,
+                  );
+                })
+                .catch(() => {
+                  setUploadStatus(`Loaded ${h.length} holdings · ${formatLabel} — snapshot failed`);
+                });
+            }, 600);
           } else {
             setUploadStatus("Could not parse holdings. Check CSV format.");
           }

@@ -428,7 +428,7 @@ export default function CryptoPage() {
             : format === "portfolio_overview"
               ? "Portfolio Overview"
               : "Unknown format";
-        setReplaceStatus(`Loaded ${h.length} holdings (${formatLabel})`);
+        setReplaceStatus(`Loaded ${h.length} holdings (${formatLabel}) — snapshotting…`);
         // Use ticker mapping if set, otherwise the raw token name (which is
         // already a valid Binance ticker for Transaction-format exports).
         const mappedTokens = h.map((holding) => tickerMappings[holding.token] ?? holding.token);
@@ -440,7 +440,24 @@ export default function CryptoPage() {
           }
           if (Object.keys(remapped).length > 0) setLivePrices(remapped);
         });
-        setTimeout(() => setReplaceStatus(null), 4000);
+        // Auto-trigger /api/snapshot so the cron's next read isn't stale.
+        // Wait for setCsvText's debounced KV write (~500ms) before snapshotting.
+        window.setTimeout(() => {
+          fetch("/api/snapshot", { method: "POST" })
+            .then(async (r) => {
+              if (r.ok) {
+                setReplaceStatus(`Loaded ${h.length} holdings (${formatLabel}) — snapshot updated`);
+              } else {
+                setReplaceStatus(`Loaded ${h.length} holdings (${formatLabel}) — snapshot failed`);
+              }
+            })
+            .catch(() => {
+              setReplaceStatus(`Loaded ${h.length} holdings (${formatLabel}) — snapshot failed`);
+            })
+            .finally(() => {
+              window.setTimeout(() => setReplaceStatus(null), 3000);
+            });
+        }, 600);
       };
       reader.readAsText(file);
     },

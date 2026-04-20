@@ -481,26 +481,26 @@ function replayHoldings<T extends { date: string; units?: number; amount?: numbe
 }
 
 /**
- * Per-day total PnL using avg-buy-price + historical closes.
+ * Per-day total PnL anchored to CURRENT holdings (matches HoldingsPnl).
  *
- * For each day from fromDate..toDate:
- *   stockPnl = Σ ((close_t − avg_buy) × amount + realized_to_date)
- *   cryptoPnl = same, with stablecoin-aware pricing
- *   totalPnl = stockPnl + cryptoPnl + super contribution
+ * For each day from fromDate..toDate, for each holding:
+ *   if t < first_txn_date for this holding: contribution = 0
+ *   else: PnL = current_amount × close_t − current_cost + current_realized
  *
- * The avg-buy-price method matches what CoinMarketCap and exchanges report,
- * so today's totalPnl lines up with the user's CMC "All-time profit" reading.
- * Daily PnL is just the diff between consecutive days; range PnL is the diff
- * between range endpoints. No phantoms from CSV currency mislabeling or
- * unbalanced swap entries because we never compare snapshot deltas to txn
- * cash flow — we go directly from holdings + prices to PnL.
+ * Today's PnL = HoldingsPnl by construction. Range PnL = PnL[end] − PnL[start]
+ * captures pure price movement on the current holdings. Avoids the
+ * replay-vs-holdings drift caused by user data inconsistencies (txns
+ * missing sells, mismatched cost basis, currency mislabeling) — we trust
+ * holdings + computed avg buy price as the source of truth, only use
+ * historical prices for the time-series shape.
  */
 export function computeDailyPnlSeries(params: {
   fromDate: string;
   toDate: string;
   portfolioTxns: PortfolioTransaction[];
   cryptoTxns: CryptoTransaction[];
-  holdings: { id: string; ticker?: string; name?: string; accountType?: string; amountInvested?: number; currency?: string }[];
+  portfolioHoldings: { id: string; ticker?: string; name?: string; accountType?: string; units?: number; amountInvested?: number; currency?: string }[];
+  cryptoHoldings: { token: string; amount: number; totalCostUsd: number; realizedPnlUsd?: number }[];
   stockBars: Record<string, { date: string; close: number }[]>;
   cryptoBars: Record<string, { date: string; close: number }[]>;
   cronPortfolioSnaps: { date: string; value: number; valueWithSuper?: number }[];
@@ -511,37 +511,82 @@ export function computeDailyPnlSeries(params: {
     toDate,
     portfolioTxns,
     cryptoTxns,
-    holdings,
+    portfolioHoldings,
+    cryptoHoldings,
     stockBars,
     cryptoBars,
     cronPortfolioSnaps,
     fxToUsd,
   } = params;
 
-  // Ticker resolver — id first, then name fallback (handles orphan txns whose
-  // holdingId was deleted during a holdings-merge).
+  // Resolver for txn → ticker (name fallback for orphans)
   const tickerById = new Map<string, string>();
   const tickerByName = new Map<string, string>();
-  const superTickers = new Set<string>();
-  let superCostUsd = 0;
-  for (const h of holdings) {
+  for (const h of portfolioHoldings) {
     if (h.ticker) {
       const t = h.ticker.toUpperCase();
       tickerById.set(h.id, t);
       if (h.name) tickerByName.set(h.name.toLowerCase(), t);
-      if (h.accountType === "super") {
-        superTickers.add(t);
-        if (h.amountInvested != null && h.currency) {
-          superCostUsd += fxToUsd(h.amountInvested, h.currency);
-        }
-      }
     }
   }
   const resolveTicker = (tx: PortfolioTransaction): string | undefined =>
     tickerById.get(tx.holdingId) ??
     (tx.holdingName ? tickerByName.get(tx.holdingName.toLowerCase()) : undefined);
 
-  // Per-token historical price lookup with carry-forward.
+  // For each stock ticker: first txn date, current amount & cost basis.
+  interface StockState {
+    amount: number;
+    costUsd: number;
+    firstTxnDate: string;
+    isSuper: boolean;
+  }
+  const stockStates = new Map<string, StockState>();
+  for (const h of portfolioHoldings) {
+    if (!h.ticker || !h.units || h.units === 0) continue;
+    const ticker = h.ticker.toUpperCase();
+    if (stockStates.has(ticker)) continue;
+    stockStates.set(ticker, {
+      amount: h.units,
+      costUsd: h.amountInvested != null && h.currency ? fxToUsd(h.amountInvested, h.currency) : 0,
+      firstTxnDate: "9999-12-31",
+      isSuper: h.accountType === "super",
+    });
+  }
+  // Fill in first_txn_date by scanning txns
+  for (const tx of portfolioTxns) {
+    const ticker = resolveTicker(tx);
+    if (!ticker) continue;
+    const s = stockStates.get(ticker);
+    if (!s) continue;
+    const day = dateOnly(tx.date);
+    if (day < s.firstTxnDate) s.firstTxnDate = day;
+  }
+
+  // Crypto states: current amount + cost + realized per token, plus first txn.
+  interface CryptoState {
+    amount: number;
+    costUsd: number;  // current cost basis (after sells, per computeHoldings)
+    realizedUsd: number;
+    firstTxnDate: string;
+  }
+  const cryptoStates = new Map<string, CryptoState>();
+  for (const h of cryptoHoldings) {
+    if (Math.abs(h.amount) < 1e-8) continue;
+    cryptoStates.set(h.token, {
+      amount: h.amount,
+      costUsd: h.totalCostUsd,
+      realizedUsd: h.realizedPnlUsd ?? 0,
+      firstTxnDate: "9999-12-31",
+    });
+  }
+  for (const tx of cryptoTxns) {
+    const s = cryptoStates.get(tx.token);
+    if (!s) continue;
+    const day = dateOnly(tx.date);
+    if (day < s.firstTxnDate) s.firstTxnDate = day;
+  }
+
+  // Per-token historical close lookup
   const stockClose = new Map<string, Map<string, number>>();
   for (const [t, bars] of Object.entries(stockBars)) {
     stockClose.set(t.toUpperCase(), new Map(bars.map((b) => [b.date, b.close])));
@@ -564,15 +609,20 @@ export function computeDailyPnlSeries(params: {
     return 0;
   };
 
-  // Carry-forward closes for non-trading days (weekends for stocks, etc.)
+  // Last-known prices for carry-forward on non-trading days
   const lastStockClose = new Map<string, number>();
   const lastCryptoClose = new Map<string, number>();
-  // Track lastTxnPrice per crypto token for tokens with no API close (syrupUSDC etc.)
+
+  // Last txn priceUsd per crypto token (fallback for tokens without API price)
   const sortedCryptoTxns = [...cryptoTxns].sort((a, b) =>
     a.date < b.date ? -1 : 1,
   );
   const cryptoLastTxnPrice = new Map<string, number>();
   let cryptoTxnIdx = 0;
+
+  const STABLES = new Set([
+    "USDT", "USDC", "USDE", "USD1", "DAI", "BUSD", "TUSD", "FDUSD", "GUSD",
+  ]);
 
   const out: DailyPnlPoint[] = [];
   for (
@@ -582,7 +632,6 @@ export function computeDailyPnlSeries(params: {
   ) {
     const day = d.toISOString().slice(0, 10);
 
-    // Update carry-forward txn prices (for crypto)
     while (cryptoTxnIdx < sortedCryptoTxns.length && dateOnly(sortedCryptoTxns[cryptoTxnIdx].date) <= day) {
       const tx = sortedCryptoTxns[cryptoTxnIdx];
       if (tx.priceUsd != null && tx.priceUsd > 0) {
@@ -591,45 +640,39 @@ export function computeDailyPnlSeries(params: {
       cryptoTxnIdx++;
     }
 
-    // ----- Stocks (incl super) -----
-    const stockStates = replayHoldings(
-      portfolioTxns,
-      (t) => resolveTicker(t),
-      day,
-      (t) => fxToUsd(t.totalAmount, t.currency),
-    );
-
+    // ----- Stocks (non-super) -----
     let stockPnl = 0;
     for (const [ticker, s] of stockStates) {
-      if (Math.abs(s.amount) < 1e-8) continue;
-      // Super tickers: use cron snapshot for value (no Alpaca for managed funds)
-      if (superTickers.has(ticker)) continue; // handled below
+      if (s.isSuper) continue;
+      if (day < s.firstTxnDate) continue; // holding didn't exist yet
       const closeMap = stockClose.get(ticker);
       const close = closeMap?.get(day) ?? lastStockClose.get(ticker);
       if (close != null) {
         if (closeMap?.get(day) != null) lastStockClose.set(ticker, closeMap.get(day)!);
-        const avgBuy = s.totalBoughtAmount > 0 ? s.totalBoughtCost / s.totalBoughtAmount : 0;
-        stockPnl += (close - avgBuy) * s.amount + s.realizedPnl;
+        stockPnl += s.amount * close - s.costUsd;
       }
     }
-    // Super contribution
-    const superValue = superValueAt(day);
-    const superPnl = superValue > 0 ? superValue - superCostUsd : 0;
+
+    // ----- Super -----
+    // Use cron snapshot's super-only value (user manually updates HOSTPLUS).
+    // Cost basis is current amountInvested for super holdings.
+    let superCostUsd = 0;
+    let superFirstDate = "9999-12-31";
+    for (const [, s] of stockStates) {
+      if (!s.isSuper) continue;
+      superCostUsd += s.costUsd;
+      if (s.firstTxnDate < superFirstDate) superFirstDate = s.firstTxnDate;
+    }
+    let superPnl = 0;
+    if (day >= superFirstDate) {
+      const superValue = superValueAt(day);
+      if (superValue > 0) superPnl = superValue - superCostUsd;
+    }
 
     // ----- Crypto -----
-    const STABLES = new Set([
-      "USDT", "USDC", "USDE", "USD1", "DAI", "BUSD", "TUSD", "FDUSD", "GUSD",
-    ]);
-    const cryptoStates = replayHoldings(
-      cryptoTxns,
-      (t) => t.token,
-      day,
-      (t) => t.totalValueUsd,
-    );
-
     let cryptoPnl = 0;
     for (const [token, s] of cryptoStates) {
-      if (Math.abs(s.amount) < 1e-8) continue;
+      if (day < s.firstTxnDate) continue;
       const upper = token.toUpperCase();
       let price: number;
       if (STABLES.has(upper)) {
@@ -644,12 +687,7 @@ export function computeDailyPnlSeries(params: {
         if (closeMap?.get(day) != null) lastCryptoClose.set(upper, closeMap.get(day)!);
       }
       if (price === 0) continue;
-      const avgBuy = STABLES.has(upper)
-        ? 1
-        : s.totalBoughtAmount > 0
-          ? s.totalBoughtCost / s.totalBoughtAmount
-          : 0;
-      cryptoPnl += (price - avgBuy) * s.amount + s.realizedPnl;
+      cryptoPnl += s.amount * price - s.costUsd + s.realizedUsd;
     }
 
     out.push({
