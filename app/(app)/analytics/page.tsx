@@ -25,6 +25,7 @@ import {
   computeDailyPnl,
   computeHoldingsPnl,
   computePnlAnalysis,
+  reconstructStockSnapshots,
 } from "@/lib/utils/pnl";
 import type { PortfolioHolding, PortfolioTransaction } from "@/lib/utils/types";
 
@@ -185,9 +186,51 @@ export default function AnalyticsPage() {
     [portfolioTransactions, superHoldingIds],
   );
 
+  // Reconstruct stock snapshots from transactions + Alpaca historical bars,
+  // bypassing portfolio_snapshots' drift from backdated CSV/holding edits.
+  const [stockHistory, setStockHistory] = useState<Record<string, { date: string; close: number }[]>>({});
+
+  const stockTickers = useMemo(() => {
+    const ids = new Set<string>();
+    for (const h of portfolioHoldings) {
+      if (h.accountType !== "super" && h.ticker) ids.add(h.ticker.toUpperCase());
+    }
+    return [...ids];
+  }, [portfolioHoldings]);
+
+  const stockTxnRange = useMemo(() => {
+    const dates = portfolioTransactions
+      .filter((t) => !superHoldingIds.has(t.holdingId))
+      .map((t) => t.date.slice(0, 10))
+      .sort();
+    if (dates.length === 0) return null;
+    return { from: dates[0], to: today };
+  }, [portfolioTransactions, superHoldingIds, today]);
+
+  useEffect(() => {
+    if (stockTickers.length === 0 || !stockTxnRange) return;
+    fetch(
+      `/api/stock-history?tickers=${stockTickers.join(",")}&from=${stockTxnRange.from}&to=${stockTxnRange.to}`,
+    )
+      .then((r) => r.json())
+      .then((j) => setStockHistory(j.data ?? {}))
+      .catch(() => setStockHistory({}));
+  }, [stockTickers, stockTxnRange]);
+
+  const reconstructedStockSnapshots = useMemo(() => {
+    if (!stockTxnRange || Object.keys(stockHistory).length === 0) return portfolioSnapshots;
+    return reconstructStockSnapshots(
+      portfolioTransactions,
+      portfolioHoldings,
+      stockHistory,
+      stockTxnRange.from,
+      stockTxnRange.to,
+    );
+  }, [stockHistory, stockTxnRange, portfolioTransactions, portfolioHoldings, portfolioSnapshots]);
+
   const dailyPnl = useMemo(
-    () => computeDailyPnl(portfolioSnapshots, cryptoSnapshots, nonSuperTxns, cryptoTxns, convert),
-    [portfolioSnapshots, cryptoSnapshots, nonSuperTxns, cryptoTxns, convert],
+    () => computeDailyPnl(reconstructedStockSnapshots, cryptoSnapshots, nonSuperTxns, cryptoTxns, convert),
+    [reconstructedStockSnapshots, cryptoSnapshots, nonSuperTxns, cryptoTxns, convert],
   );
 
   const todayPnl = dailyPnl.find((d) => d.date === today)?.totalPnl ?? 0;

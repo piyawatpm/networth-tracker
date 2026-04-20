@@ -298,3 +298,95 @@ export function getISOWeekday(dateStr: string): number {
   const d = new Date(dateStr + "T00:00:00");
   return (d.getDay() + 6) % 7; // JS getDay: 0=Sun → shift to 0=Mon
 }
+
+// ---------------------------------------------------------------------------
+// Reconstruct daily stock snapshots from transactions + historical closes
+// ---------------------------------------------------------------------------
+
+interface StockBar {
+  date: string;
+  close: number;
+}
+
+interface MinimalHolding {
+  id: string;
+  ticker: string;
+  accountType?: string;
+}
+
+/**
+ * Replay portfolio_transactions against daily close prices to produce one
+ * total-value snapshot per day (in USD). Skips super holdings — the calendar
+ * already uses the no-super column for daily PnL.
+ *
+ * Result feeds computeDailyPnl as the portfolio_snapshots input, replacing
+ * the cron-captured values that drift whenever CSVs/holdings are edited
+ * backdated. This stays in sync with transactions by construction, so no
+ * phantom losses/gains from snapshot/ledger mismatch.
+ */
+export function reconstructStockSnapshots(
+  transactions: PortfolioTransaction[],
+  holdings: MinimalHolding[],
+  historicalBars: Record<string, StockBar[]>,
+  fromDate: string,
+  toDate: string,
+): { date: string; value: number }[] {
+  const superIds = new Set<string>();
+  const tickerById = new Map<string, string>();
+  for (const h of holdings) {
+    if (h.accountType === "super") superIds.add(h.id);
+    if (h.ticker) tickerById.set(h.id, h.ticker.toUpperCase());
+  }
+
+  // Per-ticker date → close for O(1) lookup
+  const closeLookup = new Map<string, Map<string, number>>();
+  for (const [ticker, bars] of Object.entries(historicalBars)) {
+    closeLookup.set(
+      ticker.toUpperCase(),
+      new Map(bars.map((b) => [b.date, b.close])),
+    );
+  }
+
+  // Filter to non-super txns, sort chronologically
+  const sorted = transactions
+    .filter((t) => !superIds.has(t.holdingId))
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+
+  const unitsByTicker = new Map<string, number>();
+  const lastClose = new Map<string, number>();
+  let txIdx = 0;
+
+  const out: { date: string; value: number }[] = [];
+  for (
+    let d = new Date(`${fromDate}T00:00:00Z`);
+    d <= new Date(`${toDate}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + 1)
+  ) {
+    const day = d.toISOString().slice(0, 10);
+
+    // Apply all txns with date <= EOD this day
+    while (txIdx < sorted.length && sorted[txIdx].date.slice(0, 10) <= day) {
+      const tx = sorted[txIdx];
+      const ticker = tickerById.get(tx.holdingId);
+      if (ticker) {
+        const sign = tx.type === "buy" ? 1 : -1;
+        unitsByTicker.set(ticker, (unitsByTicker.get(ticker) ?? 0) + sign * tx.units);
+      }
+      txIdx++;
+    }
+
+    // Sum units × close for each ticker
+    let total = 0;
+    for (const [ticker, units] of unitsByTicker) {
+      if (Math.abs(units) < 1e-8) continue;
+      const close = closeLookup.get(ticker)?.get(day) ?? lastClose.get(ticker);
+      if (close != null) {
+        lastClose.set(ticker, close);
+        total += units * close;
+      }
+    }
+    out.push({ date: day, value: total });
+  }
+
+  return out;
+}
