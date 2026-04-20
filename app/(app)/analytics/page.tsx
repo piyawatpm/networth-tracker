@@ -11,7 +11,12 @@ import {
   parseAndComputeHoldings,
   getTotalCryptoValueUsd,
 } from "@/lib/utils/crypto-csv";
-import { applyLivePrices } from "@/lib/utils/crypto-prices";
+import {
+  applyLivePrices,
+  fetchCryptoPrices,
+  getCachedCryptoPrices,
+  isCryptoPricesCacheStale,
+} from "@/lib/utils/crypto-prices";
 import { applyStablecoinTags } from "@/lib/utils/crypto-csv";
 import { canAutoUpdate } from "@/lib/utils/prices";
 import { useAlpacaWs } from "@/lib/hooks/use-alpaca-ws";
@@ -102,6 +107,37 @@ export default function AnalyticsPage() {
       setCryptoLivePrices((prev) => ({ ...prev, ...mapped }));
     }
   }, [binancePrices, rawCryptoHoldings, tickerMappings]);
+
+  // Seed prices from REST cache so PnL is correct before the WS connects.
+  // Without this, holdings render with currentValueUsd = totalCostUsd → 0 PnL.
+  useEffect(() => {
+    if (rawCryptoHoldings.length === 0) return;
+    const mapTickers = (prices: Record<string, number>) => {
+      const out: Record<string, number> = {};
+      for (const h of rawCryptoHoldings) {
+        const ticker = tickerMappings[h.token] ?? h.token;
+        if (prices[ticker]) out[h.token] = prices[ticker];
+      }
+      return out;
+    };
+
+    const cached = getCachedCryptoPrices();
+    if (cached && !isCryptoPricesCacheStale()) {
+      const mapped = mapTickers(cached.prices);
+      if (Object.keys(mapped).length > 0) {
+        setCryptoLivePrices((prev) => ({ ...mapped, ...prev }));
+      }
+      return;
+    }
+
+    const tokens = rawCryptoHoldings.map((h) => tickerMappings[h.token] ?? h.token);
+    fetchCryptoPrices(tokens).then((prices) => {
+      const mapped = mapTickers(prices);
+      if (Object.keys(mapped).length > 0) {
+        setCryptoLivePrices((prev) => ({ ...mapped, ...prev }));
+      }
+    });
+  }, [rawCryptoHoldings, tickerMappings]);
 
   // Live portfolio holdings with Alpaca prices applied
   const livePortfolioHoldings = useMemo(() => {

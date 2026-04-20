@@ -217,6 +217,7 @@ export interface CryptoHolding {
   amount: number;
   totalCostUsd: number;
   currentValueUsd: number;
+  realizedPnlUsd?: number;  // locked-in profit/loss from past sells
   exchange?: string;  // auto-parsed from CSV notes or manually set
 }
 

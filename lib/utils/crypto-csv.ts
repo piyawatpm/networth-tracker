@@ -227,18 +227,38 @@ function extractExchange(notes: string): string | undefined {
 }
 
 export function computeHoldings(transactions: CryptoTransaction[]): CryptoHolding[] {
-  const holdingsMap = new Map<string, { amount: number; totalCostUsd: number; exchanges: Set<string> }>();
+  // Avg-buy-price method (matches what crypto exchanges report):
+  //   avgBuyPrice = totalBoughtCost / totalBoughtAmount  (buys + transferIns only)
+  //   on sell: realized += soldAmount × (soldPrice − avgBuyPrice); cost basis
+  //   per remaining unit stays at avgBuyPrice instead of drifting.
+  // Sorting by date is required so realized PnL uses the avg-buy-price as it
+  // stood AT the time of each sell, not the final all-time average.
+  const sorted = [...transactions].sort((a, b) =>
+    a.date < b.date ? -1 : a.date > b.date ? 1 : 0,
+  );
 
-  for (const tx of transactions) {
+  interface State {
+    amount: number;
+    totalBoughtAmount: number;
+    totalBoughtCost: number;
+    realizedPnl: number;
+    exchanges: Set<string>;
+  }
+  const holdingsMap = new Map<string, State>();
+
+  for (const tx of sorted) {
     const token = tx.token;
-
     if (!holdingsMap.has(token)) {
-      holdingsMap.set(token, { amount: 0, totalCostUsd: 0, exchanges: new Set() });
+      holdingsMap.set(token, {
+        amount: 0,
+        totalBoughtAmount: 0,
+        totalBoughtCost: 0,
+        realizedPnl: 0,
+        exchanges: new Set(),
+      });
     }
-
     const h = holdingsMap.get(token)!;
 
-    // Extract exchange from notes
     const exchange = extractExchange(tx.notes);
     if (exchange) h.exchanges.add(exchange);
 
@@ -246,25 +266,45 @@ export function computeHoldings(transactions: CryptoTransaction[]): CryptoHoldin
       case "buy":
       case "transferIn":
         h.amount += tx.amount;
-        if (tx.totalValueUsd) h.totalCostUsd += tx.totalValueUsd;
+        // transferIn rows often have totalValueUsd = null; only track cost
+        // for rows that carry a USD value, otherwise avg buy price stays put.
+        if (tx.totalValueUsd != null) {
+          h.totalBoughtAmount += tx.amount;
+          h.totalBoughtCost += tx.totalValueUsd;
+        }
         break;
       case "sell":
-      case "transferOut":
+      case "transferOut": {
         h.amount -= tx.amount;
-        if (tx.totalValueUsd) h.totalCostUsd -= tx.totalValueUsd;
+        if (tx.totalValueUsd != null && h.totalBoughtAmount > 0) {
+          const avgBuy = h.totalBoughtCost / h.totalBoughtAmount;
+          h.realizedPnl += tx.totalValueUsd - tx.amount * avgBuy;
+        }
         break;
+      }
     }
   }
 
   const holdings: CryptoHolding[] = [];
   for (const [token, data] of holdingsMap) {
     if (Math.abs(data.amount) < 0.0001) continue;
-    const estimatedValue = isStablecoin(token) ? data.amount : data.totalCostUsd;
+    const stable = isStablecoin(token);
+    const avgBuy =
+      data.totalBoughtAmount > 0
+        ? data.totalBoughtCost / data.totalBoughtAmount
+        : 0;
+    // Stablecoin cost-basis drifts on amount-only transferIn/Out rows, so
+    // peg cost to current amount → unrealized PnL stays 0 (the peg is $1).
+    const totalCostUsd = stable
+      ? data.amount
+      : Math.max(0, data.amount * avgBuy);
+    const currentValueUsd = stable ? data.amount : totalCostUsd;
     holdings.push({
       token,
       amount: data.amount,
-      totalCostUsd: Math.max(0, data.totalCostUsd),
-      currentValueUsd: estimatedValue,
+      totalCostUsd,
+      currentValueUsd,
+      realizedPnlUsd: stable ? 0 : data.realizedPnl,
       exchange: data.exchanges.size > 0 ? Array.from(data.exchanges).join(", ") : undefined,
     });
   }

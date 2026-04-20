@@ -147,15 +147,23 @@ export function computeDailyPnl(
     const today = days[i];
     const yesterday = days[i - 1];
 
-    const portToday = portMap.get(today) ?? portMap.get(yesterday) ?? 0;
-    const portYesterday = portMap.get(yesterday) ?? 0;
+    // Without a real prior-day snapshot the day's full balance would be
+    // booked as profit, so skip the contribution until a baseline exists.
+    const portYesterdayVal = portMap.get(yesterday);
+    const portTodayVal = portMap.get(today) ?? portYesterdayVal;
     const portDeposit = portCF.get(today) ?? 0;
-    const portfolioPnl = portToday - portYesterday - portDeposit;
+    const portfolioPnl =
+      portYesterdayVal !== undefined && portTodayVal !== undefined
+        ? portTodayVal - portYesterdayVal - portDeposit
+        : 0;
 
-    const cryptoToday = cryptoMap.get(today) ?? cryptoMap.get(yesterday) ?? 0;
-    const cryptoYesterday = cryptoMap.get(yesterday) ?? 0;
+    const cryptoYesterdayVal = cryptoMap.get(yesterday);
+    const cryptoTodayVal = cryptoMap.get(today) ?? cryptoYesterdayVal;
     const cryptoDeposit = cryptoCF.get(today) ?? 0;
-    const cryptoPnl = cryptoToday - cryptoYesterday - cryptoDeposit;
+    const cryptoPnl =
+      cryptoYesterdayVal !== undefined && cryptoTodayVal !== undefined
+        ? cryptoTodayVal - cryptoYesterdayVal - cryptoDeposit
+        : 0;
 
     entries.push({
       date: today,
@@ -200,7 +208,10 @@ export function computeHoldingsPnl(
   for (const h of cryptoHoldings) {
     const currentConverted = convert(h.currentValueUsd, "USD");
     const costConverted = convert(h.totalCostUsd, "USD");
-    const pnl = currentConverted - costConverted;
+    const realizedConverted = convert(h.realizedPnlUsd ?? 0, "USD");
+    // Total profit per token = unrealized (current − cost) + realized (locked
+    // in from past sells) — matches what crypto exchanges report.
+    const pnl = currentConverted - costConverted + realizedConverted;
     const pnlPct = costConverted !== 0 ? (pnl / costConverted) * 100 : 0;
 
     result.push({
