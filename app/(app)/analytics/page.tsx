@@ -192,7 +192,11 @@ export default function AnalyticsPage() {
 
   const todayPnl = dailyPnl.find((d) => d.date === today)?.totalPnl ?? 0;
 
-  // PnL totals for several time ranges (week / month / year / all-time)
+  // PnL totals for several time ranges. Week/Month/Year sum the daily snapshot
+  // deltas. All-time uses cost-basis math (current value − cost basis + realized)
+  // including super, since summing daily deltas accumulates phantoms from
+  // unbalanced swap entries in the CSV (e.g. "buy syrupUSDC" rows whose matching
+  // "sell USDC" leg never got exported). Cost-basis matches the HoldingsPnl table.
   const rangePnls = useMemo(() => {
     const weekCutoff = new Date();
     weekCutoff.setDate(weekCutoff.getDate() - 6); // last 7 days including today
@@ -202,13 +206,25 @@ export default function AnalyticsPage() {
       dailyPnl
         .filter((d) => d.date >= from && d.date <= today)
         .reduce((sum, d) => sum + d.totalPnl, 0);
+
+    // All-time: include super by computing across ALL portfolio holdings, not the
+    // super-filtered set used for the daily delta calculation.
+    let allTime = 0;
+    for (const h of livePortfolioHoldings) {
+      allTime += convert(h.currentValue, h.currency) - convert(h.amountInvested, h.currency);
+    }
+    for (const h of cryptoHoldings) {
+      const realized = h.realizedPnlUsd ?? 0;
+      allTime += convert(h.currentValueUsd - h.totalCostUsd + realized, "USD");
+    }
+
     return {
       week: sumRange(weekStart),
       month: sumRange(monthStart),
       year: sumRange(yearStart),
-      all: dailyPnl.reduce((sum, d) => sum + d.totalPnl, 0),
+      all: allTime,
     };
-  }, [dailyPnl, monthStart, today]);
+  }, [dailyPnl, monthStart, today, livePortfolioHoldings, cryptoHoldings, convert]);
 
 
   // Last 30 days filter
