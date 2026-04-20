@@ -14,6 +14,7 @@ export interface DailyPnlEntry {
   portfolioPnl: number; // Price-change PnL for stocks
   cryptoPnl: number; // Price-change PnL for crypto
   totalPnl: number; // Combined
+  totalPnlPct: number; // % vs prior-day total (0 when no baseline)
 }
 
 export interface HoldingPnl {
@@ -165,11 +166,15 @@ export function computeDailyPnl(
         ? cryptoTodayVal - cryptoYesterdayVal - cryptoDeposit
         : 0;
 
+    const totalPnl = portfolioPnl + cryptoPnl;
+    const baseline = (portYesterdayVal ?? 0) + (cryptoYesterdayVal ?? 0);
+    const totalPnlPct = baseline > 0 ? (totalPnl / baseline) * 100 : 0;
     entries.push({
       date: today,
       portfolioPnl,
       cryptoPnl,
-      totalPnl: portfolioPnl + cryptoPnl,
+      totalPnl,
+      totalPnlPct,
     });
   }
 

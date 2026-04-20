@@ -17,6 +17,7 @@ import {
 interface DailyCalendarProps {
   dailyPnl: DailyPnlEntry[];
   format: (amount: number) => string;
+  symbol: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -40,23 +41,20 @@ const MONTH_LABELS = [
   "December",
 ] as const;
 
-/** Format large numbers compactly: 1234 -> "1.2k", -980 -> "-980" */
-function compactPnl(value: number): string {
+/** Format large numbers compactly with currency symbol: 1234 -> "+฿1.2k". */
+function compactPnl(value: number, symbol: string): string {
+  if (value === 0) return `${symbol}0`;
   const abs = Math.abs(value);
-  if (abs >= 1000) {
-    const sign = value < 0 ? "-" : "+";
-    return `${sign}${(abs / 1000).toFixed(1)}k`;
-  }
-  if (value === 0) return "$0";
-  const sign = value > 0 ? "+" : "";
-  return `${sign}${Math.round(value)}`;
+  const sign = value > 0 ? "+" : "-";
+  if (abs >= 1000) return `${sign}${symbol}${(abs / 1000).toFixed(1)}k`;
+  return `${sign}${symbol}${Math.round(abs)}`;
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export function DailyCalendar({ dailyPnl, format }: DailyCalendarProps) {
+export function DailyCalendar({ dailyPnl, format, symbol }: DailyCalendarProps) {
   const todayStr = getSydneyDateString();
   const [todayYear, todayMonth] = todayStr.split("-").map(Number);
 
@@ -113,16 +111,24 @@ export function DailyCalendar({ dailyPnl, format }: DailyCalendarProps) {
       <div className="mb-4 flex items-center justify-between">
         <div className="flex flex-col gap-1">
           <p className="label-mono">Daily Breakdown</p>
-          {selectedEntry && (
-            <p
-              className={cn(
-                "text-lg font-bold tabular-nums font-mono",
-                selectedEntry.totalPnl >= 0 ? "text-income" : "text-expense",
-              )}
-            >
-              {format(selectedEntry.totalPnl)}
-            </p>
-          )}
+          {/* Fixed-height slot prevents layout shift when a day is selected. */}
+          <p
+            className={cn(
+              "text-lg font-bold tabular-nums font-mono leading-7 h-7 flex items-baseline gap-2",
+              !selectedEntry && "opacity-0 select-none",
+              selectedEntry && selectedEntry.totalPnl >= 0
+                ? "text-income"
+                : "text-expense",
+            )}
+          >
+            <span>{format(selectedEntry?.totalPnl ?? 0)}</span>
+            {selectedEntry && (
+              <span className="text-xs text-muted-foreground">
+                {selectedEntry.totalPnlPct >= 0 ? "+" : ""}
+                {selectedEntry.totalPnlPct.toFixed(2)}%
+              </span>
+            )}
+          </p>
         </div>
 
         {/* Month navigation */}
@@ -214,7 +220,7 @@ export function DailyCalendar({ dailyPnl, format }: DailyCalendarProps) {
                         : "text-muted-foreground",
                   )}
                 >
-                  {compactPnl(pnl)}
+                  {compactPnl(pnl, symbol)}
                 </span>
               )}
             </button>
@@ -222,46 +228,44 @@ export function DailyCalendar({ dailyPnl, format }: DailyCalendarProps) {
         })}
       </div>
 
-      {/* ---- Selected day breakdown ---- */}
-      {selectedEntry && (
-        <div className="mt-4 border-t border-border/60 pt-4">
-          <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-2">
-            {selectedDay} Breakdown
-          </p>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-md bg-secondary/50 p-3">
-              <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-1">
-                Stocks PnL
-              </p>
-              <p
-                className={cn(
-                  "text-sm font-bold tabular-nums font-mono",
-                  selectedEntry.portfolioPnl >= 0
-                    ? "text-income"
-                    : "text-expense",
-                )}
-              >
-                {format(selectedEntry.portfolioPnl)}
-              </p>
-            </div>
-            <div className="rounded-md bg-secondary/50 p-3">
-              <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-1">
-                Crypto PnL
-              </p>
-              <p
-                className={cn(
-                  "text-sm font-bold tabular-nums font-mono",
-                  selectedEntry.cryptoPnl >= 0
-                    ? "text-income"
-                    : "text-expense",
-                )}
-              >
-                {format(selectedEntry.cryptoPnl)}
-              </p>
-            </div>
+      {/* ---- Selected day breakdown (always rendered to avoid layout shift) ---- */}
+      <div className="mt-4 border-t border-border/60 pt-4">
+        <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-2">
+          {selectedEntry ? `${selectedDay} Breakdown` : "Click a day to see breakdown"}
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="rounded-md bg-secondary/50 p-3">
+            <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-1">
+              Stocks PnL
+            </p>
+            <p
+              className={cn(
+                "text-sm font-bold tabular-nums font-mono",
+                !selectedEntry && "text-muted-foreground/40",
+                selectedEntry &&
+                  (selectedEntry.portfolioPnl >= 0 ? "text-income" : "text-expense"),
+              )}
+            >
+              {format(selectedEntry?.portfolioPnl ?? 0)}
+            </p>
+          </div>
+          <div className="rounded-md bg-secondary/50 p-3">
+            <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-1">
+              Crypto PnL
+            </p>
+            <p
+              className={cn(
+                "text-sm font-bold tabular-nums font-mono",
+                !selectedEntry && "text-muted-foreground/40",
+                selectedEntry &&
+                  (selectedEntry.cryptoPnl >= 0 ? "text-income" : "text-expense"),
+              )}
+            >
+              {format(selectedEntry?.cryptoPnl ?? 0)}
+            </p>
           </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }

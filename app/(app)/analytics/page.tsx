@@ -253,7 +253,7 @@ export default function AnalyticsPage() {
       </BlurFade>
 
       <BlurFade delay={D}>
-        <DailyCalendar dailyPnl={dailyPnl} format={format} />
+        <DailyCalendar dailyPnl={dailyPnl} format={format} symbol={symbol} />
       </BlurFade>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
