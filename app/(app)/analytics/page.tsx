@@ -329,15 +329,30 @@ export default function AnalyticsPage() {
     weekCutoff.setDate(weekCutoff.getDate() - 7);
     const weekStart = weekCutoff.toISOString().slice(0, 10);
     const yearStart = today.slice(0, 4) + "-01-01";
-    const beforeStart = "1970-01-01";
     const todayPnl = pnlAtDate(today);
+
+    // All-time: HoldingsPnl approach (current value − cost basis + realized).
+    // The pnlSeries replay diverges from current holdings whenever the user's
+    // txn ledger doesn't perfectly track every buy/sell — e.g. adjusting
+    // holdings.units down without recording the sell, or setting an
+    // amountInvested higher than the sum of buy txns. HoldingsPnl is the
+    // source of truth for "current state" so we anchor All-time to it.
+    let allTime = 0;
+    for (const h of livePortfolioHoldings) {
+      allTime += convert(h.currentValue, h.currency) - convert(h.amountInvested, h.currency);
+    }
+    for (const h of cryptoHoldings) {
+      const realized = h.realizedPnlUsd ?? 0;
+      allTime += convert(h.currentValueUsd - h.totalCostUsd + realized, "USD");
+    }
+
     return {
       week: todayPnl - pnlAtDate(weekStart),
       month: todayPnl - pnlAtDate(monthStart),
       year: todayPnl - pnlAtDate(yearStart),
-      all: todayPnl - pnlAtDate(beforeStart),
+      all: allTime,
     };
-  }, [pnlAtDate, monthStart, today]);
+  }, [pnlAtDate, monthStart, today, livePortfolioHoldings, cryptoHoldings, convert]);
 
 
 
