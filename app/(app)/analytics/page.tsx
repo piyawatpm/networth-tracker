@@ -27,6 +27,7 @@ import {
   computePnlAnalysis,
   reconstructStockSnapshots,
   reconstructCryptoSnapshots,
+  computeDailyPnlSeries,
 } from "@/lib/utils/pnl";
 import type { PortfolioHolding, PortfolioTransaction } from "@/lib/utils/types";
 
@@ -279,68 +280,48 @@ export default function AnalyticsPage() {
 
   const todayPnl = dailyPnl.find((d) => d.date === today)?.totalPnl ?? 0;
 
-  // Single source of truth for ALL ranges: PnL_at(t) = totalValue_t − totalCost_t.
-  // Each range's PnL is the diff between today's PnL and the PnL on the range's
-  // start date. Guarantees Week/Month/Year/All-time are internally consistent —
-  // when "everything started this year" they agree by construction.
+  // Daily total-PnL series using avg-buy-price method (matches CMC).
+  // For each day: stockPnl + cryptoPnl + superPnl, all in USD.
+  // Range PnL = series[end] − series[start]; daily PnL = series[t] − series[t-1].
+  const pnlSeries = useMemo(() => {
+    const dates = [
+      ...portfolioTransactions.map((t) => t.date.slice(0, 10)),
+      ...cryptoTxns.map((t) => t.date.slice(0, 10)),
+    ].sort();
+    if (dates.length === 0) return [];
+    return computeDailyPnlSeries({
+      fromDate: dates[0],
+      toDate: today,
+      portfolioTxns: portfolioTransactions,
+      cryptoTxns,
+      holdings: portfolioHoldings,
+      stockBars: stockHistory,
+      cryptoBars: cryptoHistory,
+      cronPortfolioSnaps: portfolioSnapshots,
+      fxToUsd: (amount, currency) => convert(amount, currency, "USD"),
+    });
+  }, [
+    portfolioTransactions,
+    cryptoTxns,
+    portfolioHoldings,
+    stockHistory,
+    cryptoHistory,
+    portfolioSnapshots,
+    convert,
+    today,
+  ]);
+
   const pnlAtDate = useCallback(
     (target: string): number => {
-      // Stocks (no super) — reconstructed from txns × Alpaca closes
-      const stockSnap = [...reconstructedStockSnapshots]
-        .reverse()
-        .find((s) => s.date <= target);
-      const stockUsd = stockSnap?.value ?? 0;
-
-      // Crypto — reconstructed from txns × Binance closes
-      const cryptoSnap = [...reconstructedCryptoSnapshots]
-        .reverse()
-        .find((s) => s.date.slice(0, 10) <= target);
-      const cryptoUsd = cryptoSnap?.value ?? 0;
-
-      // Super — extract from cron portfolio_snapshots (value_with_super − value).
-      // Daily reconstruction isn't possible (no historical price source for
-      // managed funds like HOSTPLUS), so we lean on the cron's manually-updated
-      // snapshot values for super.
-      let superUsd = 0;
-      const portSnapsSorted = [...portfolioSnapshots].sort((a, b) =>
-        a.date < b.date ? 1 : -1,
-      );
-      for (const s of portSnapsSorted) {
-        if (s.date.slice(0, 10) <= target && s.valueWithSuper != null) {
-          superUsd = s.valueWithSuper - s.value;
-          break;
-        }
+      // Find latest series point on/before target. If target is before all data → 0.
+      let result = 0;
+      for (const p of pnlSeries) {
+        if (p.date <= target) result = p.totalUsd;
+        else break;
       }
-
-      const totalValue = convert(stockUsd + cryptoUsd + superUsd, "USD");
-
-      // Cost basis up to target = sum of all txn deposits (incl super), in user
-      // currency. Sells subtract their value, which preserves realized PnL: a
-      // BTC bought at $70k and sold at $74k adds $70k cost then subtracts $74k
-      // → net cost basis −$4k, exactly the realized profit.
-      let cost = 0;
-      for (const t of portfolioTransactions) {
-        if (t.date.slice(0, 10) > target) continue;
-        const sign = t.type === "buy" ? 1 : -1;
-        cost += sign * convert(t.totalAmount, t.currency);
-      }
-      for (const t of cryptoTxns) {
-        if (t.date.slice(0, 10) > target) continue;
-        if (t.totalValueUsd == null) continue;
-        const sign = t.type === "buy" || t.type === "transferIn" ? 1 : -1;
-        cost += sign * convert(t.totalValueUsd, "USD");
-      }
-
-      return totalValue - cost;
+      return convert(result, "USD");
     },
-    [
-      reconstructedStockSnapshots,
-      reconstructedCryptoSnapshots,
-      portfolioSnapshots,
-      portfolioTransactions,
-      cryptoTxns,
-      convert,
-    ],
+    [pnlSeries, convert],
   );
 
   const rangePnls = useMemo(() => {
@@ -348,7 +329,6 @@ export default function AnalyticsPage() {
     weekCutoff.setDate(weekCutoff.getDate() - 7);
     const weekStart = weekCutoff.toISOString().slice(0, 10);
     const yearStart = today.slice(0, 4) + "-01-01";
-    // Day before earliest data — pnlAtDate returns 0 here, so All-time = today's PnL.
     const beforeStart = "1970-01-01";
     const todayPnl = pnlAtDate(today);
     return {
@@ -358,6 +338,7 @@ export default function AnalyticsPage() {
       all: todayPnl - pnlAtDate(beforeStart),
     };
   }, [pnlAtDate, monthStart, today]);
+
 
 
   // Last 30 days filter

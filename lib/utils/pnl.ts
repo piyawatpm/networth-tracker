@@ -415,6 +415,255 @@ export function reconstructStockSnapshots(
 }
 
 // ---------------------------------------------------------------------------
+// Total PnL at any date — avg-buy-price method (matches CoinMarketCap etc.)
+// ---------------------------------------------------------------------------
+
+export interface DailyPnlPoint {
+  date: string;
+  stockUsd: number;   // unrealized + realized for stocks (incl super)
+  cryptoUsd: number;  // unrealized + realized for crypto
+  totalUsd: number;
+}
+
+interface ReplayHolding {
+  amount: number;
+  totalBoughtAmount: number;
+  totalBoughtCost: number; // USD
+  realizedPnl: number;     // USD
+}
+
+function dateOnly(s: string): string {
+  return s.slice(0, 10);
+}
+
+/**
+ * Walk transactions chronologically up to `target` and return per-key state
+ * using the avg-buy-price method. Sells settle realized PnL against the
+ * weighted-avg buy price at the time of the sell, so cost-per-remaining-unit
+ * stays stable. This is the same approach exchanges report.
+ */
+function replayHoldings<T extends { date: string; units?: number; amount?: number; type: string }>(
+  txns: T[],
+  keyOf: (t: T) => string | undefined,
+  target: string,
+  costUsdOf: (t: T) => number | null,
+): Map<string, ReplayHolding> {
+  const out = new Map<string, ReplayHolding>();
+  const sorted = [...txns].sort((a, b) =>
+    a.date < b.date ? -1 : a.date > b.date ? 1 : 0,
+  );
+  for (const tx of sorted) {
+    if (dateOnly(tx.date) > target) break;
+    const key = keyOf(tx);
+    if (!key) continue;
+    const qty = (tx.units ?? tx.amount ?? 0) as number;
+    if (!qty) continue;
+    if (!out.has(key)) {
+      out.set(key, { amount: 0, totalBoughtAmount: 0, totalBoughtCost: 0, realizedPnl: 0 });
+    }
+    const s = out.get(key)!;
+    const costUsd = costUsdOf(tx);
+    if (tx.type === "buy" || tx.type === "transferIn") {
+      s.amount += qty;
+      if (costUsd != null && costUsd > 0) {
+        s.totalBoughtAmount += qty;
+        s.totalBoughtCost += costUsd;
+      }
+    } else {
+      s.amount -= qty;
+      if (costUsd != null && costUsd > 0 && s.totalBoughtAmount > 0) {
+        const avg = s.totalBoughtCost / s.totalBoughtAmount;
+        s.realizedPnl += costUsd - qty * avg;
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Per-day total PnL using avg-buy-price + historical closes.
+ *
+ * For each day from fromDate..toDate:
+ *   stockPnl = Σ ((close_t − avg_buy) × amount + realized_to_date)
+ *   cryptoPnl = same, with stablecoin-aware pricing
+ *   totalPnl = stockPnl + cryptoPnl + super contribution
+ *
+ * The avg-buy-price method matches what CoinMarketCap and exchanges report,
+ * so today's totalPnl lines up with the user's CMC "All-time profit" reading.
+ * Daily PnL is just the diff between consecutive days; range PnL is the diff
+ * between range endpoints. No phantoms from CSV currency mislabeling or
+ * unbalanced swap entries because we never compare snapshot deltas to txn
+ * cash flow — we go directly from holdings + prices to PnL.
+ */
+export function computeDailyPnlSeries(params: {
+  fromDate: string;
+  toDate: string;
+  portfolioTxns: PortfolioTransaction[];
+  cryptoTxns: CryptoTransaction[];
+  holdings: { id: string; ticker?: string; name?: string; accountType?: string; amountInvested?: number; currency?: string }[];
+  stockBars: Record<string, { date: string; close: number }[]>;
+  cryptoBars: Record<string, { date: string; close: number }[]>;
+  cronPortfolioSnaps: { date: string; value: number; valueWithSuper?: number }[];
+  fxToUsd: (amount: number, currency: string) => number;
+}): DailyPnlPoint[] {
+  const {
+    fromDate,
+    toDate,
+    portfolioTxns,
+    cryptoTxns,
+    holdings,
+    stockBars,
+    cryptoBars,
+    cronPortfolioSnaps,
+    fxToUsd,
+  } = params;
+
+  // Ticker resolver — id first, then name fallback (handles orphan txns whose
+  // holdingId was deleted during a holdings-merge).
+  const tickerById = new Map<string, string>();
+  const tickerByName = new Map<string, string>();
+  const superTickers = new Set<string>();
+  let superCostUsd = 0;
+  for (const h of holdings) {
+    if (h.ticker) {
+      const t = h.ticker.toUpperCase();
+      tickerById.set(h.id, t);
+      if (h.name) tickerByName.set(h.name.toLowerCase(), t);
+      if (h.accountType === "super") {
+        superTickers.add(t);
+        if (h.amountInvested != null && h.currency) {
+          superCostUsd += fxToUsd(h.amountInvested, h.currency);
+        }
+      }
+    }
+  }
+  const resolveTicker = (tx: PortfolioTransaction): string | undefined =>
+    tickerById.get(tx.holdingId) ??
+    (tx.holdingName ? tickerByName.get(tx.holdingName.toLowerCase()) : undefined);
+
+  // Per-token historical price lookup with carry-forward.
+  const stockClose = new Map<string, Map<string, number>>();
+  for (const [t, bars] of Object.entries(stockBars)) {
+    stockClose.set(t.toUpperCase(), new Map(bars.map((b) => [b.date, b.close])));
+  }
+  const cryptoClose = new Map<string, Map<string, number>>();
+  for (const [t, bars] of Object.entries(cryptoBars)) {
+    cryptoClose.set(t.toUpperCase(), new Map(bars.map((b) => [b.date, b.close])));
+  }
+
+  // Cron portfolio snaps sorted desc — to find super value at any past date.
+  const sortedCronSnaps = [...cronPortfolioSnaps].sort((a, b) =>
+    a.date < b.date ? 1 : -1,
+  );
+  const superValueAt = (target: string): number => {
+    for (const s of sortedCronSnaps) {
+      if (dateOnly(s.date) <= target && s.valueWithSuper != null) {
+        return s.valueWithSuper - s.value;
+      }
+    }
+    return 0;
+  };
+
+  // Carry-forward closes for non-trading days (weekends for stocks, etc.)
+  const lastStockClose = new Map<string, number>();
+  const lastCryptoClose = new Map<string, number>();
+  // Track lastTxnPrice per crypto token for tokens with no API close (syrupUSDC etc.)
+  const sortedCryptoTxns = [...cryptoTxns].sort((a, b) =>
+    a.date < b.date ? -1 : 1,
+  );
+  const cryptoLastTxnPrice = new Map<string, number>();
+  let cryptoTxnIdx = 0;
+
+  const out: DailyPnlPoint[] = [];
+  for (
+    let d = new Date(`${fromDate}T00:00:00Z`);
+    d <= new Date(`${toDate}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + 1)
+  ) {
+    const day = d.toISOString().slice(0, 10);
+
+    // Update carry-forward txn prices (for crypto)
+    while (cryptoTxnIdx < sortedCryptoTxns.length && dateOnly(sortedCryptoTxns[cryptoTxnIdx].date) <= day) {
+      const tx = sortedCryptoTxns[cryptoTxnIdx];
+      if (tx.priceUsd != null && tx.priceUsd > 0) {
+        cryptoLastTxnPrice.set(tx.token, tx.priceUsd);
+      }
+      cryptoTxnIdx++;
+    }
+
+    // ----- Stocks (incl super) -----
+    const stockStates = replayHoldings(
+      portfolioTxns,
+      (t) => resolveTicker(t),
+      day,
+      (t) => fxToUsd(t.totalAmount, t.currency),
+    );
+
+    let stockPnl = 0;
+    for (const [ticker, s] of stockStates) {
+      if (Math.abs(s.amount) < 1e-8) continue;
+      // Super tickers: use cron snapshot for value (no Alpaca for managed funds)
+      if (superTickers.has(ticker)) continue; // handled below
+      const closeMap = stockClose.get(ticker);
+      const close = closeMap?.get(day) ?? lastStockClose.get(ticker);
+      if (close != null) {
+        if (closeMap?.get(day) != null) lastStockClose.set(ticker, closeMap.get(day)!);
+        const avgBuy = s.totalBoughtAmount > 0 ? s.totalBoughtCost / s.totalBoughtAmount : 0;
+        stockPnl += (close - avgBuy) * s.amount + s.realizedPnl;
+      }
+    }
+    // Super contribution
+    const superValue = superValueAt(day);
+    const superPnl = superValue > 0 ? superValue - superCostUsd : 0;
+
+    // ----- Crypto -----
+    const STABLES = new Set([
+      "USDT", "USDC", "USDE", "USD1", "DAI", "BUSD", "TUSD", "FDUSD", "GUSD",
+    ]);
+    const cryptoStates = replayHoldings(
+      cryptoTxns,
+      (t) => t.token,
+      day,
+      (t) => t.totalValueUsd,
+    );
+
+    let cryptoPnl = 0;
+    for (const [token, s] of cryptoStates) {
+      if (Math.abs(s.amount) < 1e-8) continue;
+      const upper = token.toUpperCase();
+      let price: number;
+      if (STABLES.has(upper)) {
+        price = 1;
+      } else {
+        const closeMap = cryptoClose.get(upper);
+        price =
+          closeMap?.get(day) ??
+          lastCryptoClose.get(upper) ??
+          cryptoLastTxnPrice.get(token) ??
+          0;
+        if (closeMap?.get(day) != null) lastCryptoClose.set(upper, closeMap.get(day)!);
+      }
+      if (price === 0) continue;
+      const avgBuy = STABLES.has(upper)
+        ? 1
+        : s.totalBoughtAmount > 0
+          ? s.totalBoughtCost / s.totalBoughtAmount
+          : 0;
+      cryptoPnl += (price - avgBuy) * s.amount + s.realizedPnl;
+    }
+
+    out.push({
+      date: day,
+      stockUsd: stockPnl + superPnl,
+      cryptoUsd: cryptoPnl,
+      totalUsd: stockPnl + superPnl + cryptoPnl,
+    });
+  }
+
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Reconstruct daily crypto snapshots from CSV txns + historical prices
 // ---------------------------------------------------------------------------
 
