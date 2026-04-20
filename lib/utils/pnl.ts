@@ -311,6 +311,7 @@ interface StockBar {
 interface MinimalHolding {
   id: string;
   ticker: string;
+  name?: string;
   accountType?: string;
 }
 
@@ -332,10 +333,21 @@ export function reconstructStockSnapshots(
   toDate: string,
 ): { date: string; value: number }[] {
   const superIds = new Set<string>();
+  const superNames = new Set<string>();
   const tickerById = new Map<string, string>();
+  // Name → ticker fallback so transactions referencing deleted/consolidated
+  // holdingIds (e.g. duplicate "Initial holding" entries the user later
+  // merged) still resolve to the right ticker via their holdingName.
+  const tickerByName = new Map<string, string>();
   for (const h of holdings) {
-    if (h.accountType === "super") superIds.add(h.id);
-    if (h.ticker) tickerById.set(h.id, h.ticker.toUpperCase());
+    if (h.accountType === "super") {
+      superIds.add(h.id);
+      if (h.name) superNames.add(h.name.toLowerCase());
+    }
+    if (h.ticker) {
+      tickerById.set(h.id, h.ticker.toUpperCase());
+      if (h.name) tickerByName.set(h.name.toLowerCase(), h.ticker.toUpperCase());
+    }
   }
 
   // Per-ticker date → close for O(1) lookup
@@ -347,9 +359,20 @@ export function reconstructStockSnapshots(
     );
   }
 
+  const resolveTicker = (tx: PortfolioTransaction): string | undefined => {
+    return (
+      tickerById.get(tx.holdingId) ??
+      (tx.holdingName ? tickerByName.get(tx.holdingName.toLowerCase()) : undefined)
+    );
+  };
+
+  const isSuper = (tx: PortfolioTransaction) =>
+    superIds.has(tx.holdingId) ||
+    (tx.holdingName ? superNames.has(tx.holdingName.toLowerCase()) : false);
+
   // Filter to non-super txns, sort chronologically
   const sorted = transactions
-    .filter((t) => !superIds.has(t.holdingId))
+    .filter((t) => !isSuper(t))
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 
   const unitsByTicker = new Map<string, number>();
@@ -367,7 +390,7 @@ export function reconstructStockSnapshots(
     // Apply all txns with date <= EOD this day
     while (txIdx < sorted.length && sorted[txIdx].date.slice(0, 10) <= day) {
       const tx = sorted[txIdx];
-      const ticker = tickerById.get(tx.holdingId);
+      const ticker = resolveTicker(tx);
       if (ticker) {
         const sign = tx.type === "buy" ? 1 : -1;
         unitsByTicker.set(ticker, (unitsByTicker.get(ticker) ?? 0) + sign * tx.units);
