@@ -390,3 +390,90 @@ export function reconstructStockSnapshots(
 
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// Reconstruct daily crypto snapshots from CSV txns + historical prices
+// ---------------------------------------------------------------------------
+
+const STABLE_TOKENS = new Set([
+  "USDT", "USDC", "USDE", "USD1", "DAI", "BUSD", "TUSD", "FDUSD", "GUSD",
+]);
+
+/**
+ * Same idea as reconstructStockSnapshots but for crypto: replay CSV txns and
+ * value EOD holdings against historical Binance closes.
+ *
+ * Price fallback chain per token per day:
+ *   1. Stablecoin → $1
+ *   2. Historical close from API
+ *   3. Last historical close seen on a prior day (carry-forward)
+ *   4. Last txn priceUsd seen for this token on/before this day (CSV
+ *      provides ground-truth prices for tokens not on Binance like syrupUSDC,
+ *      yield tokens, niche listings)
+ *   5. 0 (give up)
+ */
+export function reconstructCryptoSnapshots(
+  transactions: CryptoTransaction[],
+  historicalBars: Record<string, { date: string; close: number }[]>,
+  fromDate: string,
+  toDate: string,
+): { date: string; value: number }[] {
+  const closeLookup = new Map<string, Map<string, number>>();
+  for (const [token, bars] of Object.entries(historicalBars)) {
+    closeLookup.set(
+      token.toUpperCase(),
+      new Map(bars.map((b) => [b.date, b.close])),
+    );
+  }
+
+  const sorted = [...transactions].sort((a, b) =>
+    a.date < b.date ? -1 : a.date > b.date ? 1 : 0,
+  );
+
+  const holdings = new Map<string, number>();
+  const lastApiClose = new Map<string, number>();
+  const lastTxnPrice = new Map<string, number>();
+  let txIdx = 0;
+
+  const out: { date: string; value: number }[] = [];
+  for (
+    let d = new Date(`${fromDate}T00:00:00Z`);
+    d <= new Date(`${toDate}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + 1)
+  ) {
+    const day = d.toISOString().slice(0, 10);
+
+    while (txIdx < sorted.length && sorted[txIdx].date.slice(0, 10) <= day) {
+      const tx = sorted[txIdx];
+      const sign = tx.type === "buy" || tx.type === "transferIn" ? 1 : -1;
+      holdings.set(tx.token, (holdings.get(tx.token) ?? 0) + sign * tx.amount);
+      if (tx.priceUsd != null && tx.priceUsd > 0) {
+        lastTxnPrice.set(tx.token, tx.priceUsd);
+      }
+      txIdx++;
+    }
+
+    let total = 0;
+    for (const [token, amount] of holdings) {
+      if (Math.abs(amount) < 1e-8) continue;
+      const upper = token.toUpperCase();
+      if (STABLE_TOKENS.has(upper)) {
+        total += amount;
+        continue;
+      }
+      const close =
+        closeLookup.get(upper)?.get(day) ??
+        lastApiClose.get(upper) ??
+        lastTxnPrice.get(token);
+      if (close != null) {
+        if (closeLookup.get(upper)?.get(day) != null) {
+          lastApiClose.set(upper, closeLookup.get(upper)!.get(day)!);
+        }
+        total += amount * close;
+      }
+    }
+    out.push({ date: day, value: total });
+  }
+
+  return out;
+}

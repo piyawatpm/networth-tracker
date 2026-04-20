@@ -26,6 +26,7 @@ import {
   computeHoldingsPnl,
   computePnlAnalysis,
   reconstructStockSnapshots,
+  reconstructCryptoSnapshots,
 } from "@/lib/utils/pnl";
 import type { PortfolioHolding, PortfolioTransaction } from "@/lib/utils/types";
 
@@ -228,9 +229,51 @@ export default function AnalyticsPage() {
     );
   }, [stockHistory, stockTxnRange, portfolioTransactions, portfolioHoldings, portfolioSnapshots]);
 
+  // Same reconstruction strategy for crypto: txns + Binance historical closes
+  // → daily values. Bypasses cron snapshots that drift on backdated CSV uploads.
+  const [cryptoHistory, setCryptoHistory] = useState<Record<string, { date: string; close: number }[]>>({});
+
+  const cryptoTokens = useMemo(() => {
+    const set = new Set<string>();
+    for (const t of cryptoTxns) set.add(t.token);
+    return [...set];
+  }, [cryptoTxns]);
+
+  const cryptoTxnRange = useMemo(() => {
+    if (cryptoTxns.length === 0) return null;
+    const dates = cryptoTxns.map((t) => t.date.slice(0, 10)).sort();
+    return { from: dates[0], to: today };
+  }, [cryptoTxns, today]);
+
+  useEffect(() => {
+    if (cryptoTokens.length === 0 || !cryptoTxnRange) return;
+    fetch(
+      `/api/historical-prices?tokens=${cryptoTokens.join(",")}&from=${cryptoTxnRange.from}&to=${cryptoTxnRange.to}`,
+    )
+      .then((r) => r.json())
+      .then((j) => setCryptoHistory(j.data ?? {}))
+      .catch(() => setCryptoHistory({}));
+  }, [cryptoTokens, cryptoTxnRange]);
+
+  const reconstructedCryptoSnapshots = useMemo(() => {
+    if (!cryptoTxnRange || cryptoTxns.length === 0) return cryptoSnapshots;
+    return reconstructCryptoSnapshots(
+      cryptoTxns,
+      cryptoHistory,
+      cryptoTxnRange.from,
+      cryptoTxnRange.to,
+    );
+  }, [cryptoTxns, cryptoHistory, cryptoTxnRange, cryptoSnapshots]);
+
   const dailyPnl = useMemo(
-    () => computeDailyPnl(reconstructedStockSnapshots, cryptoSnapshots, nonSuperTxns, cryptoTxns, convert),
-    [reconstructedStockSnapshots, cryptoSnapshots, nonSuperTxns, cryptoTxns, convert],
+    () => computeDailyPnl(
+      reconstructedStockSnapshots,
+      reconstructedCryptoSnapshots,
+      nonSuperTxns,
+      cryptoTxns,
+      convert,
+    ),
+    [reconstructedStockSnapshots, reconstructedCryptoSnapshots, nonSuperTxns, cryptoTxns, convert],
   );
 
   const todayPnl = dailyPnl.find((d) => d.date === today)?.totalPnl ?? 0;

@@ -7,9 +7,11 @@ interface DailyClose {
   close: number;
 }
 
+// True peg-to-$1 stablecoins. syrupUSDC is intentionally excluded — it's a
+// yield-bearing token trading at ~$1.16, so the caller is expected to fall
+// back to the user's transaction prices for it.
 const STABLES = new Set([
-  "USDT", "USDC", "USDe", "USD1", "DAI", "BUSD", "TUSD", "FDUSD", "GUSD",
-  "syrupUSDC".toUpperCase(),
+  "USDT", "USDC", "USDE", "USD1", "DAI", "BUSD", "TUSD", "FDUSD", "GUSD",
 ]);
 
 async function binanceCloses(token: string, from: string, to: string): Promise<DailyClose[]> {
