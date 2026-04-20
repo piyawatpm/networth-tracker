@@ -15,12 +15,10 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart";
-import { parseCryptoCSV } from "@/lib/utils/crypto-csv";
 import type { DailyPnlEntry } from "@/lib/utils/pnl";
 
 interface ComparisonChartProps {
   dailyPnl: DailyPnlEntry[];
-  cryptoCsvText: string;
 }
 
 interface BenchmarkPoint {
@@ -44,15 +42,17 @@ const config: ChartConfig = {
   spy: { label: "S&P 500", color: "hsl(140 60% 45%)" },
 };
 
-const STABLES = new Set([
-  "USDT", "USDC", "USDE", "USD1", "DAI", "BUSD", "TUSD", "FDUSD", "GUSD", "SYRUPUSDC",
-]);
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/** Compound a series of daily % returns into a cumulative % series. */
+/**
+ * TWRR — Time-Weighted Rate of Return.
+ *
+ * For each day:   r_t = (V_t − V_{t-1} − F_t) / V_{t-1}
+ * Cumulative:     R = ∏(1 + r_t) − 1
+ *
+ * Subtracting the day's net cash flow (F_t) before dividing by yesterday's
+ * value strips out the effect of deposits/withdrawals, which is exactly
+ * how indices like BTC and SPY are quoted (no user cash flows). That makes
+ * "My Stocks +5%" directly comparable to "BTC +12%" over the same window.
+ */
 function cumulativeFromPcts(entries: { date: string; pct: number }[]): { date: string; cum: number }[] {
   const out: { date: string; cum: number }[] = [];
   let factor = 1;
@@ -78,156 +78,19 @@ function cumulativeFromCloses(map: Map<string, number>): Map<string, number> {
   return out;
 }
 
-/** YYYY-MM-DD strings between from and to inclusive. */
-function dateRange(from: string, to: string): string[] {
-  const out: string[] = [];
-  for (
-    let d = new Date(`${from}T00:00:00Z`);
-    d <= new Date(`${to}T00:00:00Z`);
-    d.setUTCDate(d.getUTCDate() + 1)
-  ) {
-    out.push(d.toISOString().slice(0, 10));
-  }
-  return out;
-}
-
-/**
- * Replay CSV txns + historical prices to get daily crypto values + cash flows
- * for the pre-snapshot window. Returns daily TWRR pcts: (Δvalue − cashFlow) / yesterday.
- */
-function reconstructCryptoPcts(
-  csvText: string,
-  historicalPrices: Record<string, { date: string; close: number }[]>,
-  from: string,
-  to: string,
-): { date: string; pct: number }[] {
-  const txns = parseCryptoCSV(csvText);
-  const days = dateRange(from, to);
-
-  // Per-token close lookup keyed by date
-  const priceLookup: Record<string, Map<string, number>> = {};
-  for (const [token, closes] of Object.entries(historicalPrices)) {
-    const m = new Map<string, number>();
-    for (const c of closes) m.set(c.date, c.close);
-    priceLookup[token] = m;
-  }
-
-  // Replay txns chronologically; for each day collect EOD holdings + USD cash flow.
-  const sorted = [...txns].sort((a, b) =>
-    a.date < b.date ? -1 : a.date > b.date ? 1 : 0,
-  );
-  const holdings = new Map<string, number>();
-  let txIdx = 0;
-  const dailyValues: { date: string; value: number; cashFlow: number }[] = [];
-  // Carry-forward last seen close per token for days when a token didn't trade.
-  const lastClose = new Map<string, number>();
-
-  for (const day of days) {
-    let cashFlow = 0;
-    while (txIdx < sorted.length && sorted[txIdx].date.slice(0, 10) <= day) {
-      const tx = sorted[txIdx];
-      if (tx.date.slice(0, 10) === day) {
-        if (tx.type === "buy" || tx.type === "transferIn") {
-          if (tx.totalValueUsd != null) cashFlow += tx.totalValueUsd;
-          holdings.set(tx.token, (holdings.get(tx.token) ?? 0) + tx.amount);
-        } else {
-          if (tx.totalValueUsd != null) cashFlow -= tx.totalValueUsd;
-          holdings.set(tx.token, (holdings.get(tx.token) ?? 0) - tx.amount);
-        }
-      } else if (tx.date.slice(0, 10) < day) {
-        // Pre-window txn: still apply to opening holdings.
-        if (tx.type === "buy" || tx.type === "transferIn") {
-          holdings.set(tx.token, (holdings.get(tx.token) ?? 0) + tx.amount);
-        } else {
-          holdings.set(tx.token, (holdings.get(tx.token) ?? 0) - tx.amount);
-        }
-      }
-      txIdx++;
-    }
-
-    let value = 0;
-    for (const [token, amount] of holdings) {
-      if (Math.abs(amount) < 1e-8) continue;
-      const upper = token.toUpperCase();
-      if (STABLES.has(upper)) {
-        value += amount;
-        continue;
-      }
-      const closes = priceLookup[token] ?? priceLookup[upper];
-      const close = closes?.get(day) ?? lastClose.get(token);
-      if (close != null) {
-        lastClose.set(token, close);
-        value += amount * close;
-      }
-    }
-    dailyValues.push({ date: day, value, cashFlow });
-  }
-
-  // Daily TWRR pcts
-  const out: { date: string; pct: number }[] = [];
-  for (let i = 0; i < dailyValues.length; i++) {
-    const today = dailyValues[i];
-    if (i === 0) {
-      out.push({ date: today.date, pct: 0 });
-      continue;
-    }
-    const yesterday = dailyValues[i - 1];
-    if (yesterday.value <= 0) {
-      out.push({ date: today.date, pct: 0 });
-      continue;
-    }
-    const pct = ((today.value - yesterday.value - today.cashFlow) / yesterday.value) * 100;
-    out.push({ date: today.date, pct });
-  }
-  return out;
-}
-
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
-
-export function ComparisonChart({ dailyPnl, cryptoCsvText }: ComparisonChartProps) {
+export function ComparisonChart({ dailyPnl }: ComparisonChartProps) {
   const [bench, setBench] = useState<BenchmarkPoint[] | null>(null);
-  const [historical, setHistorical] = useState<Record<string, { date: string; close: number }[]> | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Earliest crypto txn date — that's where the chart should start.
-  const cryptoTxns = useMemo(
-    () => (cryptoCsvText ? parseCryptoCSV(cryptoCsvText) : []),
-    [cryptoCsvText],
-  );
-  const earliestCryptoDate = useMemo(() => {
-    if (cryptoTxns.length === 0) return null;
-    return cryptoTxns
-      .map((t) => t.date.slice(0, 10))
-      .sort()
-      .at(0)!;
-  }, [cryptoTxns]);
-
+  // Range is whatever dailyPnl spans — both reconstructions in pnl.ts now
+  // extend back to the earliest stock/crypto transaction.
   const range = useMemo(() => {
-    const dailyDates = dailyPnl.map((d) => d.date).sort();
-    const lastDailyDate = dailyDates.at(-1);
-    const firstDailyDate = dailyDates.at(0);
-    if (!lastDailyDate && !earliestCryptoDate) return null;
-    const from = earliestCryptoDate ?? firstDailyDate!;
-    const to = lastDailyDate ?? new Date().toISOString().slice(0, 10);
-    return { from, to };
-  }, [dailyPnl, earliestCryptoDate]);
-
-  // First snapshot day for crypto — we reconstruct only BEFORE this date,
-  // and use dailyPnl pcts from this date onward.
-  const firstSnapshotDate = useMemo(() => {
-    return dailyPnl.map((d) => d.date).sort().at(0) ?? null;
+    if (dailyPnl.length === 0) return null;
+    const dates = dailyPnl.map((d) => d.date).sort();
+    return { from: dates[0], to: dates[dates.length - 1] };
   }, [dailyPnl]);
 
-  const uniqueTokens = useMemo(() => {
-    const set = new Set<string>();
-    for (const t of cryptoTxns) set.add(t.token);
-    return [...set];
-  }, [cryptoTxns]);
-
-  // Fetch BTC/SPY benchmark data
   useEffect(() => {
     if (!range) return;
     setLoading(true);
@@ -239,53 +102,20 @@ export function ComparisonChart({ dailyPnl, cryptoCsvText }: ComparisonChartProp
       .finally(() => setLoading(false));
   }, [range]);
 
-  // Fetch historical prices for tokens — only if we have a pre-snapshot gap to fill.
-  useEffect(() => {
-    if (!range || !firstSnapshotDate || uniqueTokens.length === 0) return;
-    if (range.from >= firstSnapshotDate) {
-      setHistorical({});
-      return;
-    }
-    const tokens = uniqueTokens.join(",");
-    fetch(`/api/historical-prices?from=${range.from}&to=${firstSnapshotDate}&tokens=${tokens}`)
-      .then((r) => r.json())
-      .then((j) => setHistorical(j.data ?? {}))
-      .catch(() => setHistorical({}));
-  }, [range, firstSnapshotDate, uniqueTokens]);
-
-  // Build the merged series.
   const series = useMemo<SeriesPoint[]>(() => {
-    if (!range) return [];
+    const sorted = [...dailyPnl].sort((a, b) => (a.date < b.date ? -1 : 1));
 
-    // Stocks: only from dailyPnl entries (snapshots start Apr 7).
-    const stockPcts = dailyPnl
-      .slice()
-      .sort((a, b) => (a.date < b.date ? -1 : 1))
-      .map((d) => ({ date: d.date, pct: d.portfolioPnlPct }));
-    const stocksCum = new Map(cumulativeFromPcts(stockPcts).map((p) => [p.date, p.cum]));
-
-    // Crypto: reconstructed pre-snapshot + dailyPnl from snapshots onward.
-    let cryptoPcts: { date: string; pct: number }[] = [];
-    if (historical && firstSnapshotDate && range.from < firstSnapshotDate) {
-      const reconDays = dateRange(range.from, firstSnapshotDate);
-      // Trim the last reconstructed day; dailyPnl will own that day going forward.
-      const recon = reconstructCryptoPcts(
-        cryptoCsvText,
-        historical,
-        range.from,
-        reconDays.at(-2) ?? range.from,
-      );
-      cryptoPcts.push(...recon);
-    }
-    cryptoPcts.push(
-      ...dailyPnl
-        .slice()
-        .sort((a, b) => (a.date < b.date ? -1 : 1))
-        .map((d) => ({ date: d.date, pct: d.cryptoPnlPct })),
+    const stocksCum = new Map(
+      cumulativeFromPcts(sorted.map((d) => ({ date: d.date, pct: d.portfolioPnlPct }))).map(
+        (p) => [p.date, p.cum],
+      ),
     );
-    const cryptoCum = new Map(cumulativeFromPcts(cryptoPcts).map((p) => [p.date, p.cum]));
+    const cryptoCum = new Map(
+      cumulativeFromPcts(sorted.map((d) => ({ date: d.date, pct: d.cryptoPnlPct }))).map(
+        (p) => [p.date, p.cum],
+      ),
+    );
 
-    // Benchmarks
     const btcMap = cumulativeFromCloses(
       new Map((bench ?? []).filter((p) => p.btc != null).map((p) => [p.date, p.btc as number])),
     );
@@ -306,9 +136,8 @@ export function ComparisonChart({ dailyPnl, cryptoCsvText }: ComparisonChartProp
       btc: btcMap.get(date) ?? null,
       spy: spyMap.get(date) ?? null,
     }));
-  }, [bench, dailyPnl, historical, cryptoCsvText, range, firstSnapshotDate]);
+  }, [bench, dailyPnl]);
 
-  // Latest cumulative % per series.
   const latest = useMemo(() => {
     const last = (k: keyof Omit<SeriesPoint, "date">) => {
       for (let i = series.length - 1; i >= 0; i--) {
