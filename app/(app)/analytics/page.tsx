@@ -192,13 +192,24 @@ export default function AnalyticsPage() {
 
   const todayPnl = dailyPnl.find((d) => d.date === today)?.totalPnl ?? 0;
 
-  const monthPnl = useMemo(
-    () =>
+  // PnL totals for several time ranges (week / month / year / all-time)
+  const rangePnls = useMemo(() => {
+    const weekCutoff = new Date();
+    weekCutoff.setDate(weekCutoff.getDate() - 6); // last 7 days including today
+    const weekStart = weekCutoff.toISOString().slice(0, 10);
+    const yearStart = today.slice(0, 4) + "-01-01";
+    const sumRange = (from: string) =>
       dailyPnl
-        .filter((d) => d.date >= monthStart && d.date <= today)
-        .reduce((sum, d) => sum + d.totalPnl, 0),
-    [dailyPnl, monthStart, today],
-  );
+        .filter((d) => d.date >= from && d.date <= today)
+        .reduce((sum, d) => sum + d.totalPnl, 0);
+    return {
+      week: sumRange(weekStart),
+      month: sumRange(monthStart),
+      year: sumRange(yearStart),
+      all: dailyPnl.reduce((sum, d) => sum + d.totalPnl, 0),
+    };
+  }, [dailyPnl, monthStart, today]);
+
 
   // Last 30 days filter
   const last30 = useMemo(() => {
@@ -246,7 +257,7 @@ export default function AnalyticsPage() {
       <BlurFade delay={0}>
         <PnlHeader
           todayPnl={todayPnl}
-          monthPnl={monthPnl}
+          rangePnls={rangePnls}
           estimatedBalance={estimatedBalance}
           format={format}
           symbol={symbol}
