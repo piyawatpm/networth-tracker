@@ -18,6 +18,8 @@ interface DailyCalendarProps {
   dailyPnl: DailyPnlEntry[];
   format: (amount: number) => string;
   symbol: string;
+  baselineDate: string;
+  pctByDate: Map<string, number>;  // day → rDay * 100
 }
 
 // ---------------------------------------------------------------------------
@@ -54,7 +56,7 @@ function compactPnl(value: number, symbol: string): string {
 // Component
 // ---------------------------------------------------------------------------
 
-export function DailyCalendar({ dailyPnl, format, symbol }: DailyCalendarProps) {
+export function DailyCalendar({ dailyPnl, format, symbol, baselineDate, pctByDate }: DailyCalendarProps) {
   const todayStr = getSydneyDateString();
   const [todayYear, todayMonth] = todayStr.split("-").map(Number);
 
@@ -186,11 +188,12 @@ export function DailyCalendar({ dailyPnl, format, symbol }: DailyCalendarProps) 
           const isSelected = dateStr === selectedDay;
           const hasData = !!entry;
           const pnl = entry?.totalPnl ?? 0;
+          const isPreBaseline = dateStr < baselineDate;
 
           return (
             <button
               key={dateStr}
-              disabled={isFuture}
+              disabled={isFuture || isPreBaseline}
               onClick={() =>
                 setSelectedDay(isSelected ? null : dateStr)
               }
@@ -202,7 +205,8 @@ export function DailyCalendar({ dailyPnl, format, symbol }: DailyCalendarProps) 
                 hasData && pnl === 0 && "bg-secondary/50 hover:bg-secondary",
                 // States
                 isFuture && "opacity-30 cursor-not-allowed",
-                !hasData && !isFuture && "opacity-40",
+                isPreBaseline && "opacity-30 pointer-events-none",
+                !hasData && !isFuture && !isPreBaseline && "opacity-40",
                 isSelected && "ring-2 ring-foreground/30",
               )}
             >
@@ -221,6 +225,12 @@ export function DailyCalendar({ dailyPnl, format, symbol }: DailyCalendarProps) 
                   )}
                 >
                   {compactPnl(pnl, symbol)}
+                </span>
+              )}
+              {entry && dateStr >= baselineDate && (
+                <span className={cn("text-[9px] font-mono",
+                  (pctByDate.get(dateStr) ?? 0) > 0 ? "text-income" : (pctByDate.get(dateStr) ?? 0) < 0 ? "text-expense" : "text-muted-foreground")}>
+                  {(pctByDate.get(dateStr) ?? 0).toFixed(2)}%
                 </span>
               )}
             </button>

@@ -373,6 +373,12 @@ export default function AnalyticsPage() {
     });
   }, [baseline, dailyValuesUsd, depositsMap, today, liveCombinedUsd]);
 
+  const pctByDate = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const p of twrSeries) m.set(p.date, p.rDay * 100);
+    return m;
+  }, [twrSeries]);
+
   const [benchBars, setBenchBars] = useState<{ date: string; btc: number | null; spy: number | null }[]>([]);
   useEffect(() => {
     if (!baseline) return;
@@ -527,7 +533,7 @@ export default function AnalyticsPage() {
       </BlurFade>
 
       <BlurFade delay={D * 1.5}>
-        <DailyCalendar dailyPnl={dailyPnl} format={format} symbol={symbol} />
+        <DailyCalendar dailyPnl={dailyPnl} format={format} symbol={symbol} baselineDate={baseline.date} pctByDate={pctByDate} />
       </BlurFade>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
