@@ -20,7 +20,7 @@ import {
   applyLivePrices,
 } from "@/lib/utils/crypto-prices";
 import { resolveTokens, fetchCoinImages } from "@/lib/utils/crypto-symbol-resolver";
-import type { CryptoHolding } from "@/lib/utils/types";
+import type { CryptoHolding, CryptoDeposit } from "@/lib/utils/types";
 import { ECHARTS_COLORS } from "@/lib/utils/echarts";
 import ReactECharts from "echarts-for-react";
 
@@ -36,6 +36,8 @@ import { HistoryChart } from "./_components/history-chart";
 import { CryptoDonut } from "./_components/crypto-donut";
 import { HoldingsBreakdown } from "./_components/holdings-breakdown";
 import { TickerMappingDialog } from "./_components/ticker-mapping-dialog";
+import { DepositLogForm } from "./_components/deposit-log-form";
+import { DepositList } from "./_components/deposit-list";
 
 export default function CryptoPage() {
   const [csvText, setCsvText] = useCloudStorage<string>("crypto_csv_text", "");
@@ -76,6 +78,14 @@ export default function CryptoPage() {
     "crypto_stablecoin_tags",
     {},
   );
+
+  const [deposits, setDeposits] = useState<CryptoDeposit[]>([]);
+  useEffect(() => {
+    fetch("/api/crypto/deposits")
+      .then((r) => r.json())
+      .then((j) => setDeposits(j.deposits ?? []))
+      .catch(() => { /* silent */ });
+  }, []);
 
   // Emergency fund tag overrides
   const [emergencyTags, setEmergencyTags] = useCloudStorage<Record<string, boolean>>(
@@ -538,6 +548,11 @@ export default function CryptoPage() {
               {replaceStatus}
             </span>
           )}
+          <DepositLogForm
+            holdings={pricedHoldings}
+            livePrices={livePrices}
+            onSaved={(d) => setDeposits((prev) => [d, ...prev])}
+          />
         </div>
       </BlurFade>
 
@@ -649,6 +664,7 @@ export default function CryptoPage() {
         setCashTags={setCashTags}
         clearCsv={clearCsv}
       />
+      <DepositList deposits={deposits} onDeleted={(id) => setDeposits((prev) => prev.filter((d) => d.id !== id))} />
     </div>
   );
 }
