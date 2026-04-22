@@ -33,10 +33,8 @@ import type { PortfolioHolding, PortfolioTransaction, AnalyticsBaseline, CryptoD
 import {
   depositsByDay,
   computeTwrSeries,
-  computeBenchmarkSeries,
   holdingPnlSinceBaseline,
   type TwrPoint,
-  type BenchmarkPoint,
 } from "@/lib/utils/analytics-baseline";
 
 // Sub-components (some don't exist yet — other tasks will create them)
@@ -389,34 +387,29 @@ export default function AnalyticsPage() {
     return m;
   }, [twrSeries]);
 
-  const [benchBars, setBenchBars] = useState<{ date: string; btc: number | null; spy: number | null }[]>([]);
+  // Pre-computed per-tick performance rows from the cron (15-min resolution).
+  // Drives the hero chart directly — no client-side TWR recompute for the chart.
+  const [perfSnapshots, setPerfSnapshots] = useState<{
+    timestamp: string;
+    portfolioPct: number | null;
+    spyPct: number | null;
+    btcPct: number | null;
+  }[]>([]);
   useEffect(() => {
     if (!baseline) return;
-    fetch(`/api/comparison?from=${baseline.date}&to=${today}`)
+    fetch("/api/analytics/performance-snapshots")
       .then((r) => r.json())
-      .then((j) => setBenchBars(j.data ?? []))
-      .catch(() => setBenchBars([]));
-  }, [baseline, today]);
+      .then((j) => setPerfSnapshots(j.snapshots ?? []))
+      .catch(() => setPerfSnapshots([]));
+  }, [baseline]);
 
-  const spySeries = useMemo<BenchmarkPoint[]>(() => {
-    if (!baseline) return [];
-    return computeBenchmarkSeries({
-      baselineDate: baseline.date,
-      baselinePrice: baseline.benchmarks.spy,
-      bars: benchBars.filter((b) => b.spy != null).map((b) => ({ date: b.date, close: b.spy as number })),
-      today,
-    });
-  }, [baseline, benchBars, today]);
-
-  const btcSeries = useMemo<BenchmarkPoint[]>(() => {
-    if (!baseline) return [];
-    return computeBenchmarkSeries({
-      baselineDate: baseline.date,
-      baselinePrice: baseline.benchmarks.btc,
-      bars: benchBars.filter((b) => b.btc != null).map((b) => ({ date: b.date, close: b.btc as number })),
-      today,
-    });
-  }, [baseline, benchBars, today]);
+  // Live-override for the chart's trailing portfolio point so it tracks moves
+  // between cron ticks. Uses the same TWR point we already compute for the
+  // PnlHeader (latest cumulativePct).
+  const livePortfolioPct = useMemo(() => {
+    if (twrSeries.length === 0) return null;
+    return twrSeries[twrSeries.length - 1].cumulativePct;
+  }, [twrSeries]);
 
   const pnlAtDate = useCallback(
     (target: string): number => {
@@ -590,7 +583,11 @@ export default function AnalyticsPage() {
       </div>
 
       <BlurFade delay={0}>
-        <ComparisonChart twr={twrSeries} spy={spySeries} btc={btcSeries} />
+        <ComparisonChart
+          snapshots={perfSnapshots}
+          baselineDate={baseline.date}
+          livePortfolioPct={livePortfolioPct}
+        />
       </BlurFade>
 
       <BlurFade delay={D}>
