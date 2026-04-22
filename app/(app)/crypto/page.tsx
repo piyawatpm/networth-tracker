@@ -11,6 +11,7 @@ import {
   getCashValueUsd,
   computePortfolioHistory,
   applyStablecoinTags,
+  detectFormat,
 } from "@/lib/utils/crypto-csv";
 import {
   fetchCryptoPrices,
@@ -19,7 +20,7 @@ import {
   applyLivePrices,
 } from "@/lib/utils/crypto-prices";
 import { resolveTokens, fetchCoinImages } from "@/lib/utils/crypto-symbol-resolver";
-import type { CryptoHolding } from "@/lib/utils/types";
+import type { CryptoHolding, CryptoDeposit } from "@/lib/utils/types";
 import { ECHARTS_COLORS } from "@/lib/utils/echarts";
 import ReactECharts from "echarts-for-react";
 
@@ -35,6 +36,8 @@ import { HistoryChart } from "./_components/history-chart";
 import { CryptoDonut } from "./_components/crypto-donut";
 import { HoldingsBreakdown } from "./_components/holdings-breakdown";
 import { TickerMappingDialog } from "./_components/ticker-mapping-dialog";
+import { DepositLogForm } from "./_components/deposit-log-form";
+import { DepositList } from "./_components/deposit-list";
 
 export default function CryptoPage() {
   const [csvText, setCsvText] = useCloudStorage<string>("crypto_csv_text", "");
@@ -75,6 +78,14 @@ export default function CryptoPage() {
     "crypto_stablecoin_tags",
     {},
   );
+
+  const [deposits, setDeposits] = useState<CryptoDeposit[]>([]);
+  useEffect(() => {
+    fetch("/api/crypto/deposits")
+      .then((r) => r.json())
+      .then((j) => setDeposits(j.deposits ?? []))
+      .catch(() => { /* silent */ });
+  }, []);
 
   // Emergency fund tag overrides
   const [emergencyTags, setEmergencyTags] = useCloudStorage<Record<string, boolean>>(
@@ -402,36 +413,61 @@ export default function CryptoPage() {
   }, [pricedHoldings, getExchange]);
 
   // File handler for Replace CSV
+  const [replaceStatus, setReplaceStatus] = useState<string | null>(null);
   const handleFile = useCallback(
     (file: File) => {
+      setReplaceStatus("Reading file…");
       const reader = new FileReader();
       reader.onload = (e) => {
         const text = e.target?.result as string;
-        if (text && text.trim().length > 0) {
-          setCsvText(text);
-          setCsvUploadedAt(Date.now());
-          const h = parseAndComputeHoldings(text);
-          if (h.length > 0) {
-            // Only fetch prices for tokens that already have a ticker mapping —
-            // raw CSV names like "Bitcoin" are not valid Binance/CoinGecko keys.
-            const mappedTokens = h
-              .map((holding) => tickerMappings[holding.token])
-              .filter((t): t is string => Boolean(t));
-            if (mappedTokens.length === 0) return;
-            fetchCryptoPrices(mappedTokens).then((prices) => {
-              const remapped: Record<string, number> = {};
-              for (const holding of h) {
-                const ticker = tickerMappings[holding.token];
-                if (ticker && prices[ticker] != null) {
-                  remapped[holding.token] = prices[ticker];
-                }
-              }
-              if (Object.keys(remapped).length > 0) {
-                setLivePrices(remapped);
-              }
-            });
-          }
+        if (!text || text.trim().length === 0) {
+          setReplaceStatus("File was empty");
+          return;
         }
+        const format = detectFormat(text);
+        const h = parseAndComputeHoldings(text);
+        if (h.length === 0) {
+          setReplaceStatus("Could not parse holdings — check CSV format");
+          return;
+        }
+        setCsvText(text);
+        setCsvUploadedAt(Date.now());
+        const formatLabel =
+          format === "transactions"
+            ? "Transaction History"
+            : format === "portfolio_overview"
+              ? "Portfolio Overview"
+              : "Unknown format";
+        setReplaceStatus(`Loaded ${h.length} holdings (${formatLabel}) — snapshotting…`);
+        // Use ticker mapping if set, otherwise the raw token name (which is
+        // already a valid Binance ticker for Transaction-format exports).
+        const mappedTokens = h.map((holding) => tickerMappings[holding.token] ?? holding.token);
+        fetchCryptoPrices(mappedTokens).then((prices) => {
+          const remapped: Record<string, number> = {};
+          for (const holding of h) {
+            const ticker = tickerMappings[holding.token] ?? holding.token;
+            if (prices[ticker] != null) remapped[holding.token] = prices[ticker];
+          }
+          if (Object.keys(remapped).length > 0) setLivePrices(remapped);
+        });
+        // Auto-trigger /api/snapshot so the cron's next read isn't stale.
+        // Wait for setCsvText's debounced KV write (~500ms) before snapshotting.
+        window.setTimeout(() => {
+          fetch("/api/snapshot", { method: "POST" })
+            .then(async (r) => {
+              if (r.ok) {
+                setReplaceStatus(`Loaded ${h.length} holdings (${formatLabel}) — snapshot updated`);
+              } else {
+                setReplaceStatus(`Loaded ${h.length} holdings (${formatLabel}) — snapshot failed`);
+              }
+            })
+            .catch(() => {
+              setReplaceStatus(`Loaded ${h.length} holdings (${formatLabel}) — snapshot failed`);
+            })
+            .finally(() => {
+              window.setTimeout(() => setReplaceStatus(null), 3000);
+            });
+        }, 600);
       };
       reader.readAsText(file);
     },
@@ -506,6 +542,16 @@ export default function CryptoPage() {
             accept=".csv,text/csv,text/plain,application/vnd.ms-excel"
             onChange={onFileSelect}
             className="hidden"
+          />
+          {replaceStatus && (
+            <span className="text-[10px] font-mono text-muted-foreground basis-full text-right">
+              {replaceStatus}
+            </span>
+          )}
+          <DepositLogForm
+            holdings={pricedHoldings}
+            livePrices={livePrices}
+            onSaved={(d) => setDeposits((prev) => [d, ...prev])}
           />
         </div>
       </BlurFade>
@@ -618,6 +664,7 @@ export default function CryptoPage() {
         setCashTags={setCashTags}
         clearCsv={clearCsv}
       />
+      <DepositList deposits={deposits} onDeleted={(id) => setDeposits((prev) => prev.filter((d) => d.id !== id))} />
     </div>
   );
 }

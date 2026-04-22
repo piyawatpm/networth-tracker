@@ -217,6 +217,7 @@ export interface CryptoHolding {
   amount: number;
   totalCostUsd: number;
   currentValueUsd: number;
+  realizedPnlUsd?: number;  // locked-in profit/loss from past sells
   exchange?: string;  // auto-parsed from CSV notes or manually set
 }
 
@@ -273,4 +274,52 @@ export function normalizeExpenseEntry(e: Record<string, unknown>): ExpenseEntry 
     recurringId: e.recurringId as string | undefined,
     isOneOff: (e.isOneOff as boolean) ?? false,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Analytics baseline + crypto deposits (see docs/.../2026-04-22-analytics-baseline-pnl-design.md)
+// ---------------------------------------------------------------------------
+
+export interface AnalyticsBaseline {
+  /** "YYYY-MM-DD" — the day the user reset the baseline. */
+  date: string;
+  /** Epoch ms when the baseline was captured. */
+  createdAt: number;
+  /** Per-portfolio-holding snapshot keyed by holding.id. */
+  portfolio: Record<string, {
+    units: number;
+    priceUsd: number;
+    valueUsd: number;
+    currency: Currency;
+    accountType?: AccountType;
+  }>;
+  /** Per-crypto-token snapshot keyed by token symbol (matches CryptoHolding.token). */
+  crypto: Record<string, {
+    amount: number;
+    priceUsd: number;
+    valueUsd: number;
+  }>;
+  /** Benchmark close prices on baseline_date. */
+  benchmarks: {
+    spy: number;  // Alpaca `adjustment=all` close (dividend-adjusted → TR equivalent)
+    btc: number;
+  };
+  /** Rolling totals for convenience. */
+  totals: {
+    portfolioUsd: number;
+    cryptoUsd: number;
+    combinedUsd: number;
+  };
+}
+
+export interface CryptoDeposit {
+  id: string;
+  /** ISO string — may contain time. */
+  date: string;
+  token: string;
+  amount: number;
+  usdValueAtDeposit: number;
+  kind: "stablecoin" | "crypto";
+  notes?: string;
+  createdAt: number;
 }

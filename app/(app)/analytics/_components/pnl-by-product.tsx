@@ -34,7 +34,7 @@ export function PnlByProduct({
       <div className="mb-4 flex items-center justify-between">
         <p className="label-mono">PnL by Product</p>
         <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
-          Past 30 days
+          Since baseline
         </span>
       </div>
 
