@@ -334,19 +334,28 @@ export default function AnalyticsPage() {
     today,
   ]);
 
-  // Per-day EOD USD values (portfolio + crypto combined) from snapshots
+  // Per-day EOD USD values (portfolio + crypto combined) from snapshots.
+  // The cron writes every 15 min, so there are up to ~96 ticks per day per
+  // table. Take the LAST tick of each day per table (sort asc, set by day
+  // → last write wins), then sum portfolio + crypto per day.
   const dailyValuesUsd = useMemo(() => {
-    const map = new Map<string, number>();
-    const take = (rows: { date: string; value: number; valueWithSuper?: number }[], kind: "port" | "crypto") => {
-      for (const r of rows) {
+    const lastByDay = (rows: { date: string; value: number; valueWithSuper?: number }[], pickSuper: boolean) => {
+      const sorted = [...rows].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+      const m = new Map<string, number>();
+      for (const r of sorted) {
         const day = r.date.slice(0, 10);
-        const v = kind === "port" ? (r.valueWithSuper ?? r.value) : r.value;
-        map.set(day, (map.get(day) ?? 0) + v);
+        const v = pickSuper ? (r.valueWithSuper ?? r.value) : r.value;
+        m.set(day, v);
       }
+      return m;
     };
-    take(portfolioSnapshots as { date: string; value: number; valueWithSuper?: number }[], "port");
-    take(cryptoSnapshots as { date: string; value: number }[], "crypto");
-    return map;
+    const port = lastByDay(portfolioSnapshots as { date: string; value: number; valueWithSuper?: number }[], true);
+    const crypto = lastByDay(cryptoSnapshots as { date: string; value: number }[], false);
+    const out = new Map<string, number>();
+    for (const d of new Set([...port.keys(), ...crypto.keys()])) {
+      out.set(d, (port.get(d) ?? 0) + (crypto.get(d) ?? 0));
+    }
+    return out;
   }, [portfolioSnapshots, cryptoSnapshots]);
 
   const depositsMap = useMemo(() => {
