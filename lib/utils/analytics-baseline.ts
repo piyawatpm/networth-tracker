@@ -156,22 +156,23 @@ export function computeTwrSeries(params: {
 
   for (const day of days) {
     const isToday = day === today;
-    const isBaseline = day === baseline.date;
     const rawValue = isToday && liveValueUsd != null
       ? liveValueUsd
       : dailyValuesUsd.get(day);
     const value = rawValue ?? prevValue;     // carry-forward on gaps
     const dep = deposits.get(day) ?? 0;
 
+    // Compute daily return for every day including baseline itself. Intraday
+    // movement on baseline_date (live price ≠ baseline value) is a real
+    // return, not zero. depositsByDay already excludes the baseline day so
+    // cumDeposits stays at 0 until the first post-baseline deposit.
     let rDay = 0;
-    if (!isBaseline) {
-      const denom = prevValue + dep;
-      if (denom > 0) {
-        rDay = (value - prevValue - dep) / denom;
-        cumFactor *= 1 + rDay;
-      }
-      cumDeposits += dep;
+    const denom = prevValue + dep;
+    if (denom > 0) {
+      rDay = (value - prevValue - dep) / denom;
+      cumFactor *= 1 + rDay;
     }
+    cumDeposits += dep;
 
     out.push({
       date: day,

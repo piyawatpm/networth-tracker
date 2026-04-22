@@ -428,33 +428,43 @@ export default function AnalyticsPage() {
   const todayPnlPct = todayTwrPoint ? todayTwrPoint.rDay * 100 : 0;
 
   const rangePnls = useMemo<Record<"week" | "month" | "year" | "all", { value: number; pct: number }>>(() => {
+    if (!baseline || twrSeries.length === 0) {
+      return { week: { value: 0, pct: 0 }, month: { value: 0, pct: 0 }, year: { value: 0, pct: 0 }, all: { value: 0, pct: 0 } };
+    }
     const weekCutoff = new Date(); weekCutoff.setDate(weekCutoff.getDate() - 7);
     const weekStart = weekCutoff.toISOString().slice(0, 10);
     const yearStart = today.slice(0, 4) + "-01-01";
-    const start = (d: string) => d < (baseline?.date ?? d) ? (baseline?.date ?? d) : d;
+    const last = twrSeries[twrSeries.length - 1];
 
-    const at = (d: string): TwrPoint | null => {
-      let last: TwrPoint | null = null;
-      for (const p of twrSeries) { if (p.date <= d) last = p; else break; }
-      return last;
-    };
-
-    const rangeBetween = (startDay: string): { value: number; pct: number } => {
-      const s = at(startDay);
-      const e = at(today);
-      if (!s || !e) return { value: 0, pct: 0 };
-      const value = convert(e.deltaUsd - s.deltaUsd, "USD");
-      // Chained % from startDay+1 → today using TWR
-      let factor = 1;
-      for (const p of twrSeries) if (p.date > startDay && p.date <= today) factor *= (1 + p.rDay);
-      return { value, pct: (factor - 1) * 100 };
+    // "Since baseline" = the accumulated delta/cumulative % at the latest point.
+    // Not a difference across rangeBetween — the baseline day IS the anchor,
+    // so subtracting s.delta=end.delta would zero out same-day PnL.
+    const since = (startDay: string): { value: number; pct: number } => {
+      const clamped = startDay < baseline.date ? baseline.date : startDay;
+      if (clamped <= baseline.date) {
+        return { value: convert(last.deltaUsd, "USD"), pct: last.cumulativePct };
+      }
+      // Post-baseline start: find the point whose date is just < clamped.
+      // That's the "prior" anchor; subtract its delta and divide cumFactors.
+      let priorDelta = 0;
+      let priorCumFactor = 1;
+      for (const p of twrSeries) {
+        if (p.date < clamped) {
+          priorDelta = p.deltaUsd;
+          priorCumFactor *= 1 + p.rDay;
+        } else break;
+      }
+      const value = convert(last.deltaUsd - priorDelta, "USD");
+      const endCumFactor = last.cumulativePct / 100 + 1;
+      const rangeFactor = priorCumFactor > 0 ? endCumFactor / priorCumFactor : 1;
+      return { value, pct: (rangeFactor - 1) * 100 };
     };
 
     return {
-      week: rangeBetween(start(weekStart)),
-      month: rangeBetween(start(monthStart)),
-      year: rangeBetween(start(yearStart)),
-      all: rangeBetween(baseline?.date ?? today),
+      week: since(weekStart),
+      month: since(monthStart),
+      year: since(yearStart),
+      all: since(baseline.date),
     };
   }, [twrSeries, baseline, today, monthStart, convert]);
 
