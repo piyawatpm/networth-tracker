@@ -508,6 +508,10 @@ export default function AnalyticsPage() {
       </div>
 
       <BlurFade delay={0}>
+        <ComparisonChart twr={twrSeries} spy={spySeries} btc={btcSeries} />
+      </BlurFade>
+
+      <BlurFade delay={D}>
         <PnlHeader
           todayPnl={todayPnl}
           rangePnls={rangePnls}
@@ -517,12 +521,8 @@ export default function AnalyticsPage() {
         />
       </BlurFade>
 
-      <BlurFade delay={D}>
-        <DailyCalendar dailyPnl={dailyPnl} format={format} symbol={symbol} />
-      </BlurFade>
-
       <BlurFade delay={D * 1.5}>
-        <ComparisonChart pnlSeries={pnlSeries} />
+        <DailyCalendar dailyPnl={dailyPnl} format={format} symbol={symbol} />
       </BlurFade>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">

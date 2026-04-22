@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import {
   CartesianGrid,
   Line,
@@ -15,17 +15,11 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart";
-import type { DailyPnlPoint } from "@/lib/utils/pnl";
 
 interface ComparisonChartProps {
-  /** Per-day PnL series anchored to current holdings (from computeDailyPnlSeries). */
-  pnlSeries: DailyPnlPoint[];
-}
-
-interface BenchmarkPoint {
-  date: string;
-  btc: number | null;
-  spy: number | null;
+  twr: { date: string; cumulativePct: number }[];
+  spy: { date: string; cumulativePct: number }[];
+  btc: { date: string; cumulativePct: number }[];
 }
 
 interface SeriesPoint {
@@ -41,73 +35,19 @@ const config: ChartConfig = {
   spy: { label: "S&P 500", color: "hsl(140 60% 45%)" },
 };
 
-/**
- * Convert a closing-price series → cumulative % vs the first non-null point.
- * BTC and SPY have no user cash flows so this is just (close_t/close_first − 1).
- */
-function cumulativeFromCloses(map: Map<string, number>): Map<string, number> {
-  const out = new Map<string, number>();
-  const dates = [...map.keys()].sort();
-  if (dates.length === 0) return out;
-  const base = map.get(dates[0])!;
-  if (base === 0) return out;
-  for (const d of dates) {
-    const close = map.get(d);
-    if (close == null) continue;
-    out.set(d, (close / base - 1) * 100);
-  }
-  return out;
-}
-
-export function ComparisonChart({ pnlSeries }: ComparisonChartProps) {
-  const [bench, setBench] = useState<BenchmarkPoint[] | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  // Depend on the from/to strings, not the range object reference, so an
-  // upstream pnlSeries reference change with identical dates doesn't refire
-  // the benchmark fetch.
-  const rangeFrom = pnlSeries[0]?.date ?? null;
-  const rangeTo = pnlSeries[pnlSeries.length - 1]?.date ?? null;
-
-  useEffect(() => {
-    if (!rangeFrom || !rangeTo) return;
-    setLoading(true);
-    setError(null);
-    fetch(`/api/comparison?from=${rangeFrom}&to=${rangeTo}`)
-      .then((r) => r.json())
-      .then((j) => setBench(j.data ?? []))
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : "Fetch failed"))
-      .finally(() => setLoading(false));
-  }, [rangeFrom, rangeTo]);
-
-  // Portfolio % each day = total PnL / cost basis active that day × 100.
-  // Same denominator as HoldingsPnl% on the latest day, so the rightmost
-  // point of the chart matches your All-time PnL%.
+export function ComparisonChart({ twr, spy, btc }: ComparisonChartProps) {
   const series = useMemo<SeriesPoint[]>(() => {
-    const portMap = new Map<string, number>();
-    for (const p of pnlSeries) {
-      portMap.set(p.date, p.costUsd > 0 ? (p.totalUsd / p.costUsd) * 100 : 0);
-    }
-    const btcMap = cumulativeFromCloses(
-      new Map((bench ?? []).filter((p) => p.btc != null).map((p) => [p.date, p.btc as number])),
-    );
-    const spyMap = cumulativeFromCloses(
-      new Map((bench ?? []).filter((p) => p.spy != null).map((p) => [p.date, p.spy as number])),
-    );
-
-    const dates = new Set<string>([
-      ...portMap.keys(),
-      ...btcMap.keys(),
-      ...spyMap.keys(),
-    ]);
+    const portMap = new Map(twr.map((p) => [p.date, p.cumulativePct]));
+    const btcMap = new Map(btc.map((p) => [p.date, p.cumulativePct]));
+    const spyMap = new Map(spy.map((p) => [p.date, p.cumulativePct]));
+    const dates = new Set<string>([...portMap.keys(), ...btcMap.keys(), ...spyMap.keys()]);
     return [...dates].sort().map((date) => ({
       date,
       portfolio: portMap.get(date) ?? null,
       btc: btcMap.get(date) ?? null,
       spy: spyMap.get(date) ?? null,
     }));
-  }, [bench, pnlSeries]);
+  }, [twr, btc, spy]);
 
   const latest = useMemo(() => {
     const last = (k: keyof Omit<SeriesPoint, "date">) => {
@@ -151,17 +91,7 @@ export function ComparisonChart({ pnlSeries }: ComparisonChartProps) {
         </div>
       </div>
 
-      {loading && !bench && (
-        <div className="flex h-72 items-center justify-center text-xs text-muted-foreground font-mono">
-          Loading comparison data…
-        </div>
-      )}
-      {error && (
-        <div className="flex h-72 items-center justify-center text-xs text-expense font-mono">
-          {error}
-        </div>
-      )}
-      {!loading && !error && series.length > 0 && (
+      {series.length > 0 && (
         <ChartContainer config={config} className="aspect-auto h-72 w-full">
           <LineChart data={series} margin={{ left: 8, right: 12, top: 8, bottom: 8 }}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} />
