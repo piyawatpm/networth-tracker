@@ -467,15 +467,27 @@ export default function AnalyticsPage() {
     return dailyPnl.filter((d) => d.date >= cutoffStr);
   }, [dailyPnl]);
 
-  const portfolioPnl30d = useMemo(
-    () => last30.reduce((s, d) => s + d.portfolioPnl, 0),
-    [last30],
-  );
+  const pnlByProduct = useMemo(() => {
+    if (!baseline) return { portfolio: 0, crypto: 0 };
+    // Portfolio side: sum(currentValue − baseline_value − stock deposits since baseline)
+    const portfolioDepositsUsd = portfolioTransactions
+      .filter((t) => t.date.slice(0, 10) > baseline.date)
+      .reduce((s, t) => s + (t.type === "buy" ? 1 : -1) * convert(t.totalAmount, t.currency, "USD"), 0);
+    const portfolioCurrentUsd = livePortfolioHoldings.reduce(
+      (s, h) => s + convert(h.currentValue, h.currency, "USD"), 0,
+    );
+    const portfolioBaselineUsd = baseline.totals.portfolioUsd;
+    const portfolio = portfolioCurrentUsd - portfolioBaselineUsd - portfolioDepositsUsd;
 
-  const cryptoPnl30d = useMemo(
-    () => last30.reduce((s, d) => s + d.cryptoPnl, 0),
-    [last30],
-  );
+    const cryptoDepositsUsd = cryptoDeposits
+      .filter((d) => d.date.slice(0, 10) > baseline.date)
+      .reduce((s, d) => s + d.usdValueAtDeposit, 0);
+    const cryptoCurrentUsd = cryptoHoldings.reduce((s, h) => s + h.currentValueUsd, 0);
+    const cryptoBaselineUsd = baseline.totals.cryptoUsd;
+    const crypto = cryptoCurrentUsd - cryptoBaselineUsd - cryptoDepositsUsd;
+
+    return { portfolio: convert(portfolio, "USD"), crypto: convert(crypto, "USD") };
+  }, [baseline, portfolioTransactions, livePortfolioHoldings, cryptoDeposits, cryptoHoldings, convert]);
 
   // Holdings PnL
   const holdingsPnl = useMemo(
@@ -539,8 +551,8 @@ export default function AnalyticsPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
         <BlurFade delay={D * 2}>
           <PnlByProduct
-            portfolioPnl={portfolioPnl30d}
-            cryptoPnl={cryptoPnl30d}
+            portfolioPnl={pnlByProduct.portfolio}
+            cryptoPnl={pnlByProduct.crypto}
             format={format}
           />
         </BlurFade>
