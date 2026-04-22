@@ -109,6 +109,7 @@ export async function GET(request: Request) {
     const keys = [
       "portfolio_holdings",
       "portfolio_snapshots",
+      "portfolio_transactions",
       "networth_snapshots",
       "income_entries",
       "expense_entries",
@@ -495,6 +496,102 @@ export async function GET(request: Request) {
       log.push(`Mirrored to relational tables: ${snapshotInserts.length} snapshots`);
     } catch (e) {
       log.push(`Table mirror failed (KV write succeeded): ${String(e)}`);
+    }
+
+    // ── Performance snapshot (portfolio/SPY/BTC % since baseline) ──
+    // Skipped silently if no active baseline exists. Reads crypto_deposits
+    // + portfolio_transactions to subtract post-baseline cash flows so the
+    // stored % reflects return-on-capital, not return-on-(capital+deposits).
+    try {
+      const { data: baselineRow } = await supabase
+        .from("analytics_baseline")
+        .select("id, date, snapshot")
+        .eq("is_current", true)
+        .maybeSingle();
+
+      if (baselineRow) {
+        const baseline = baselineRow.snapshot as {
+          date: string;
+          benchmarks: { spy: number; btc: number };
+          totals: { portfolioUsd: number; cryptoUsd: number; combinedUsd: number };
+        };
+        const combinedUsd = portfolioTotal + cryptoTotalUsd;
+
+        // Post-baseline cash flows (stock buys − sells + crypto deposits)
+        const portfolioTxns = parse<{ holdingId: string; type: "buy" | "sell"; totalAmount: number; currency: string; date: string }[]>("portfolio_transactions", []);
+        let depositsUsd = 0;
+        for (const tx of portfolioTxns) {
+          if (tx.date.slice(0, 10) <= baseline.date) continue;
+          const usd = toUsd(tx.totalAmount, tx.currency ?? "USD");
+          depositsUsd += tx.type === "buy" ? usd : -usd;
+        }
+        const { data: deposits } = await supabase
+          .from("crypto_deposits")
+          .select("usd_value_at_deposit, date")
+          .gt("date", `${baseline.date}T23:59:59Z`);
+        for (const d of deposits ?? []) {
+          depositsUsd += Number(d.usd_value_at_deposit);
+        }
+
+        // Current BTC price from the CoinGecko fetch we just did, if any.
+        const latestPrices = parse<{ prices: Record<string, number> }>("crypto_prices", { prices: {} });
+        const priceUpdate = updates.find((u) => u.key === "crypto_prices");
+        const mergedPrices = priceUpdate
+          ? { ...latestPrices.prices, ...JSON.parse(priceUpdate.value).prices }
+          : latestPrices.prices;
+        const btcPrice = mergedPrices["BTC"] ?? mergedPrices["Bitcoin"] ?? null;
+
+        // Current SPY price via Alpaca (same feed as /api/comparison).
+        let spyPrice: number | null = null;
+        if (process.env.ALPACA_KEY_ID && process.env.ALPACA_SECRET_KEY) {
+          try {
+            const r = await fetch("https://data.alpaca.markets/v2/stocks/SPY/bars/latest?feed=iex", {
+              cache: "no-store",
+              headers: {
+                "APCA-API-KEY-ID": process.env.ALPACA_KEY_ID,
+                "APCA-API-SECRET-KEY": process.env.ALPACA_SECRET_KEY,
+              },
+            });
+            if (r.ok) {
+              const j = await r.json() as { bar?: { c: number } };
+              spyPrice = j.bar?.c ?? null;
+            }
+          } catch { /* silent — spy_pct stays null */ }
+        }
+
+        const denom = baseline.totals.combinedUsd + depositsUsd;
+        const portfolioPct = denom > 0 ? ((combinedUsd - baseline.totals.combinedUsd - depositsUsd) / denom) * 100 : null;
+        const spyPct = spyPrice != null && baseline.benchmarks.spy > 0
+          ? (spyPrice / baseline.benchmarks.spy - 1) * 100 : null;
+        const btcPct = btcPrice != null && baseline.benchmarks.btc > 0
+          ? (btcPrice / baseline.benchmarks.btc - 1) * 100 : null;
+
+        const { error: perfErr } = await supabase.from("performance_snapshots").insert({
+          baseline_id: baselineRow.id,
+          baseline_date: baseline.date,
+          timestamp: new Date().toISOString(),
+          portfolio_usd: portfolioTotal,
+          crypto_usd: cryptoTotalUsd,
+          combined_usd: combinedUsd,
+          deposits_usd: depositsUsd,
+          spy_price_usd: spyPrice,
+          btc_price_usd: btcPrice,
+          portfolio_pct: portfolioPct,
+          spy_pct: spyPct,
+          btc_pct: btcPct,
+        });
+        if (perfErr) throw perfErr;
+
+        const fmt = (p: number | null) => p == null ? "—" : `${p.toFixed(2)}%`;
+        log.push(`Performance: portfolio=${fmt(portfolioPct)} spy=${fmt(spyPct)} btc=${fmt(btcPct)} (deposits=$${depositsUsd.toFixed(0)})`);
+      } else {
+        log.push(`Performance snapshot: no active baseline, skipped`);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message
+        : typeof e === "object" && e !== null && "message" in e ? String((e as { message: unknown }).message)
+        : String(e);
+      log.push(`Performance snapshot failed: ${msg}`);
     }
 
     log.push(`Done. ${updates.length} keys updated.`);
