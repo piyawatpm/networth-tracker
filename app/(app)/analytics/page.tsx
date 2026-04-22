@@ -23,17 +23,18 @@ import { useAlpacaWs } from "@/lib/hooks/use-alpaca-ws";
 import { useBinanceWs } from "@/lib/hooks/use-binance-ws";
 import {
   computeDailyPnl,
-  computeHoldingsPnl,
   computePnlAnalysis,
   reconstructStockSnapshots,
   reconstructCryptoSnapshots,
   computeDailyPnlSeries,
 } from "@/lib/utils/pnl";
+import type { HoldingPnl } from "@/lib/utils/pnl";
 import type { PortfolioHolding, PortfolioTransaction, AnalyticsBaseline, CryptoDeposit } from "@/lib/utils/types";
 import {
   depositsByDay,
   computeTwrSeries,
   computeBenchmarkSeries,
+  holdingPnlSinceBaseline,
   type TwrPoint,
   type BenchmarkPoint,
 } from "@/lib/utils/analytics-baseline";
@@ -489,11 +490,51 @@ export default function AnalyticsPage() {
     return { portfolio: convert(portfolio, "USD"), crypto: convert(crypto, "USD") };
   }, [baseline, portfolioTransactions, livePortfolioHoldings, cryptoDeposits, cryptoHoldings, convert]);
 
-  // Holdings PnL
-  const holdingsPnl = useMemo(
-    () => computeHoldingsPnl(livePortfolioHoldings, cryptoHoldings, convert),
-    [livePortfolioHoldings, cryptoHoldings, convert],
-  );
+  // Holdings PnL (baseline-aware)
+  const holdingsPnl = useMemo(() => {
+    if (!baseline) return [];
+    const result: HoldingPnl[] = [];
+
+    for (const h of livePortfolioHoldings) {
+      const baseEntry = baseline.portfolio[h.id];
+      const baseValueUsd = baseEntry?.valueUsd ?? 0;
+      const currentUsd = convert(h.currentValue, h.currency, "USD");
+      const depositsUsd = portfolioTransactions
+        .filter((t) => t.holdingId === h.id && t.date.slice(0, 10) > baseline.date)
+        .reduce((s, t) => s + (t.type === "buy" ? 1 : -1) * convert(t.totalAmount, t.currency, "USD"), 0);
+      const { pnlUsd, pnlPct } = holdingPnlSinceBaseline({
+        baselineValueUsd: baseValueUsd, currentValueUsd: currentUsd, depositsToHoldingUsd: depositsUsd,
+      });
+      result.push({
+        name: h.name, ticker: h.ticker, type: "stock", units: h.units,
+        currentValue: convert(currentUsd, "USD"),
+        costBasis: convert(baseValueUsd + depositsUsd, "USD"),
+        pnl: convert(pnlUsd, "USD"),
+        pnlPct,
+        currency: h.currency,
+      });
+    }
+
+    for (const h of cryptoHoldings) {
+      const baseEntry = baseline.crypto[h.token];
+      const baseValueUsd = baseEntry?.valueUsd ?? 0;
+      const depositsUsd = cryptoDeposits
+        .filter((d) => d.token === h.token && d.date.slice(0, 10) > baseline.date)
+        .reduce((s, d) => s + d.usdValueAtDeposit, 0);
+      const { pnlUsd, pnlPct } = holdingPnlSinceBaseline({
+        baselineValueUsd: baseValueUsd, currentValueUsd: h.currentValueUsd, depositsToHoldingUsd: depositsUsd,
+      });
+      result.push({
+        name: h.token, ticker: h.token, type: "crypto", units: h.amount,
+        currentValue: convert(h.currentValueUsd, "USD"),
+        costBasis: convert(baseValueUsd + depositsUsd, "USD"),
+        pnl: convert(pnlUsd, "USD"),
+        pnlPct,
+        currency: "USD",
+      });
+    }
+    return result;
+  }, [baseline, livePortfolioHoldings, portfolioTransactions, cryptoHoldings, cryptoDeposits, convert]);
 
   // PnL analysis (win rate, cumulative profit/loss)
   const pnlAnalysis = useMemo(() => computePnlAnalysis(last30), [last30]);
