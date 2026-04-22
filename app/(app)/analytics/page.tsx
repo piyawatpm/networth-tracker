@@ -40,6 +40,8 @@ import { PnlAnalysisCard } from "./_components/pnl-analysis";
 import { HoldingsPnlTable } from "./_components/holdings-pnl-table";
 import { TopGainersLosers } from "./_components/top-gainers-losers";
 import { AssetAllocationDonut } from "./_components/asset-allocation-donut";
+import { NoBaselineEmpty } from "./_components/no-baseline-empty";
+import { ResetBaselineButton } from "./_components/reset-baseline-button";
 
 // ---------------------------------------------------------------------------
 // Snapshot shape
@@ -412,8 +414,23 @@ export default function AnalyticsPage() {
 
   const D = 0.05;
 
+  if (!baseline) {
+    return (
+      <div className="p-5">
+        <NoBaselineEmpty onCreated={() => fetch("/api/analytics/baseline").then((r) => r.json()).then((j) => setBaseline(j.baseline))} />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6 pb-12">
+      <div className="flex justify-end">
+        <ResetBaselineButton
+          baselineDate={baseline.date}
+          onReset={() => fetch("/api/analytics/baseline").then((r) => r.json()).then((j) => setBaseline(j.baseline))}
+        />
+      </div>
+
       <BlurFade delay={0}>
         <PnlHeader
           todayPnl={todayPnl}
