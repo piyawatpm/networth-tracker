@@ -29,7 +29,7 @@ import {
   reconstructCryptoSnapshots,
   computeDailyPnlSeries,
 } from "@/lib/utils/pnl";
-import type { PortfolioHolding, PortfolioTransaction } from "@/lib/utils/types";
+import type { PortfolioHolding, PortfolioTransaction, AnalyticsBaseline, CryptoDeposit } from "@/lib/utils/types";
 
 // Sub-components (some don't exist yet — other tasks will create them)
 import { PnlHeader } from "./_components/pnl-header";
@@ -64,6 +64,14 @@ export default function AnalyticsPage() {
   const [cryptoCsvText] = useCloudStorage<string>("crypto_csv_text", "");
   const [stablecoinTags] = useCloudStorage<Record<string, boolean>>("crypto_stablecoin_tags", {});
   const [tickerMappings] = useCloudStorage<Record<string, string>>("crypto_ticker_mappings", {});
+
+  const [baseline, setBaseline] = useState<AnalyticsBaseline | null>(null);
+  const [cryptoDeposits, setCryptoDeposits] = useState<CryptoDeposit[]>([]);
+
+  useEffect(() => {
+    fetch("/api/analytics/baseline").then((r) => r.json()).then((j) => setBaseline(j.baseline ?? null)).catch(() => {});
+    fetch("/api/crypto/deposits").then((r) => r.json()).then((j) => setCryptoDeposits(j.deposits ?? [])).catch(() => {});
+  }, []);
 
   const { convert, format, symbol } = useCurrency();
 
