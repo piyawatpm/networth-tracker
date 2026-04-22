@@ -5,9 +5,9 @@ import { STABLECOINS, YIELD_PREFIXES, KNOWN_EXCHANGES } from "./constants";
 // Detect CSV format
 // ---------------------------------------------------------------------------
 
-type CsvFormat = "transactions" | "portfolio_overview" | "unknown";
+export type CsvFormat = "transactions" | "portfolio_overview" | "unknown";
 
-function detectFormat(csvText: string): CsvFormat {
+export function detectFormat(csvText: string): CsvFormat {
   const first200 = csvText.slice(0, 200).toLowerCase();
   if (first200.includes("last updated") && first200.includes("total value")) {
     return "portfolio_overview";
@@ -227,18 +227,38 @@ function extractExchange(notes: string): string | undefined {
 }
 
 export function computeHoldings(transactions: CryptoTransaction[]): CryptoHolding[] {
-  const holdingsMap = new Map<string, { amount: number; totalCostUsd: number; exchanges: Set<string> }>();
+  // Avg-buy-price method (matches what crypto exchanges report):
+  //   avgBuyPrice = totalBoughtCost / totalBoughtAmount  (buys + transferIns only)
+  //   on sell: realized += soldAmount × (soldPrice − avgBuyPrice); cost basis
+  //   per remaining unit stays at avgBuyPrice instead of drifting.
+  // Sorting by date is required so realized PnL uses the avg-buy-price as it
+  // stood AT the time of each sell, not the final all-time average.
+  const sorted = [...transactions].sort((a, b) =>
+    a.date < b.date ? -1 : a.date > b.date ? 1 : 0,
+  );
 
-  for (const tx of transactions) {
+  interface State {
+    amount: number;
+    totalBoughtAmount: number;
+    totalBoughtCost: number;
+    realizedPnl: number;
+    exchanges: Set<string>;
+  }
+  const holdingsMap = new Map<string, State>();
+
+  for (const tx of sorted) {
     const token = tx.token;
-
     if (!holdingsMap.has(token)) {
-      holdingsMap.set(token, { amount: 0, totalCostUsd: 0, exchanges: new Set() });
+      holdingsMap.set(token, {
+        amount: 0,
+        totalBoughtAmount: 0,
+        totalBoughtCost: 0,
+        realizedPnl: 0,
+        exchanges: new Set(),
+      });
     }
-
     const h = holdingsMap.get(token)!;
 
-    // Extract exchange from notes
     const exchange = extractExchange(tx.notes);
     if (exchange) h.exchanges.add(exchange);
 
@@ -246,25 +266,45 @@ export function computeHoldings(transactions: CryptoTransaction[]): CryptoHoldin
       case "buy":
       case "transferIn":
         h.amount += tx.amount;
-        if (tx.totalValueUsd) h.totalCostUsd += tx.totalValueUsd;
+        // transferIn rows often have totalValueUsd = null; only track cost
+        // for rows that carry a USD value, otherwise avg buy price stays put.
+        if (tx.totalValueUsd != null) {
+          h.totalBoughtAmount += tx.amount;
+          h.totalBoughtCost += tx.totalValueUsd;
+        }
         break;
       case "sell":
-      case "transferOut":
+      case "transferOut": {
         h.amount -= tx.amount;
-        if (tx.totalValueUsd) h.totalCostUsd -= tx.totalValueUsd;
+        if (tx.totalValueUsd != null && h.totalBoughtAmount > 0) {
+          const avgBuy = h.totalBoughtCost / h.totalBoughtAmount;
+          h.realizedPnl += tx.totalValueUsd - tx.amount * avgBuy;
+        }
         break;
+      }
     }
   }
 
   const holdings: CryptoHolding[] = [];
   for (const [token, data] of holdingsMap) {
     if (Math.abs(data.amount) < 0.0001) continue;
-    const estimatedValue = isStablecoin(token) ? data.amount : data.totalCostUsd;
+    const stable = isStablecoin(token);
+    const avgBuy =
+      data.totalBoughtAmount > 0
+        ? data.totalBoughtCost / data.totalBoughtAmount
+        : 0;
+    // Stablecoin cost-basis drifts on amount-only transferIn/Out rows, so
+    // peg cost to current amount → unrealized PnL stays 0 (the peg is $1).
+    const totalCostUsd = stable
+      ? data.amount
+      : Math.max(0, data.amount * avgBuy);
+    const currentValueUsd = stable ? data.amount : totalCostUsd;
     holdings.push({
       token,
       amount: data.amount,
-      totalCostUsd: Math.max(0, data.totalCostUsd),
-      currentValueUsd: estimatedValue,
+      totalCostUsd,
+      currentValueUsd,
+      realizedPnlUsd: stable ? 0 : data.realizedPnl,
       exchange: data.exchanges.size > 0 ? Array.from(data.exchanges).join(", ") : undefined,
     });
   }
@@ -293,14 +333,27 @@ export function computePortfolioHistory(csvText: string): PortfolioSnapshot[] {
   // Sort transactions by date ascending
   const sorted = [...transactions].sort((a, b) => a.date.localeCompare(b.date));
 
-  // Track cumulative holdings: token → { amount, costUsd, lastPriceUsd }
-  const state = new Map<string, { amount: number; costUsd: number; lastPriceUsd: number }>();
+  // Avg-buy-price method (mirrors computeHoldings). Selling at a profit must
+  // not collapse the cost basis of remaining units, so sells only reduce
+  // amount — totalBoughtAmount/Cost stay put so avgBuy = cost/amount is stable.
+  interface State {
+    amount: number;
+    totalBoughtAmount: number;
+    totalBoughtCost: number;
+    lastPriceUsd: number;
+  }
+  const state = new Map<string, State>();
   const snapshots: PortfolioSnapshot[] = [];
 
   for (const tx of sorted) {
     const token = tx.token;
     if (!state.has(token)) {
-      state.set(token, { amount: 0, costUsd: 0, lastPriceUsd: tx.priceUsd ?? 0 });
+      state.set(token, {
+        amount: 0,
+        totalBoughtAmount: 0,
+        totalBoughtCost: 0,
+        lastPriceUsd: tx.priceUsd ?? 0,
+      });
     }
     const s = state.get(token)!;
 
@@ -311,12 +364,16 @@ export function computePortfolioHistory(csvText: string): PortfolioSnapshot[] {
       case "buy":
       case "transferIn":
         s.amount += tx.amount;
-        if (tx.totalValueUsd) s.costUsd += tx.totalValueUsd;
+        // transferIn rows often have totalValueUsd = null; only shift avg-buy
+        // when the row carries USD, otherwise cost drifts on deposits.
+        if (tx.totalValueUsd != null) {
+          s.totalBoughtAmount += tx.amount;
+          s.totalBoughtCost += tx.totalValueUsd;
+        }
         break;
       case "sell":
       case "transferOut":
         s.amount -= tx.amount;
-        if (tx.totalValueUsd) s.costUsd -= tx.totalValueUsd;
         break;
     }
 
@@ -325,13 +382,20 @@ export function computePortfolioHistory(csvText: string): PortfolioSnapshot[] {
     let totalCost = 0;
     for (const [tk, holding] of state) {
       if (Math.abs(holding.amount) < 0.0001) continue;
-      // Stablecoins valued at $1 per unit
+      // Stablecoins pegged at $1 per unit (cost == value, unrealized PnL = 0)
       const isStable = tk.toUpperCase() === "USDC" || tk.toUpperCase() === "USDT" ||
         tk.toUpperCase() === "BUSD" || tk.toUpperCase() === "DAI" ||
         tk.toUpperCase() === "USD1" || tk.toUpperCase() === "TUSD";
-      const price = isStable ? 1 : holding.lastPriceUsd;
-      totalValue += holding.amount * price;
-      totalCost += Math.max(0, holding.costUsd);
+      if (isStable) {
+        totalValue += holding.amount;
+        totalCost += holding.amount;
+      } else {
+        const avgBuy = holding.totalBoughtAmount > 0
+          ? holding.totalBoughtCost / holding.totalBoughtAmount
+          : 0;
+        totalValue += holding.amount * holding.lastPriceUsd;
+        totalCost += Math.max(0, holding.amount * avgBuy);
+      }
     }
 
     // Extract date (YYYY-MM-DD from "YYYY-MM-DD HH:MM:SS")

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useCallback } from "react";
 
 import { useCloudStorage } from "@/components/providers/data-provider";
 import { useCurrency } from "@/components/providers/currency-provider";
@@ -11,26 +11,45 @@ import {
   parseAndComputeHoldings,
   getTotalCryptoValueUsd,
 } from "@/lib/utils/crypto-csv";
-import { applyLivePrices } from "@/lib/utils/crypto-prices";
+import {
+  applyLivePrices,
+  fetchCryptoPrices,
+  getCachedCryptoPrices,
+  isCryptoPricesCacheStale,
+} from "@/lib/utils/crypto-prices";
 import { applyStablecoinTags } from "@/lib/utils/crypto-csv";
 import { canAutoUpdate } from "@/lib/utils/prices";
 import { useAlpacaWs } from "@/lib/hooks/use-alpaca-ws";
 import { useBinanceWs } from "@/lib/hooks/use-binance-ws";
 import {
   computeDailyPnl,
-  computeHoldingsPnl,
   computePnlAnalysis,
+  reconstructStockSnapshots,
+  reconstructCryptoSnapshots,
+  computeDailyPnlSeries,
 } from "@/lib/utils/pnl";
-import type { PortfolioHolding, PortfolioTransaction } from "@/lib/utils/types";
+import type { HoldingPnl } from "@/lib/utils/pnl";
+import type { PortfolioHolding, PortfolioTransaction, AnalyticsBaseline, CryptoDeposit } from "@/lib/utils/types";
+import {
+  depositsByDay,
+  computeTwrSeries,
+  computeBenchmarkSeries,
+  holdingPnlSinceBaseline,
+  type TwrPoint,
+  type BenchmarkPoint,
+} from "@/lib/utils/analytics-baseline";
 
 // Sub-components (some don't exist yet — other tasks will create them)
 import { PnlHeader } from "./_components/pnl-header";
 import { DailyCalendar } from "./_components/daily-calendar";
+import { ComparisonChart } from "./_components/comparison-chart";
 import { PnlByProduct } from "./_components/pnl-by-product";
 import { PnlAnalysisCard } from "./_components/pnl-analysis";
 import { HoldingsPnlTable } from "./_components/holdings-pnl-table";
 import { TopGainersLosers } from "./_components/top-gainers-losers";
 import { AssetAllocationDonut } from "./_components/asset-allocation-donut";
+import { NoBaselineEmpty } from "./_components/no-baseline-empty";
+import { ResetBaselineButton } from "./_components/reset-baseline-button";
 
 // ---------------------------------------------------------------------------
 // Snapshot shape
@@ -39,6 +58,7 @@ import { AssetAllocationDonut } from "./_components/asset-allocation-donut";
 interface Snapshot {
   date: string;
   value: number;
+  valueWithSuper?: number; // portfolio_snapshots only — total incl super
 }
 
 // ---------------------------------------------------------------------------
@@ -54,6 +74,14 @@ export default function AnalyticsPage() {
   const [cryptoCsvText] = useCloudStorage<string>("crypto_csv_text", "");
   const [stablecoinTags] = useCloudStorage<Record<string, boolean>>("crypto_stablecoin_tags", {});
   const [tickerMappings] = useCloudStorage<Record<string, string>>("crypto_ticker_mappings", {});
+
+  const [baseline, setBaseline] = useState<AnalyticsBaseline | null>(null);
+  const [cryptoDeposits, setCryptoDeposits] = useState<CryptoDeposit[]>([]);
+
+  useEffect(() => {
+    fetch("/api/analytics/baseline").then((r) => r.json()).then((j) => setBaseline(j.baseline ?? null)).catch(() => {});
+    fetch("/api/crypto/deposits").then((r) => r.json()).then((j) => setCryptoDeposits(j.deposits ?? [])).catch(() => {});
+  }, []);
 
   const { convert, format, symbol } = useCurrency();
 
@@ -103,6 +131,37 @@ export default function AnalyticsPage() {
     }
   }, [binancePrices, rawCryptoHoldings, tickerMappings]);
 
+  // Seed prices from REST cache so PnL is correct before the WS connects.
+  // Without this, holdings render with currentValueUsd = totalCostUsd → 0 PnL.
+  useEffect(() => {
+    if (rawCryptoHoldings.length === 0) return;
+    const mapTickers = (prices: Record<string, number>) => {
+      const out: Record<string, number> = {};
+      for (const h of rawCryptoHoldings) {
+        const ticker = tickerMappings[h.token] ?? h.token;
+        if (prices[ticker]) out[h.token] = prices[ticker];
+      }
+      return out;
+    };
+
+    const cached = getCachedCryptoPrices();
+    if (cached && !isCryptoPricesCacheStale()) {
+      const mapped = mapTickers(cached.prices);
+      if (Object.keys(mapped).length > 0) {
+        setCryptoLivePrices((prev) => ({ ...mapped, ...prev }));
+      }
+      return;
+    }
+
+    const tokens = rawCryptoHoldings.map((h) => tickerMappings[h.token] ?? h.token);
+    fetchCryptoPrices(tokens).then((prices) => {
+      const mapped = mapTickers(prices);
+      if (Object.keys(mapped).length > 0) {
+        setCryptoLivePrices((prev) => ({ ...mapped, ...prev }));
+      }
+    });
+  }, [rawCryptoHoldings, tickerMappings]);
+
   // Live portfolio holdings with Alpaca prices applied
   const livePortfolioHoldings = useMemo(() => {
     if (Object.keys(finnhubPrices).length === 0) return portfolioHoldings;
@@ -148,20 +207,268 @@ export default function AnalyticsPage() {
     [portfolioTransactions, superHoldingIds],
   );
 
+  // Reconstruct stock snapshots from transactions + Alpaca historical bars,
+  // bypassing portfolio_snapshots' drift from backdated CSV/holding edits.
+  const [stockHistory, setStockHistory] = useState<Record<string, { date: string; close: number }[]>>({});
+
+  const stockTickers = useMemo(() => {
+    const ids = new Set<string>();
+    for (const h of portfolioHoldings) {
+      if (h.accountType !== "super" && h.ticker) ids.add(h.ticker.toUpperCase());
+    }
+    return [...ids];
+  }, [portfolioHoldings]);
+
+  const stockTxnRange = useMemo(() => {
+    const dates = portfolioTransactions
+      .filter((t) => !superHoldingIds.has(t.holdingId))
+      .map((t) => t.date.slice(0, 10))
+      .sort();
+    if (dates.length === 0) return null;
+    return { from: dates[0], to: today };
+  }, [portfolioTransactions, superHoldingIds, today]);
+
+  useEffect(() => {
+    if (stockTickers.length === 0 || !stockTxnRange) return;
+    fetch(
+      `/api/stock-history?tickers=${stockTickers.join(",")}&from=${stockTxnRange.from}&to=${stockTxnRange.to}`,
+    )
+      .then((r) => r.json())
+      .then((j) => setStockHistory(j.data ?? {}))
+      .catch(() => setStockHistory({}));
+  }, [stockTickers, stockTxnRange]);
+
+  const reconstructedStockSnapshots = useMemo(() => {
+    if (!stockTxnRange || Object.keys(stockHistory).length === 0) return portfolioSnapshots;
+    return reconstructStockSnapshots(
+      portfolioTransactions,
+      portfolioHoldings,
+      stockHistory,
+      stockTxnRange.from,
+      stockTxnRange.to,
+    );
+  }, [stockHistory, stockTxnRange, portfolioTransactions, portfolioHoldings, portfolioSnapshots]);
+
+  // Same reconstruction strategy for crypto: txns + Binance historical closes
+  // → daily values. Bypasses cron snapshots that drift on backdated CSV uploads.
+  const [cryptoHistory, setCryptoHistory] = useState<Record<string, { date: string; close: number }[]>>({});
+
+  const cryptoTokens = useMemo(() => {
+    const set = new Set<string>();
+    for (const t of cryptoTxns) set.add(t.token);
+    return [...set];
+  }, [cryptoTxns]);
+
+  const cryptoTxnRange = useMemo(() => {
+    if (cryptoTxns.length === 0) return null;
+    const dates = cryptoTxns.map((t) => t.date.slice(0, 10)).sort();
+    return { from: dates[0], to: today };
+  }, [cryptoTxns, today]);
+
+  useEffect(() => {
+    if (cryptoTokens.length === 0 || !cryptoTxnRange) return;
+    fetch(
+      `/api/historical-prices?tokens=${cryptoTokens.join(",")}&from=${cryptoTxnRange.from}&to=${cryptoTxnRange.to}`,
+    )
+      .then((r) => r.json())
+      .then((j) => setCryptoHistory(j.data ?? {}))
+      .catch(() => setCryptoHistory({}));
+  }, [cryptoTokens, cryptoTxnRange]);
+
+  const reconstructedCryptoSnapshots = useMemo(() => {
+    if (!cryptoTxnRange || cryptoTxns.length === 0) return cryptoSnapshots;
+    return reconstructCryptoSnapshots(
+      cryptoTxns,
+      cryptoHistory,
+      cryptoTxnRange.from,
+      cryptoTxnRange.to,
+    );
+  }, [cryptoTxns, cryptoHistory, cryptoTxnRange, cryptoSnapshots]);
+
   const dailyPnl = useMemo(
-    () => computeDailyPnl(portfolioSnapshots, cryptoSnapshots, nonSuperTxns, cryptoTxns, convert),
-    [portfolioSnapshots, cryptoSnapshots, nonSuperTxns, cryptoTxns, convert],
+    () => computeDailyPnl(
+      reconstructedStockSnapshots,
+      reconstructedCryptoSnapshots,
+      nonSuperTxns,
+      cryptoTxns,
+      convert,
+    ),
+    [reconstructedStockSnapshots, reconstructedCryptoSnapshots, nonSuperTxns, cryptoTxns, convert],
   );
 
-  const todayPnl = dailyPnl.find((d) => d.date === today)?.totalPnl ?? 0;
+  // Daily total-PnL series using avg-buy-price method (matches CMC).
+  // For each day: stockPnl + cryptoPnl + superPnl, all in USD.
+  // Range PnL = series[end] − series[start]; daily PnL = series[t] − series[t-1].
+  const pnlSeries = useMemo(() => {
+    const dates = [
+      ...portfolioTransactions.map((t) => t.date.slice(0, 10)),
+      ...cryptoTxns.map((t) => t.date.slice(0, 10)),
+    ].sort();
+    if (dates.length === 0) return [];
+    return computeDailyPnlSeries({
+      fromDate: dates[0],
+      toDate: today,
+      portfolioTxns: portfolioTransactions,
+      cryptoTxns,
+      portfolioHoldings,
+      // Use rawCryptoHoldings (stable) instead of cryptoHoldings (live).
+      // The series only reads amount/totalCostUsd/realizedPnlUsd — fields that
+      // come from txn replay and don't change on WS price ticks. Using the
+      // live-priced version causes pnlSeries to recompute on every WS tick,
+      // which cascades into the comparison chart re-rendering constantly.
+      cryptoHoldings: rawCryptoHoldings,
+      stockBars: stockHistory,
+      cryptoBars: cryptoHistory,
+      cronPortfolioSnaps: portfolioSnapshots,
+      fxToUsd: (amount, currency) => convert(amount, currency, "USD"),
+    });
+  }, [
+    portfolioTransactions,
+    cryptoTxns,
+    portfolioHoldings,
+    rawCryptoHoldings,
+    stockHistory,
+    cryptoHistory,
+    portfolioSnapshots,
+    convert,
+    today,
+  ]);
 
-  const monthPnl = useMemo(
-    () =>
-      dailyPnl
-        .filter((d) => d.date >= monthStart && d.date <= today)
-        .reduce((sum, d) => sum + d.totalPnl, 0),
-    [dailyPnl, monthStart, today],
+  // Per-day EOD USD values (portfolio + crypto combined) from snapshots
+  const dailyValuesUsd = useMemo(() => {
+    const map = new Map<string, number>();
+    const take = (rows: { date: string; value: number; valueWithSuper?: number }[], kind: "port" | "crypto") => {
+      for (const r of rows) {
+        const day = r.date.slice(0, 10);
+        const v = kind === "port" ? (r.valueWithSuper ?? r.value) : r.value;
+        map.set(day, (map.get(day) ?? 0) + v);
+      }
+    };
+    take(portfolioSnapshots as { date: string; value: number; valueWithSuper?: number }[], "port");
+    take(cryptoSnapshots as { date: string; value: number }[], "crypto");
+    return map;
+  }, [portfolioSnapshots, cryptoSnapshots]);
+
+  const depositsMap = useMemo(() => {
+    if (!baseline) return new Map<string, number>();
+    return depositsByDay({
+      portfolioTxns: portfolioTransactions,
+      cryptoDeposits,
+      baselineDate: baseline.date,
+      fxToUsd: (amount, currency) => convert(amount, currency, "USD"),
+    });
+  }, [baseline, portfolioTransactions, cryptoDeposits, convert]);
+
+  const liveCombinedUsd = useMemo(() => {
+    const portfolioTotal = livePortfolioHoldings.reduce(
+      (s, h) => s + convert(h.currentValue, h.currency, "USD"), 0,
+    );
+    const cryptoTotal = cryptoHoldings.reduce((s, h) => s + h.currentValueUsd, 0);
+    return portfolioTotal + cryptoTotal;
+  }, [livePortfolioHoldings, cryptoHoldings, convert]);
+
+  const twrSeries = useMemo<TwrPoint[]>(() => {
+    if (!baseline) return [];
+    return computeTwrSeries({
+      baseline, dailyValuesUsd, deposits: depositsMap, today, liveValueUsd: liveCombinedUsd,
+    });
+  }, [baseline, dailyValuesUsd, depositsMap, today, liveCombinedUsd]);
+
+  const pctByDate = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const p of twrSeries) m.set(p.date, p.rDay * 100);
+    return m;
+  }, [twrSeries]);
+
+  const [benchBars, setBenchBars] = useState<{ date: string; btc: number | null; spy: number | null }[]>([]);
+  useEffect(() => {
+    if (!baseline) return;
+    fetch(`/api/comparison?from=${baseline.date}&to=${today}`)
+      .then((r) => r.json())
+      .then((j) => setBenchBars(j.data ?? []))
+      .catch(() => setBenchBars([]));
+  }, [baseline, today]);
+
+  const spySeries = useMemo<BenchmarkPoint[]>(() => {
+    if (!baseline) return [];
+    return computeBenchmarkSeries({
+      baselineDate: baseline.date,
+      baselinePrice: baseline.benchmarks.spy,
+      bars: benchBars.filter((b) => b.spy != null).map((b) => ({ date: b.date, close: b.spy as number })),
+      today,
+    });
+  }, [baseline, benchBars, today]);
+
+  const btcSeries = useMemo<BenchmarkPoint[]>(() => {
+    if (!baseline) return [];
+    return computeBenchmarkSeries({
+      baselineDate: baseline.date,
+      baselinePrice: baseline.benchmarks.btc,
+      bars: benchBars.filter((b) => b.btc != null).map((b) => ({ date: b.date, close: b.btc as number })),
+      today,
+    });
+  }, [baseline, benchBars, today]);
+
+  const pnlAtDate = useCallback(
+    (target: string): number => {
+      // Find latest series point on/before target. If target is before all data → 0.
+      let result = 0;
+      for (const p of pnlSeries) {
+        if (p.date <= target) result = p.totalUsd;
+        else break;
+      }
+      return convert(result, "USD");
+    },
+    [pnlSeries, convert],
   );
+
+  const todayTwrPoint = twrSeries.length > 0 ? twrSeries[twrSeries.length - 1] : null;
+  const prevTwrPoint = twrSeries.length > 1 ? twrSeries[twrSeries.length - 2] : null;
+  const todayPnl = convert(todayTwrPoint ? todayTwrPoint.valueUsd - (prevTwrPoint?.valueUsd ?? baseline?.totals.combinedUsd ?? 0) - todayTwrPoint.depositsUsd : 0, "USD");
+  const todayPnlPct = todayTwrPoint ? todayTwrPoint.rDay * 100 : 0;
+
+  const rangePnls = useMemo<Record<"week" | "month" | "year" | "all", { value: number; pct: number }>>(() => {
+    if (!baseline || twrSeries.length === 0) {
+      return { week: { value: 0, pct: 0 }, month: { value: 0, pct: 0 }, year: { value: 0, pct: 0 }, all: { value: 0, pct: 0 } };
+    }
+    const weekCutoff = new Date(); weekCutoff.setDate(weekCutoff.getDate() - 7);
+    const weekStart = weekCutoff.toISOString().slice(0, 10);
+    const yearStart = today.slice(0, 4) + "-01-01";
+    const last = twrSeries[twrSeries.length - 1];
+
+    // "Since baseline" = the accumulated delta/cumulative % at the latest point.
+    // Not a difference across rangeBetween — the baseline day IS the anchor,
+    // so subtracting s.delta=end.delta would zero out same-day PnL.
+    const since = (startDay: string): { value: number; pct: number } => {
+      const clamped = startDay < baseline.date ? baseline.date : startDay;
+      if (clamped <= baseline.date) {
+        return { value: convert(last.deltaUsd, "USD"), pct: last.cumulativePct };
+      }
+      // Post-baseline start: find the point whose date is just < clamped.
+      // That's the "prior" anchor; subtract its delta and divide cumFactors.
+      let priorDelta = 0;
+      let priorCumFactor = 1;
+      for (const p of twrSeries) {
+        if (p.date < clamped) {
+          priorDelta = p.deltaUsd;
+          priorCumFactor *= 1 + p.rDay;
+        } else break;
+      }
+      const value = convert(last.deltaUsd - priorDelta, "USD");
+      const endCumFactor = last.cumulativePct / 100 + 1;
+      const rangeFactor = priorCumFactor > 0 ? endCumFactor / priorCumFactor : 1;
+      return { value, pct: (rangeFactor - 1) * 100 };
+    };
+
+    return {
+      week: since(weekStart),
+      month: since(monthStart),
+      year: since(yearStart),
+      all: since(baseline.date),
+    };
+  }, [twrSeries, baseline, today, monthStart, convert]);
+
+
 
   // Last 30 days filter
   const last30 = useMemo(() => {
@@ -171,21 +478,73 @@ export default function AnalyticsPage() {
     return dailyPnl.filter((d) => d.date >= cutoffStr);
   }, [dailyPnl]);
 
-  const portfolioPnl30d = useMemo(
-    () => last30.reduce((s, d) => s + d.portfolioPnl, 0),
-    [last30],
-  );
+  const pnlByProduct = useMemo(() => {
+    if (!baseline) return { portfolio: 0, crypto: 0 };
+    // Portfolio side: sum(currentValue − baseline_value − stock deposits since baseline)
+    const portfolioDepositsUsd = portfolioTransactions
+      .filter((t) => t.date.slice(0, 10) > baseline.date)
+      .reduce((s, t) => s + (t.type === "buy" ? 1 : -1) * convert(t.totalAmount, t.currency, "USD"), 0);
+    const portfolioCurrentUsd = livePortfolioHoldings.reduce(
+      (s, h) => s + convert(h.currentValue, h.currency, "USD"), 0,
+    );
+    const portfolioBaselineUsd = baseline.totals.portfolioUsd;
+    const portfolio = portfolioCurrentUsd - portfolioBaselineUsd - portfolioDepositsUsd;
 
-  const cryptoPnl30d = useMemo(
-    () => last30.reduce((s, d) => s + d.cryptoPnl, 0),
-    [last30],
-  );
+    const cryptoDepositsUsd = cryptoDeposits
+      .filter((d) => d.date.slice(0, 10) > baseline.date)
+      .reduce((s, d) => s + d.usdValueAtDeposit, 0);
+    const cryptoCurrentUsd = cryptoHoldings.reduce((s, h) => s + h.currentValueUsd, 0);
+    const cryptoBaselineUsd = baseline.totals.cryptoUsd;
+    const crypto = cryptoCurrentUsd - cryptoBaselineUsd - cryptoDepositsUsd;
 
-  // Holdings PnL
-  const holdingsPnl = useMemo(
-    () => computeHoldingsPnl(livePortfolioHoldings, cryptoHoldings, convert),
-    [livePortfolioHoldings, cryptoHoldings, convert],
-  );
+    return { portfolio: convert(portfolio, "USD"), crypto: convert(crypto, "USD") };
+  }, [baseline, portfolioTransactions, livePortfolioHoldings, cryptoDeposits, cryptoHoldings, convert]);
+
+  // Holdings PnL (baseline-aware)
+  const holdingsPnl = useMemo(() => {
+    if (!baseline) return [];
+    const result: HoldingPnl[] = [];
+
+    for (const h of livePortfolioHoldings) {
+      const baseEntry = baseline.portfolio[h.id];
+      const baseValueUsd = baseEntry?.valueUsd ?? 0;
+      const currentUsd = convert(h.currentValue, h.currency, "USD");
+      const depositsUsd = portfolioTransactions
+        .filter((t) => t.holdingId === h.id && t.date.slice(0, 10) > baseline.date)
+        .reduce((s, t) => s + (t.type === "buy" ? 1 : -1) * convert(t.totalAmount, t.currency, "USD"), 0);
+      const { pnlUsd, pnlPct } = holdingPnlSinceBaseline({
+        baselineValueUsd: baseValueUsd, currentValueUsd: currentUsd, depositsToHoldingUsd: depositsUsd,
+      });
+      result.push({
+        name: h.name, ticker: h.ticker, type: "stock", units: h.units,
+        currentValue: convert(currentUsd, "USD"),
+        costBasis: convert(baseValueUsd + depositsUsd, "USD"),
+        pnl: convert(pnlUsd, "USD"),
+        pnlPct,
+        currency: h.currency,
+      });
+    }
+
+    for (const h of cryptoHoldings) {
+      const baseEntry = baseline.crypto[h.token];
+      const baseValueUsd = baseEntry?.valueUsd ?? 0;
+      const depositsUsd = cryptoDeposits
+        .filter((d) => d.token === h.token && d.date.slice(0, 10) > baseline.date)
+        .reduce((s, d) => s + d.usdValueAtDeposit, 0);
+      const { pnlUsd, pnlPct } = holdingPnlSinceBaseline({
+        baselineValueUsd: baseValueUsd, currentValueUsd: h.currentValueUsd, depositsToHoldingUsd: depositsUsd,
+      });
+      result.push({
+        name: h.token, ticker: h.token, type: "crypto", units: h.amount,
+        currentValue: convert(h.currentValueUsd, "USD"),
+        costBasis: convert(baseValueUsd + depositsUsd, "USD"),
+        pnl: convert(pnlUsd, "USD"),
+        pnlPct,
+        currency: "USD",
+      });
+    }
+    return result;
+  }, [baseline, livePortfolioHoldings, portfolioTransactions, cryptoHoldings, cryptoDeposits, convert]);
 
   // PnL analysis (win rate, cumulative profit/loss)
   const pnlAnalysis = useMemo(() => computePnlAnalysis(last30), [last30]);
@@ -204,27 +563,47 @@ export default function AnalyticsPage() {
 
   const D = 0.05;
 
+  if (!baseline) {
+    return (
+      <div className="p-5">
+        <NoBaselineEmpty onCreated={() => fetch("/api/analytics/baseline").then((r) => r.json()).then((j) => setBaseline(j.baseline))} />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6 pb-12">
+      <div className="flex justify-end">
+        <ResetBaselineButton
+          baselineDate={baseline.date}
+          onReset={() => fetch("/api/analytics/baseline").then((r) => r.json()).then((j) => setBaseline(j.baseline))}
+        />
+      </div>
+
       <BlurFade delay={0}>
+        <ComparisonChart twr={twrSeries} spy={spySeries} btc={btcSeries} />
+      </BlurFade>
+
+      <BlurFade delay={D}>
         <PnlHeader
           todayPnl={todayPnl}
-          monthPnl={monthPnl}
+          todayPnlPct={todayPnlPct}
+          rangePnls={rangePnls}
           estimatedBalance={estimatedBalance}
           format={format}
           symbol={symbol}
         />
       </BlurFade>
 
-      <BlurFade delay={D}>
-        <DailyCalendar dailyPnl={dailyPnl} format={format} />
+      <BlurFade delay={D * 1.5}>
+        <DailyCalendar dailyPnl={dailyPnl} format={format} symbol={symbol} baselineDate={baseline.date} pctByDate={pctByDate} />
       </BlurFade>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
         <BlurFade delay={D * 2}>
           <PnlByProduct
-            portfolioPnl={portfolioPnl30d}
-            cryptoPnl={cryptoPnl30d}
+            portfolioPnl={pnlByProduct.portfolio}
+            cryptoPnl={pnlByProduct.crypto}
             format={format}
           />
         </BlurFade>

@@ -193,6 +193,26 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
+    // Also mirror to relational tables (graceful — tables may not exist)
+    try {
+      const snapshotInserts: Record<string, unknown>[] = [];
+      snapshotInserts.push({ type: "portfolio", date: today, value: portfolioNoSuper, value_with_super: portfolioTotal, currency: SNAPSHOT_CURRENCY });
+      snapshotInserts.push({ type: "networth", date: today, value: netWorth, value_no_super: netWorthNoSuper, currency: SNAPSHOT_CURRENCY, portfolio: portfolioTotal, crypto: cryptoInUsd });
+      if (cryptoInUsd > 0) {
+        snapshotInserts.push({ type: "crypto", date: today, value: cryptoInUsd, currency: SNAPSHOT_CURRENCY });
+      }
+      await supabase.from("snapshots").insert(snapshotInserts);
+
+      // Update holdings that changed
+      for (const h of holdings) {
+        if (manualUpdates?.[h.id] !== undefined || stockHoldings.find((s) => s.id === h.id)) {
+          await supabase.from("portfolio_holdings")
+            .update({ current_value: h.currentValue, currency: h.currency })
+            .eq("id", h.id);
+        }
+      }
+    } catch { /* tables may not exist — KV write already succeeded */ }
+
     // Debug: list each holding for verification
     const holdingsDebug = holdings
       .filter((h) => h.type !== "savings")

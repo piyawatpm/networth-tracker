@@ -19,7 +19,7 @@ interface HoldingsPnlTableProps {
 // Sort helpers
 // ---------------------------------------------------------------------------
 
-type SortKey = "name" | "units" | "value" | "pnl" | "pnlPct";
+type SortKey = "name" | "units" | "value" | "costBasis" | "pnl" | "pnlPct";
 
 function accessor(h: HoldingPnl, key: SortKey): number | string {
   switch (key) {
@@ -29,6 +29,8 @@ function accessor(h: HoldingPnl, key: SortKey): number | string {
       return h.units;
     case "value":
       return h.currentValue;
+    case "costBasis":
+      return h.costBasis;
     case "pnl":
       return h.pnl;
     case "pnlPct":
@@ -56,6 +58,7 @@ const COLUMNS: { key: SortKey; label: string }[] = [
   { key: "name", label: "Asset" },
   { key: "units", label: "Units" },
   { key: "value", label: "Value" },
+  { key: "costBasis", label: "Baseline + deposits" },
   { key: "pnl", label: "PnL" },
   { key: "pnlPct", label: "PnL%" },
 ];
@@ -99,7 +102,7 @@ export function HoldingsPnlTable({
       {/* ---- Table ---- */}
       <div className="max-h-[28rem] overflow-y-auto">
         {/* Column headers */}
-        <div className="grid grid-cols-[1fr_5rem_5rem_5rem_4rem] sm:grid-cols-[1fr_6rem_7rem_7rem_5rem] gap-x-1 px-2 pb-2 border-b border-border/40 sticky top-0 bg-card z-10">
+        <div className="grid grid-cols-[1fr_4rem_5rem_6rem_5rem_4rem] sm:grid-cols-[1fr_5rem_7rem_8rem_7rem_5rem] gap-x-1 px-2 pb-2 border-b border-border/40 sticky top-0 bg-card z-10">
           {COLUMNS.map((col) => (
             <button
               key={col.key}
@@ -133,7 +136,7 @@ export function HoldingsPnlTable({
             {sorted.map((h) => (
               <div
                 key={h.ticker + h.type}
-                className="grid grid-cols-[1fr_5rem_5rem_5rem_4rem] sm:grid-cols-[1fr_6rem_7rem_7rem_5rem] gap-x-1 items-center px-2 py-2 hover:bg-secondary/30 transition-colors"
+                className="grid grid-cols-[1fr_4rem_5rem_6rem_5rem_4rem] sm:grid-cols-[1fr_5rem_7rem_8rem_7rem_5rem] gap-x-1 items-center px-2 py-2 hover:bg-secondary/30 transition-colors"
               >
                 {/* Asset */}
                 <div className="min-w-0">
@@ -155,6 +158,11 @@ export function HoldingsPnlTable({
                 {/* Value */}
                 <span className="text-xs font-mono tabular-nums text-right">
                   {format(h.currentValue)}
+                </span>
+
+                {/* Baseline + deposits */}
+                <span className="text-[11px] font-mono tabular-nums text-muted-foreground text-right">
+                  {format(h.costBasis)}
                 </span>
 
                 {/* PnL */}
