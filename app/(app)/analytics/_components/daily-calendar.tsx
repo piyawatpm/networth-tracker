@@ -19,7 +19,8 @@ interface DailyCalendarProps {
   format: (amount: number) => string;
   symbol: string;
   baselineDate: string;
-  pctByDate: Map<string, number>;  // day → rDay * 100
+  pctByDate: Map<string, number>;       // day → rDay * 100
+  pnlUsdByDate: Map<string, number>;    // day → baseline-aware PnL in display currency
 }
 
 // ---------------------------------------------------------------------------
@@ -56,7 +57,7 @@ function compactPnl(value: number, symbol: string): string {
 // Component
 // ---------------------------------------------------------------------------
 
-export function DailyCalendar({ dailyPnl, format, symbol, baselineDate, pctByDate }: DailyCalendarProps) {
+export function DailyCalendar({ dailyPnl, format, symbol, baselineDate, pctByDate, pnlUsdByDate }: DailyCalendarProps) {
   const todayStr = getSydneyDateString();
   const [todayYear, todayMonth] = todayStr.split("-").map(Number);
 
@@ -182,13 +183,17 @@ export function DailyCalendar({ dailyPnl, format, symbol, baselineDate, pctByDat
 
         {/* Day cells */}
         {days.map((dateStr) => {
-          const entry = pnlMap.get(dateStr);
           const isFuture = dateStr > todayStr;
           const isToday = dateStr === todayStr;
           const isSelected = dateStr === selectedDay;
-          const hasData = !!entry;
-          const pnl = entry?.totalPnl ?? 0;
           const isPreBaseline = dateStr < baselineDate;
+
+          // Per-day baseline-aware PnL $ — delta between consecutive TWR
+          // points. Pre-baseline days show nothing; the old dailyPnl series
+          // (cash-flow based) is intentionally ignored here.
+          const pnl = isPreBaseline || isFuture ? 0 : (pnlUsdByDate.get(dateStr) ?? 0);
+          const hasData = !isPreBaseline && !isFuture && pnlUsdByDate.has(dateStr);
+          const entry = pnlMap.get(dateStr);
 
           return (
             <button
