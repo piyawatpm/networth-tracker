@@ -295,8 +295,6 @@ export default function AnalyticsPage() {
     [reconstructedStockSnapshots, reconstructedCryptoSnapshots, nonSuperTxns, cryptoTxns, convert],
   );
 
-  const todayPnl = dailyPnl.find((d) => d.date === today)?.totalPnl ?? 0;
-
   // Daily total-PnL series using avg-buy-price method (matches CMC).
   // For each day: stockPnl + cryptoPnl + superPnl, all in USD.
   // Range PnL = series[end] − series[start]; daily PnL = series[t] − series[t-1].
@@ -417,35 +415,41 @@ export default function AnalyticsPage() {
     [pnlSeries, convert],
   );
 
-  const rangePnls = useMemo(() => {
-    const weekCutoff = new Date();
-    weekCutoff.setDate(weekCutoff.getDate() - 7);
+  const todayTwrPoint = twrSeries.length > 0 ? twrSeries[twrSeries.length - 1] : null;
+  const prevTwrPoint = twrSeries.length > 1 ? twrSeries[twrSeries.length - 2] : null;
+  const todayPnl = convert(todayTwrPoint ? todayTwrPoint.valueUsd - (prevTwrPoint?.valueUsd ?? baseline?.totals.combinedUsd ?? 0) - todayTwrPoint.depositsUsd : 0, "USD");
+  const todayPnlPct = todayTwrPoint ? todayTwrPoint.rDay * 100 : 0;
+
+  const rangePnls = useMemo<Record<"week" | "month" | "year" | "all", { value: number; pct: number }>>(() => {
+    const weekCutoff = new Date(); weekCutoff.setDate(weekCutoff.getDate() - 7);
     const weekStart = weekCutoff.toISOString().slice(0, 10);
     const yearStart = today.slice(0, 4) + "-01-01";
-    const todayPnl = pnlAtDate(today);
+    const start = (d: string) => d < (baseline?.date ?? d) ? (baseline?.date ?? d) : d;
 
-    // All-time: HoldingsPnl approach (current value − cost basis + realized).
-    // The pnlSeries replay diverges from current holdings whenever the user's
-    // txn ledger doesn't perfectly track every buy/sell — e.g. adjusting
-    // holdings.units down without recording the sell, or setting an
-    // amountInvested higher than the sum of buy txns. HoldingsPnl is the
-    // source of truth for "current state" so we anchor All-time to it.
-    let allTime = 0;
-    for (const h of livePortfolioHoldings) {
-      allTime += convert(h.currentValue, h.currency) - convert(h.amountInvested, h.currency);
-    }
-    for (const h of cryptoHoldings) {
-      const realized = h.realizedPnlUsd ?? 0;
-      allTime += convert(h.currentValueUsd - h.totalCostUsd + realized, "USD");
-    }
+    const at = (d: string): TwrPoint | null => {
+      let last: TwrPoint | null = null;
+      for (const p of twrSeries) { if (p.date <= d) last = p; else break; }
+      return last;
+    };
+
+    const rangeBetween = (startDay: string): { value: number; pct: number } => {
+      const s = at(startDay);
+      const e = at(today);
+      if (!s || !e) return { value: 0, pct: 0 };
+      const value = convert(e.deltaUsd - s.deltaUsd, "USD");
+      // Chained % from startDay+1 → today using TWR
+      let factor = 1;
+      for (const p of twrSeries) if (p.date > startDay && p.date <= today) factor *= (1 + p.rDay);
+      return { value, pct: (factor - 1) * 100 };
+    };
 
     return {
-      week: todayPnl - pnlAtDate(weekStart),
-      month: todayPnl - pnlAtDate(monthStart),
-      year: todayPnl - pnlAtDate(yearStart),
-      all: allTime,
+      week: rangeBetween(start(weekStart)),
+      month: rangeBetween(start(monthStart)),
+      year: rangeBetween(start(yearStart)),
+      all: rangeBetween(baseline?.date ?? today),
     };
-  }, [pnlAtDate, monthStart, today, livePortfolioHoldings, cryptoHoldings, convert]);
+  }, [twrSeries, baseline, today, monthStart, convert]);
 
 
 
@@ -514,6 +518,7 @@ export default function AnalyticsPage() {
       <BlurFade delay={D}>
         <PnlHeader
           todayPnl={todayPnl}
+          todayPnlPct={todayPnlPct}
           rangePnls={rangePnls}
           estimatedBalance={estimatedBalance}
           format={format}
