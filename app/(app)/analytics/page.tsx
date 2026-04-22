@@ -30,6 +30,13 @@ import {
   computeDailyPnlSeries,
 } from "@/lib/utils/pnl";
 import type { PortfolioHolding, PortfolioTransaction, AnalyticsBaseline, CryptoDeposit } from "@/lib/utils/types";
+import {
+  depositsByDay,
+  computeTwrSeries,
+  computeBenchmarkSeries,
+  type TwrPoint,
+  type BenchmarkPoint,
+} from "@/lib/utils/analytics-baseline";
 
 // Sub-components (some don't exist yet — other tasks will create them)
 import { PnlHeader } from "./_components/pnl-header";
@@ -327,6 +334,75 @@ export default function AnalyticsPage() {
     convert,
     today,
   ]);
+
+  // Per-day EOD USD values (portfolio + crypto combined) from snapshots
+  const dailyValuesUsd = useMemo(() => {
+    const map = new Map<string, number>();
+    const take = (rows: { date: string; value: number; valueWithSuper?: number }[], kind: "port" | "crypto") => {
+      for (const r of rows) {
+        const day = r.date.slice(0, 10);
+        const v = kind === "port" ? (r.valueWithSuper ?? r.value) : r.value;
+        map.set(day, (map.get(day) ?? 0) + v);
+      }
+    };
+    take(portfolioSnapshots as { date: string; value: number; valueWithSuper?: number }[], "port");
+    take(cryptoSnapshots as { date: string; value: number }[], "crypto");
+    return map;
+  }, [portfolioSnapshots, cryptoSnapshots]);
+
+  const depositsMap = useMemo(() => {
+    if (!baseline) return new Map<string, number>();
+    return depositsByDay({
+      portfolioTxns: portfolioTransactions,
+      cryptoDeposits,
+      baselineDate: baseline.date,
+      fxToUsd: (amount, currency) => convert(amount, currency, "USD"),
+    });
+  }, [baseline, portfolioTransactions, cryptoDeposits, convert]);
+
+  const liveCombinedUsd = useMemo(() => {
+    const portfolioTotal = livePortfolioHoldings.reduce(
+      (s, h) => s + convert(h.currentValue, h.currency, "USD"), 0,
+    );
+    const cryptoTotal = cryptoHoldings.reduce((s, h) => s + h.currentValueUsd, 0);
+    return portfolioTotal + cryptoTotal;
+  }, [livePortfolioHoldings, cryptoHoldings, convert]);
+
+  const twrSeries = useMemo<TwrPoint[]>(() => {
+    if (!baseline) return [];
+    return computeTwrSeries({
+      baseline, dailyValuesUsd, deposits: depositsMap, today, liveValueUsd: liveCombinedUsd,
+    });
+  }, [baseline, dailyValuesUsd, depositsMap, today, liveCombinedUsd]);
+
+  const [benchBars, setBenchBars] = useState<{ date: string; btc: number | null; spy: number | null }[]>([]);
+  useEffect(() => {
+    if (!baseline) return;
+    fetch(`/api/comparison?from=${baseline.date}&to=${today}`)
+      .then((r) => r.json())
+      .then((j) => setBenchBars(j.data ?? []))
+      .catch(() => setBenchBars([]));
+  }, [baseline, today]);
+
+  const spySeries = useMemo<BenchmarkPoint[]>(() => {
+    if (!baseline) return [];
+    return computeBenchmarkSeries({
+      baselineDate: baseline.date,
+      baselinePrice: baseline.benchmarks.spy,
+      bars: benchBars.filter((b) => b.spy != null).map((b) => ({ date: b.date, close: b.spy as number })),
+      today,
+    });
+  }, [baseline, benchBars, today]);
+
+  const btcSeries = useMemo<BenchmarkPoint[]>(() => {
+    if (!baseline) return [];
+    return computeBenchmarkSeries({
+      baselineDate: baseline.date,
+      baselinePrice: baseline.benchmarks.btc,
+      bars: benchBars.filter((b) => b.btc != null).map((b) => ({ date: b.date, close: b.btc as number })),
+      today,
+    });
+  }, [baseline, benchBars, today]);
 
   const pnlAtDate = useCallback(
     (target: string): number => {
