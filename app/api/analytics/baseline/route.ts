@@ -1,8 +1,15 @@
+// app/api/analytics/baseline/route.ts
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { captureBaseline } from "@/lib/utils/analytics-baseline";
-import { parseAndComputeHoldings, applyStablecoinTags } from "@/lib/utils/crypto-csv";
-import type { AnalyticsBaseline, PortfolioHolding } from "@/lib/utils/types";
+import type { AnalyticsBaseline } from "@/lib/utils/types";
+import {
+  deriveAnchorDate,
+  anchorTotalsFromSnapshots,
+  buildBaselineFromSnapshots,
+  fetchBtcDailyCloses,
+  fetchSpyDailyCloses,
+  type SnapshotRow,
+} from "@/lib/utils/analytics-backfill";
 
 export const dynamic = "force-dynamic";
 
@@ -11,113 +18,126 @@ const supabase = createClient(
   process.env.SUPABASE_SECRET_KEY!,
 );
 
-async function getFxRates(): Promise<Record<string, number>> {
-  try {
-    const res = await fetch("https://open.er-api.com/v6/latest/USD", { cache: "no-store" });
-    if (!res.ok) return {};
-    const data = await res.json();
-    return data.rates ?? {};
-  } catch {
-    return {};
-  }
-}
-
-async function fetchBtcClose(): Promise<number | null> {
-  try {
-    const res = await fetch(
-      "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT",
-      { cache: "no-store" },
-    );
-    if (!res.ok) return null;
-    const data = await res.json();
-    const price = parseFloat(data.price);
-    return Number.isFinite(price) ? price : null;
-  } catch {
-    return null;
-  }
-}
-
-async function fetchSpyClose(): Promise<number | null> {
-  const keyId = process.env.ALPACA_KEY_ID;
-  const secret = process.env.ALPACA_SECRET_KEY;
-  if (!keyId || !secret) return null;
-  try {
-    const res = await fetch(
-      "https://data.alpaca.markets/v2/stocks/SPY/bars/latest?feed=iex",
-      { cache: "no-store", headers: { "APCA-API-KEY-ID": keyId, "APCA-API-SECRET-KEY": secret } },
-    );
-    if (!res.ok) return null;
-    const data = await res.json() as { bar?: { c: number } };
-    return data.bar?.c ?? null;
-  } catch {
-    return null;
-  }
-}
-
+/**
+ * GET — returns the active baseline. If none exists yet, auto-derives one from
+ * the earliest snapshot in portfolio_snapshots/crypto_snapshots and persists it.
+ * If both tables are empty (brand-new install), returns `{ baseline: null }`.
+ */
 export async function GET() {
-  const { data, error } = await supabase
+  // 1. Look up existing current baseline first.
+  const existing = await supabase
     .from("analytics_baseline")
     .select("snapshot")
     .eq("is_current", true)
     .maybeSingle();
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ baseline: (data?.snapshot ?? null) as AnalyticsBaseline | null });
-}
 
-export async function POST() {
-  // Pull current state from app_data KV
+  if (existing.error) {
+    return NextResponse.json({ error: existing.error.message }, { status: 500 });
+  }
+  if (existing.data) {
+    return NextResponse.json({
+      baseline: existing.data.snapshot as AnalyticsBaseline,
+    });
+  }
+
+  // 2. Auto-derive. Read snapshot streams from the KV `app_data` table since
+  //    that's where the client + cron currently store them.
   const { data: rows, error: readErr } = await supabase
     .from("app_data")
     .select("key, value")
-    .in("key", ["portfolio_holdings", "crypto_csv_text", "crypto_stablecoin_tags", "crypto_prices"]);
-  if (readErr) return NextResponse.json({ error: readErr.message }, { status: 500 });
+    .in("key", ["portfolio_snapshots", "crypto_snapshots"]);
+
+  if (readErr) {
+    return NextResponse.json({ error: readErr.message }, { status: 500 });
+  }
 
   const kv: Record<string, string> = {};
   for (const r of rows ?? []) kv[r.key] = r.value;
-  const parse = <T,>(k: string, fb: T): T => { try { return kv[k] ? JSON.parse(kv[k]) : fb; } catch { return fb; } };
+  const parse = <T,>(k: string, fb: T): T => {
+    try {
+      return kv[k] ? (JSON.parse(kv[k]) as T) : fb;
+    } catch {
+      return fb;
+    }
+  };
 
-  const holdings = parse<PortfolioHolding[]>("portfolio_holdings", []);
-  const csvText = parse<string>("crypto_csv_text", "");
-  const tags = parse<Record<string, boolean>>("crypto_stablecoin_tags", {});
-  const cachedPrices = parse<{ prices: Record<string, number> }>("crypto_prices", { prices: {} });
+  const portfolioSnapshots = parse<SnapshotRow[]>("portfolio_snapshots", []);
+  const cryptoSnapshots = parse<SnapshotRow[]>("crypto_snapshots", []);
 
-  // Build crypto holdings with live prices applied
-  let cryptoHoldings = csvText ? parseAndComputeHoldings(csvText) : [];
-  for (const h of cryptoHoldings) {
-    const p = cachedPrices.prices?.[h.token];
-    if (p != null && h.amount > 0) h.currentValueUsd = p * h.amount;
+  const anchorDate = deriveAnchorDate(portfolioSnapshots, cryptoSnapshots);
+  if (!anchorDate) {
+    return NextResponse.json({ baseline: null });
   }
-  cryptoHoldings = applyStablecoinTags(cryptoHoldings, tags);
 
-  // Benchmarks + FX
-  const [spy, btc, rates] = await Promise.all([fetchSpyClose(), fetchBtcClose(), getFxRates()]);
-  if (spy == null || btc == null) {
+  const totals = anchorTotalsFromSnapshots({
+    portfolioSnapshots,
+    cryptoSnapshots,
+    anchorDate,
+  });
+
+  // 3. Fetch historical benchmark prices for the anchor day (single-day fetch).
+  const cgKey = process.env.COINGECKO_API_KEY;
+  const apcaId = process.env.ALPACA_KEY_ID;
+  const apcaSecret = process.env.ALPACA_SECRET_KEY;
+  if (!cgKey || !apcaId || !apcaSecret) {
     return NextResponse.json(
-      { error: "Could not fetch SPY or BTC price; baseline not written" },
+      { error: "Missing COINGECKO_API_KEY or ALPACA_* env vars" },
+      { status: 500 },
+    );
+  }
+
+  let btcClose = 0;
+  let spyClose = 0;
+  try {
+    const [btcBars, spyBars] = await Promise.all([
+      fetchBtcDailyCloses({ fromDay: anchorDate, toDay: anchorDate, apiKey: cgKey }),
+      fetchSpyDailyCloses({
+        fromDay: anchorDate,
+        toDay: anchorDate,
+        apcaKeyId: apcaId,
+        apcaSecret,
+      }),
+    ]);
+    btcClose = btcBars[0]?.close ?? 0;
+    spyClose = spyBars[0]?.close ?? 0;
+  } catch (e) {
+    return NextResponse.json(
+      { error: `Benchmark fetch failed: ${String(e)}` },
       { status: 502 },
     );
   }
 
-  const fxToUsd = (amount: number, currency: string) => {
-    if (currency === "USD" || !rates[currency]) return amount;
-    return amount / rates[currency];
-  };
+  if (btcClose <= 0 || spyClose <= 0) {
+    return NextResponse.json(
+      { error: `No benchmark close found for anchor date ${anchorDate}` },
+      { status: 502 },
+    );
+  }
 
-  const today = new Date().toLocaleDateString("en-CA", { timeZone: "Australia/Sydney" });
-  const baseline = captureBaseline({ date: today, holdings, cryptoHoldings, spy, btc, fxToUsd });
+  // 4. Persist.
+  const baseline = buildBaselineFromSnapshots({
+    anchorDate,
+    totals,
+    btcClose,
+    spyClose,
+  });
 
-  // Write — mark previous as inactive, insert new as current
-  await supabase.from("analytics_baseline").update({ is_current: false }).eq("is_current", true);
   const { error: insErr } = await supabase.from("analytics_baseline").insert({
-    date: today,
+    date: anchorDate,
     snapshot: baseline,
     is_current: true,
   });
-  if (insErr) return NextResponse.json({ error: insErr.message }, { status: 500 });
+  if (insErr) {
+    return NextResponse.json({ error: insErr.message }, { status: 500 });
+  }
 
-  // Mirror to KV for client reads
+  // Mirror to KV (existing contract — some client code reads this key).
   await supabase.from("app_data").upsert(
-    { key: "analytics_baseline", value: JSON.stringify(baseline), updated_at: new Date().toISOString() },
+    {
+      key: "analytics_baseline",
+      value: JSON.stringify(baseline),
+      updated_at: new Date().toISOString(),
+    },
     { onConflict: "key" },
   );
 
