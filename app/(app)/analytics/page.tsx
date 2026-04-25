@@ -579,6 +579,13 @@ export default function AnalyticsPage() {
         <RebuildHistoryButton
           baselineDate={baseline.date}
           onRebuilt={() => {
+            // Backfill replaces baseline AND perf snapshots; refetch both.
+            fetch("/api/analytics/baseline")
+              .then((r) => r.json())
+              .then((j) => {
+                if (j.baseline) setBaseline(j.baseline);
+              })
+              .catch(() => {});
             fetch("/api/analytics/performance-snapshots")
               .then((r) => r.json())
               .then((j) => setPerfSnapshots(j.snapshots ?? []))

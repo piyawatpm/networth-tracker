@@ -10,7 +10,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import type {
-  AnalyticsBaseline,
   CryptoDeposit,
   PortfolioTransaction,
 } from "@/lib/utils/types";
@@ -24,6 +23,7 @@ import {
   type SnapshotRow,
   type BenchmarkBar,
 } from "@/lib/utils/analytics-backfill";
+import { deriveAndPersistBaseline } from "@/lib/utils/analytics-derive";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -57,33 +57,39 @@ function yesterdaySydney(): string {
 }
 
 export async function POST() {
-  // 1. Fetch current baseline + id (need id for cascade scoping).
-  const { data: baselineRow, error: baselineErr } = await supabase
-    .from("analytics_baseline")
-    .select("id, date, snapshot")
-    .eq("is_current", true)
-    .maybeSingle();
-
-  if (baselineErr) {
-    return NextResponse.json({ error: baselineErr.message }, { status: 500 });
+  // 1. Re-derive baseline from earliest snapshot (replacing any existing
+  //    current baseline). This is what makes "Rebuild history" actually
+  //    rebuild — without it, we'd be anchored to whatever date the user
+  //    last clicked the old (now-deleted) Reset button.
+  const derived = await deriveAndPersistBaseline({ supabase });
+  if (!derived.ok) {
+    return NextResponse.json({ error: derived.error }, { status: derived.status });
   }
-  if (!baselineRow) {
-    return NextResponse.json(
-      { error: "No active baseline. Wait for cron to run once, then retry." },
-      { status: 400 },
-    );
-  }
-  const baseline = baselineRow.snapshot as AnalyticsBaseline;
+  const baseline = derived.baseline;
   const anchorDate = baseline.date;
   const toDay = yesterdaySydney();
   if (anchorDate > toDay) {
+    // Snapshots only exist for today — no historical days to backfill yet.
+    return NextResponse.json({ ok: true, daysWritten: 0, from: anchorDate, to: toDay });
+  }
+
+  // 2. Look up the freshly-inserted baseline's id (we need the id for the
+  //    foreign key in performance_snapshots inserts).
+  const { data: baselineRow, error: baselineErr } = await supabase
+    .from("analytics_baseline")
+    .select("id")
+    .eq("is_current", true)
+    .maybeSingle();
+  if (baselineErr || !baselineRow) {
     return NextResponse.json(
-      { error: `Baseline date ${anchorDate} is in the future.` },
-      { status: 400 },
+      { error: baselineErr?.message ?? "Could not look up new baseline id." },
+      { status: 500 },
     );
   }
 
-  // 2. Wipe existing rows for this baseline (idempotency).
+  // 3. Wipe any pre-existing perf rows scoped to the new baseline id.
+  //    (Should be empty — fresh insert — but the wipe makes the endpoint
+  //    fully idempotent regardless of partial prior runs.)
   const { error: delErr } = await supabase
     .from("performance_snapshots")
     .delete()
@@ -92,7 +98,7 @@ export async function POST() {
     return NextResponse.json({ error: delErr.message }, { status: 500 });
   }
 
-  // 3. Read snapshots + txns + crypto deposits.
+  // 4. Read snapshots + txns + crypto deposits.
   const { data: kvRows, error: kvErr } = await supabase
     .from("app_data")
     .select("key, value")
@@ -131,14 +137,14 @@ export async function POST() {
     createdAt: 0,
   }));
 
-  // 4. FX rates for txn currency → USD conversion.
+  // 5. FX rates for txn currency → USD conversion.
   const rates = await getFxRates();
   const fxToUsd = (amount: number, currency: string) => {
     if (currency === "USD" || !rates[currency]) return amount;
     return amount / rates[currency];
   };
 
-  // 5. Fetch historical benchmarks for [anchorDate, toDay].
+  // 6. Fetch historical benchmarks for [anchorDate, toDay].
   const cgKey = process.env.COINGECKO_API_KEY;
   const apcaId = process.env.ALPACA_KEY_ID;
   const apcaSecret = process.env.ALPACA_SECRET_KEY;
@@ -168,7 +174,7 @@ export async function POST() {
     );
   }
 
-  // 6. Compute per-day rows.
+  // 7. Compute per-day rows.
   const dailyCombined = dailyCombinedUsd({
     portfolioSnapshots,
     cryptoSnapshots,
@@ -199,7 +205,7 @@ export async function POST() {
     return NextResponse.json({ ok: true, daysWritten: 0, from: anchorDate, to: toDay });
   }
 
-  // 7. Insert in chunks (Supabase limit = 1000 per insert).
+  // 8. Insert in chunks (Supabase limit = 1000 per insert).
   const snakeRows = rows.map((r) => ({
     baseline_id: baselineRow.id,
     baseline_date: baseline.date,
