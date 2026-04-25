@@ -33,7 +33,7 @@ export interface BenchmarkBar {
 }
 
 export interface PerfBackfillRow {
-  /** ISO timestamp at ~EOD Sydney for the day. */
+  /** ISO timestamp at noon UTC for the day (sortable daily anchor). */
   timestamp: string;
   portfolioUsd: number;
   cryptoUsd: number;
@@ -67,7 +67,7 @@ export function deriveAnchorDate(
 }
 
 // ---------------------------------------------------------------------------
-// 2. Totals at a specific day (first snapshot on or after `day`)
+// 2. Anchor-day totals (last tick of `anchorDate`, per stream)
 // ---------------------------------------------------------------------------
 
 /**
