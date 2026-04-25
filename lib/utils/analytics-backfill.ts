@@ -71,9 +71,10 @@ export function deriveAnchorDate(
 // ---------------------------------------------------------------------------
 
 /**
- * For each stream, pick the FIRST snapshot on or after `day` (sorted asc).
- * Portfolio uses valueWithSuper if present (matches chart's dailyValuesUsd
- * handling); crypto uses value directly.
+ * For each stream, pick the LAST snapshot whose date == anchorDate (matching
+ * dailyCombinedUsd's lastByDay). A stream with no snapshot on the anchor day
+ * contributes 0 — it simply wasn't being tracked yet. Portfolio uses
+ * `valueWithSuper ?? value`; crypto uses `value`.
  */
 export function anchorTotalsFromSnapshots(params: {
   portfolioSnapshots: SnapshotRow[];
@@ -82,18 +83,23 @@ export function anchorTotalsFromSnapshots(params: {
 }): { portfolioUsd: number; cryptoUsd: number; combinedUsd: number } {
   const { portfolioSnapshots, cryptoSnapshots, anchorDate } = params;
 
-  const pickFirst = (rows: SnapshotRow[], useSuper: boolean): number => {
+  // Last-tick-on-anchor-day per stream. Matches dailyCombinedUsd's lastByDay
+  // semantics so the anchor-day row computes a true 0% for portfolioPct.
+  // Stream with no snapshot on anchorDate contributes 0 — that stream simply
+  // hadn't started being tracked yet on the anchor day.
+  const pickOnDay = (rows: SnapshotRow[], useSuper: boolean): number => {
     const sorted = [...rows].sort((a, b) => a.date.localeCompare(b.date));
+    let result = 0;
     for (const r of sorted) {
-      if (r.date.slice(0, 10) >= anchorDate) {
-        return useSuper ? (r.valueWithSuper ?? r.value) : r.value;
+      if (r.date.slice(0, 10) === anchorDate) {
+        result = useSuper ? (r.valueWithSuper ?? r.value) : r.value;
       }
     }
-    return 0;
+    return result;
   };
 
-  const portfolioUsd = pickFirst(portfolioSnapshots, true);
-  const cryptoUsd = pickFirst(cryptoSnapshots, false);
+  const portfolioUsd = pickOnDay(portfolioSnapshots, true);
+  const cryptoUsd = pickOnDay(cryptoSnapshots, false);
   return { portfolioUsd, cryptoUsd, combinedUsd: portfolioUsd + cryptoUsd };
 }
 
@@ -220,9 +226,9 @@ export function benchmarkByDay(bars: BenchmarkBar[]): Map<string, number> {
 
 /**
  * Build backfill rows for every day in [anchorDate, toDay]. Timestamp is
- * set to EOD Sydney (21:00 UTC ~ early morning Sydney next day, close enough
- * for day-keyed data). For the anchor day, all pcts are 0 and combined
- * equals anchor totals.
+ * set to noon UTC for the day (sortable, unambiguous; cron 15-min ticks for
+ * today land later than these backfilled timestamps). For the anchor day,
+ * all pcts are 0 and combined equals anchor totals.
  */
 export function computeDailyPerfRows(params: {
   anchorDate: string;
@@ -278,9 +284,9 @@ export function computeDailyPerfRows(params: {
     const spyPct = anchorBenchmarks.spy > 0 ? (spy / anchorBenchmarks.spy - 1) * 100 : null;
 
     out.push({
-      // EOD Sydney ≈ 14:00 UTC (AEST) / 13:00 UTC (AEDT). Use 14:00 UTC for
-      // consistency — it's within the trading day boundary and unambiguous.
-      timestamp: `${day}T14:00:00Z`,
+      // Noon UTC — daily anchor timestamp; falls before any same-day cron
+      // 15-min tick (which uses the actual run time, typically much later).
+      timestamp: `${day}T12:00:00Z`,
       portfolioUsd: combined.portfolio,
       cryptoUsd: combined.crypto,
       combinedUsd: combined.combined,
