@@ -22,6 +22,7 @@ import {
   fetchBtcDailyCloses,
   fetchSpyDailyCloses,
   type SnapshotRow,
+  type BenchmarkBar,
 } from "@/lib/utils/analytics-backfill";
 
 export const dynamic = "force-dynamic";
@@ -92,10 +93,13 @@ export async function POST() {
   }
 
   // 3. Read snapshots + txns + crypto deposits.
-  const { data: kvRows } = await supabase
+  const { data: kvRows, error: kvErr } = await supabase
     .from("app_data")
     .select("key, value")
     .in("key", ["portfolio_snapshots", "crypto_snapshots", "portfolio_transactions"]);
+  if (kvErr) {
+    return NextResponse.json({ error: kvErr.message }, { status: 500 });
+  }
 
   const kv: Record<string, string> = {};
   for (const r of kvRows ?? []) kv[r.key] = r.value;
@@ -111,9 +115,12 @@ export async function POST() {
   const cryptoSnapshots = parse<SnapshotRow[]>("crypto_snapshots", []);
   const portfolioTxns = parse<PortfolioTransaction[]>("portfolio_transactions", []);
 
-  const { data: depositRows } = await supabase
+  const { data: depositRows, error: depErr } = await supabase
     .from("crypto_deposits")
     .select("id, date, token, amount, usd_value_at_deposit, kind");
+  if (depErr) {
+    return NextResponse.json({ error: depErr.message }, { status: 500 });
+  }
   const cryptoDeposits: CryptoDeposit[] = (depositRows ?? []).map((r) => ({
     id: r.id as string,
     date: r.date as string,
@@ -142,8 +149,8 @@ export async function POST() {
     );
   }
 
-  let btcBars;
-  let spyBars;
+  let btcBars: BenchmarkBar[];
+  let spyBars: BenchmarkBar[];
   try {
     [btcBars, spyBars] = await Promise.all([
       fetchBtcDailyCloses({ fromDay: anchorDate, toDay, apiKey: cgKey }),
