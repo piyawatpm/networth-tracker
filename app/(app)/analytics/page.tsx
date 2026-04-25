@@ -47,7 +47,7 @@ import { HoldingsPnlTable } from "./_components/holdings-pnl-table";
 import { TopGainersLosers } from "./_components/top-gainers-losers";
 import { AssetAllocationDonut } from "./_components/asset-allocation-donut";
 import { NoBaselineEmpty } from "./_components/no-baseline-empty";
-import { ResetBaselineButton } from "./_components/reset-baseline-button";
+import { RebuildHistoryButton } from "./_components/rebuild-history-button";
 
 // ---------------------------------------------------------------------------
 // Snapshot shape
@@ -576,9 +576,14 @@ export default function AnalyticsPage() {
   return (
     <div className="space-y-6 pb-12">
       <div className="flex justify-end">
-        <ResetBaselineButton
+        <RebuildHistoryButton
           baselineDate={baseline.date}
-          onReset={() => fetch("/api/analytics/baseline").then((r) => r.json()).then((j) => setBaseline(j.baseline))}
+          onRebuilt={() => {
+            fetch("/api/analytics/performance-snapshots")
+              .then((r) => r.json())
+              .then((j) => setPerfSnapshots(j.snapshots ?? []))
+              .catch(() => {});
+          }}
         />
       </div>
 
