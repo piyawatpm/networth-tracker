@@ -498,6 +498,81 @@ export async function GET(request: Request) {
       log.push(`Table mirror failed (KV write succeeded): ${String(e)}`);
     }
 
+    // ── Auto-derive baseline on first-ever cron run (no manual reset needed). ──
+    try {
+      const { data: hasBaseline } = await supabase
+        .from("analytics_baseline")
+        .select("id")
+        .eq("is_current", true)
+        .maybeSingle();
+
+      if (!hasBaseline) {
+        const { deriveAnchorDate, anchorTotalsFromSnapshots, buildBaselineFromSnapshots, fetchBtcDailyCloses, fetchSpyDailyCloses } =
+          await import("@/lib/utils/analytics-backfill");
+        type SnapshotLike = { date: string; value?: number; valueWithSuper?: number };
+
+        // Snapshots were just appended in the updates[] array — merge with KV.
+        const portUpdate = updates.find((u) => u.key === "portfolio_snapshots");
+        const cryUpdate = updates.find((u) => u.key === "crypto_snapshots");
+        const mergedPort = (portUpdate ? JSON.parse(portUpdate.value) : portfolioSnapshots) as SnapshotLike[];
+        const mergedCry = (cryUpdate ? JSON.parse(cryUpdate.value) : cryptoSnapshots) as SnapshotLike[];
+        const mergedPortNormalized = mergedPort.map((r) => ({
+          date: r.date,
+          value: r.value ?? 0,
+          valueWithSuper: r.valueWithSuper,
+        }));
+        const mergedCryNormalized = mergedCry.map((r) => ({
+          date: r.date,
+          value: r.value ?? 0,
+        }));
+
+        const anchor = deriveAnchorDate(mergedPortNormalized, mergedCryNormalized);
+        if (anchor && process.env.COINGECKO_API_KEY && process.env.ALPACA_KEY_ID && process.env.ALPACA_SECRET_KEY) {
+          const totals = anchorTotalsFromSnapshots({
+            portfolioSnapshots: mergedPortNormalized,
+            cryptoSnapshots: mergedCryNormalized,
+            anchorDate: anchor,
+          });
+          const [btcBars, spyBars] = await Promise.all([
+            fetchBtcDailyCloses({ fromDay: anchor, toDay: anchor, apiKey: process.env.COINGECKO_API_KEY }),
+            fetchSpyDailyCloses({
+              fromDay: anchor,
+              toDay: anchor,
+              apcaKeyId: process.env.ALPACA_KEY_ID,
+              apcaSecret: process.env.ALPACA_SECRET_KEY,
+            }),
+          ]);
+          const btcClose = btcBars[0]?.close ?? 0;
+          const spyClose = spyBars[0]?.close ?? 0;
+          if (btcClose > 0 && spyClose > 0) {
+            const baseline = buildBaselineFromSnapshots({ anchorDate: anchor, totals, btcClose, spyClose });
+            await supabase.from("analytics_baseline").insert({
+              date: anchor,
+              snapshot: baseline,
+              is_current: true,
+            });
+            await supabase.from("app_data").upsert(
+              {
+                key: "analytics_baseline",
+                value: JSON.stringify(baseline),
+                updated_at: new Date().toISOString(),
+              },
+              { onConflict: "key" },
+            );
+            log.push(`Auto-derived baseline on first run: anchor=${anchor} combined=$${totals.combinedUsd.toFixed(0)}`);
+          } else {
+            log.push(`Auto-derive baseline: skipped — btc=${btcClose} spy=${spyClose} (fetch returned no data)`);
+          }
+        } else if (!anchor) {
+          log.push(`Auto-derive baseline: skipped — no snapshots yet`);
+        } else {
+          log.push(`Auto-derive baseline: skipped — missing env keys`);
+        }
+      }
+    } catch (e) {
+      log.push(`Auto-derive baseline failed: ${String(e)}`);
+    }
+
     // ── Performance snapshot (portfolio/SPY/BTC % since baseline) ──
     // Skipped silently if no active baseline exists. Reads crypto_deposits
     // + portfolio_transactions to subtract post-baseline cash flows so the
