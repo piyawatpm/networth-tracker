@@ -300,3 +300,79 @@ export function computeDailyPerfRows(params: {
   }
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// External price fetchers (live in the same module to keep the backfill API
+// thin — they're easy to mock by replacing the module's fetch calls in tests
+// later if/when we add them)
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetch daily BTC closes (USD) from CoinGecko /market_chart/range.
+ * Inclusive of `fromDay`, inclusive of `toDay`. Requires COINGECKO_API_KEY.
+ */
+export async function fetchBtcDailyCloses(params: {
+  fromDay: string;
+  toDay: string;
+  apiKey: string;
+}): Promise<BenchmarkBar[]> {
+  const { fromDay, toDay, apiKey } = params;
+  // CoinGecko: market_chart/range uses unix seconds.
+  // `daily` interval auto-selected when range > 90 days.
+  const from = Math.floor(new Date(`${fromDay}T00:00:00Z`).getTime() / 1000);
+  const to = Math.floor(new Date(`${toDay}T23:59:59Z`).getTime() / 1000);
+  const url = `https://api.coingecko.com/api/v3/coins/bitcoin/market_chart/range?vs_currency=usd&from=${from}&to=${to}`;
+  const res = await fetch(url, {
+    cache: "no-store",
+    headers: { "x-cg-demo-api-key": apiKey },
+  });
+  if (!res.ok) {
+    throw new Error(`CoinGecko BTC fetch failed: ${res.status}`);
+  }
+  const data = (await res.json()) as { prices?: [number, number][] };
+  const bars: BenchmarkBar[] = [];
+  for (const [ms, close] of data.prices ?? []) {
+    const day = new Date(ms).toISOString().slice(0, 10);
+    bars.push({ date: day, close });
+  }
+  // Dedupe: CoinGecko returns multiple samples per day near range endpoints;
+  // keep the last close for each day.
+  const byDay = new Map<string, number>();
+  for (const b of bars) byDay.set(b.date, b.close);
+  return [...byDay.entries()]
+    .map(([date, close]) => ({ date, close }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/**
+ * Fetch daily SPY closes (USD) from Alpaca /v2/stocks/SPY/bars.
+ * Uses dividend-adjusted closes so the line reflects total return (matches
+ * the baseline benchmark convention from /api/analytics/baseline POST).
+ */
+export async function fetchSpyDailyCloses(params: {
+  fromDay: string;
+  toDay: string;
+  apcaKeyId: string;
+  apcaSecret: string;
+}): Promise<BenchmarkBar[]> {
+  const { fromDay, toDay, apcaKeyId, apcaSecret } = params;
+  const url =
+    `https://data.alpaca.markets/v2/stocks/SPY/bars?timeframe=1Day` +
+    `&start=${fromDay}T00:00:00Z&end=${toDay}T23:59:59Z` +
+    `&adjustment=all&feed=iex&limit=10000`;
+  const res = await fetch(url, {
+    cache: "no-store",
+    headers: {
+      "APCA-API-KEY-ID": apcaKeyId,
+      "APCA-API-SECRET-KEY": apcaSecret,
+    },
+  });
+  if (!res.ok) {
+    throw new Error(`Alpaca SPY fetch failed: ${res.status}`);
+  }
+  const data = (await res.json()) as { bars?: { t: string; c: number }[] };
+  return (data.bars ?? []).map((b) => ({
+    date: b.t.slice(0, 10),
+    close: b.c,
+  }));
+}
