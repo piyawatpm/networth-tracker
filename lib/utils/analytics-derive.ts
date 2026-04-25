@@ -29,6 +29,9 @@ export type DeriveResult =
  * fetch historical BTC + SPY for that day, persist to `analytics_baseline`
  * (replacing any existing current row) and mirror to `app_data` KV.
  *
+ * Reads snapshot history from the relational `snapshots` table (the full
+ * timeline) rather than the recent-only KV `app_data` blob.
+ *
  * Returns a discriminated union — caller decides whether to surface the
  * error as 4xx/5xx.
  */
@@ -39,31 +42,50 @@ export async function deriveAndPersistBaseline(params: {
 }): Promise<DeriveResult> {
   const { supabase, inflight } = params;
 
-  // 1. Read snapshot streams from KV (same place client + cron write them).
-  const { data: rows, error: readErr } = await supabase
-    .from("app_data")
-    .select("key, value")
-    .in("key", ["portfolio_snapshots", "crypto_snapshots"]);
+  // 1. Read snapshot streams from the relational `snapshots` table — the
+  //    KV `portfolio_snapshots`/`crypto_snapshots` blobs are recent-window
+  //    only (~24h) and miss historical data we need to anchor against.
+  //    `snapshots` is append-only and holds the full timeline.
+  //
+  //    Inflight snapshots passed in from cron are merged in addition to
+  //    table reads (covers the case where cron writes to KV first within
+  //    the same handler, then calls this helper before the relational
+  //    insert lands).
+  const [{ data: portRows, error: portErr }, { data: cryRows, error: cryErr }] =
+    await Promise.all([
+      supabase
+        .from("snapshots")
+        .select("date, value, value_with_super")
+        .eq("type", "portfolio")
+        .order("date", { ascending: true })
+        .limit(50000),
+      supabase
+        .from("snapshots")
+        .select("date, value")
+        .eq("type", "crypto")
+        .order("date", { ascending: true })
+        .limit(50000),
+    ]);
 
-  if (readErr) {
-    return { ok: false, status: 500, error: readErr.message };
-  }
+  if (portErr) return { ok: false, status: 500, error: portErr.message };
+  if (cryErr) return { ok: false, status: 500, error: cryErr.message };
 
-  const kv: Record<string, string> = {};
-  for (const r of rows ?? []) kv[r.key] = r.value;
-  const parse = <T,>(k: string, fb: T): T => {
-    try {
-      return kv[k] ? (JSON.parse(kv[k]) as T) : fb;
-    } catch {
-      return fb;
-    }
-  };
+  const tablePort: SnapshotRow[] = (portRows ?? []).map((r) => ({
+    date: r.date as string,
+    value: Number(r.value),
+    valueWithSuper: r.value_with_super != null ? Number(r.value_with_super) : undefined,
+  }));
+  const tableCry: SnapshotRow[] = (cryRows ?? []).map((r) => ({
+    date: r.date as string,
+    value: Number(r.value),
+  }));
 
-  // Merge in-flight (cron's pending writes) with KV.
-  const portfolioSnapshots =
-    inflight?.portfolioSnapshots ?? parse<SnapshotRow[]>("portfolio_snapshots", []);
-  const cryptoSnapshots =
-    inflight?.cryptoSnapshots ?? parse<SnapshotRow[]>("crypto_snapshots", []);
+  const portfolioSnapshots = inflight?.portfolioSnapshots
+    ? [...tablePort, ...inflight.portfolioSnapshots]
+    : tablePort;
+  const cryptoSnapshots = inflight?.cryptoSnapshots
+    ? [...tableCry, ...inflight.cryptoSnapshots]
+    : tableCry;
 
   const anchorDate = deriveAnchorDate(portfolioSnapshots, cryptoSnapshots);
   if (!anchorDate) {

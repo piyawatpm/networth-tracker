@@ -98,28 +98,55 @@ export async function POST() {
     return NextResponse.json({ error: delErr.message }, { status: 500 });
   }
 
-  // 4. Read snapshots + txns + crypto deposits.
-  const { data: kvRows, error: kvErr } = await supabase
-    .from("app_data")
-    .select("key, value")
-    .in("key", ["portfolio_snapshots", "crypto_snapshots", "portfolio_transactions"]);
-  if (kvErr) {
-    return NextResponse.json({ error: kvErr.message }, { status: 500 });
-  }
+  // 4. Read snapshots from relational `snapshots` table (full history;
+  //    KV blob is recent-only). Read txns from KV (still primary source).
+  const [
+    { data: portRows, error: portErr },
+    { data: cryRows, error: cryErr },
+    { data: kvRows, error: kvErr },
+  ] = await Promise.all([
+    supabase
+      .from("snapshots")
+      .select("date, value, value_with_super")
+      .eq("type", "portfolio")
+      .order("date", { ascending: true })
+      .limit(50000),
+    supabase
+      .from("snapshots")
+      .select("date, value")
+      .eq("type", "crypto")
+      .order("date", { ascending: true })
+      .limit(50000),
+    supabase
+      .from("app_data")
+      .select("key, value")
+      .in("key", ["portfolio_transactions"]),
+  ]);
 
-  const kv: Record<string, string> = {};
-  for (const r of kvRows ?? []) kv[r.key] = r.value;
-  const parse = <T,>(k: string, fb: T): T => {
+  if (portErr) return NextResponse.json({ error: portErr.message }, { status: 500 });
+  if (cryErr) return NextResponse.json({ error: cryErr.message }, { status: 500 });
+  if (kvErr) return NextResponse.json({ error: kvErr.message }, { status: 500 });
+
+  const portfolioSnapshots: SnapshotRow[] = (portRows ?? []).map((r) => ({
+    date: r.date as string,
+    value: Number(r.value),
+    valueWithSuper: r.value_with_super != null ? Number(r.value_with_super) : undefined,
+  }));
+  const cryptoSnapshots: SnapshotRow[] = (cryRows ?? []).map((r) => ({
+    date: r.date as string,
+    value: Number(r.value),
+  }));
+
+  const txKv: Record<string, string> = {};
+  for (const r of kvRows ?? []) txKv[r.key] = r.value;
+  const parseKv = <T,>(k: string, fb: T): T => {
     try {
-      return kv[k] ? (JSON.parse(kv[k]) as T) : fb;
+      return txKv[k] ? (JSON.parse(txKv[k]) as T) : fb;
     } catch {
       return fb;
     }
   };
-
-  const portfolioSnapshots = parse<SnapshotRow[]>("portfolio_snapshots", []);
-  const cryptoSnapshots = parse<SnapshotRow[]>("crypto_snapshots", []);
-  const portfolioTxns = parse<PortfolioTransaction[]>("portfolio_transactions", []);
+  const portfolioTxns = parseKv<PortfolioTransaction[]>("portfolio_transactions", []);
 
   const { data: depositRows, error: depErr } = await supabase
     .from("crypto_deposits")
