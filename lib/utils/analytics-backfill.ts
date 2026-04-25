@@ -346,8 +346,8 @@ export async function fetchBtcDailyCloses(params: {
 
 /**
  * Fetch daily SPY closes (USD) from Alpaca /v2/stocks/SPY/bars.
- * Uses dividend-adjusted closes so the line reflects total return (matches
- * the baseline benchmark convention from /api/analytics/baseline POST).
+ * Uses `adjustment=all` so closes are dividend-adjusted — i.e., the line
+ * reflects total return (TR) rather than price return.
  */
 export async function fetchSpyDailyCloses(params: {
   fromDay: string;
