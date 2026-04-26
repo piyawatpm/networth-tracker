@@ -277,40 +277,8 @@ export function normalizeExpenseEntry(e: Record<string, unknown>): ExpenseEntry 
 }
 
 // ---------------------------------------------------------------------------
-// Analytics baseline + crypto deposits (see docs/.../2026-04-22-analytics-baseline-pnl-design.md)
+// Crypto deposit ledger
 // ---------------------------------------------------------------------------
-
-export interface AnalyticsBaseline {
-  /** "YYYY-MM-DD" — the day the user reset the baseline. */
-  date: string;
-  /** Epoch ms when the baseline was captured. */
-  createdAt: number;
-  /** Per-portfolio-holding snapshot keyed by holding.id. */
-  portfolio: Record<string, {
-    units: number;
-    priceUsd: number;
-    valueUsd: number;
-    currency: Currency;
-    accountType?: AccountType;
-  }>;
-  /** Per-crypto-token snapshot keyed by token symbol (matches CryptoHolding.token). */
-  crypto: Record<string, {
-    amount: number;
-    priceUsd: number;
-    valueUsd: number;
-  }>;
-  /** Benchmark close prices on baseline_date. */
-  benchmarks: {
-    spy: number;  // Alpaca `adjustment=all` close (dividend-adjusted → TR equivalent)
-    btc: number;
-  };
-  /** Rolling totals for convenience. */
-  totals: {
-    portfolioUsd: number;
-    cryptoUsd: number;
-    combinedUsd: number;
-  };
-}
 
 export interface CryptoDeposit {
   id: string;
