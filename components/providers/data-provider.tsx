@@ -62,7 +62,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     async function load() {
       try {
-        // Step 1: Always load app_data KV first (guaranteed to have data)
+        // Step 1: Always load app_data KV first as fallback.
         const { data: kvData } = await supabase
           .from("app_data")
           .select("key, value");
@@ -70,129 +70,118 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
           cache.current.set(row.key, row.value);
         }
 
-        // Step 2: Try loading from relational tables — override KV if tables have data
-        let tablesAvailable = true;
-
-        // Probe one table to see if migration has been run
-        const { error: probeError } = await supabase
-          .from("income_entries")
-          .select("id", { count: "exact", head: true });
-
-        if (probeError) {
-          // Tables don't exist yet — keep using app_data KV data (already loaded)
-          tablesAvailable = false;
-          console.info("[DataProvider] New tables not found, using app_data KV fallback");
-        }
-
-        if (tablesAvailable) {
-          // Check if tables actually have data (migration endpoint may not have been run)
-          const { count } = await supabase
-            .from("income_entries")
-            .select("id", { count: "exact", head: true });
-          const tablesHaveData = (count ?? 0) > 0;
-
-          if (tablesHaveData) {
-            // Paginated fetch helper — Supabase caps at max_rows (default 1000) per query
-            const fetchAll = async (
-              table: string,
-              orderCol = "date",
-              ascending = true,
-            ): Promise<Record<string, unknown>[]> => {
-              const PAGE = 1000;
-              const all: Record<string, unknown>[] = [];
-              for (let from = 0; ; from += PAGE) {
-                const { data, error } = await supabase
-                  .from(table)
-                  .select("*")
-                  .order(orderCol, { ascending })
-                  .range(from, from + PAGE - 1);
-                if (error || !data || data.length === 0) break;
-                all.push(...(data as Record<string, unknown>[]));
-                if (data.length < PAGE) break;
-              }
-              return all;
-            };
-
-            // Tables exist AND have data — load from them
-            await Promise.all([
-              // Entity tables (paginated for safety)
-              ...Object.entries(ENTITY_TABLES).map(async ([key, cfg]) => {
-                const rows = await fetchAll(cfg.table, "id");
-                const camelRows = rows.map((r) => rowToCamel(r));
-                if (camelRows.length > 0) {
-                  cache.current.set(key, JSON.stringify(camelRows));
-                }
-                console.log(`[DataProvider] ${key}: ${camelRows.length} rows from table`);
-              }),
-
-              // Snapshots (paginated — can be 1000s per type)
-              (async () => {
-                const rows = await fetchAll("snapshots", "date");
-                const all = rows.map((r) => rowToCamel(r));
-                console.log(`[DataProvider] snapshots: ${all.length} total rows from table`);
-                if (all.length > 0) {
-                  for (const [key, type] of Object.entries(SNAPSHOT_KEYS)) {
-                    const filtered = all
-                      .filter((s) => s.type === type)
-                      .map((s) => {
-                        const {
-                          id: _id,
-                          type: _type,
-                          createdAt: _ca,
-                          ...rest
-                        } = s as Record<string, unknown>;
-                        return rest;
-                      });
-                    console.log(`[DataProvider] ${key}: ${filtered.length} snapshots`);
-                    if (filtered.length > 0) {
-                      cache.current.set(key, JSON.stringify(filtered));
-                    }
-                  }
-                }
-              })(),
-
-              // Custom categories
-              (async () => {
-                const { data } = await supabase
-                  .from("custom_categories")
-                  .select("*");
-                if (data && data.length > 0) {
-                  for (const [key, kind] of Object.entries(CATEGORY_KEYS)) {
-                    const filtered = data
-                      .filter((c) => c.kind === kind)
-                      .map(({ kind: _, ...rest }) => rest);
-                    if (filtered.length > 0) {
-                      cache.current.set(key, JSON.stringify(filtered));
-                    }
-                  }
-                }
-              })(),
-
-              // Cron logs
-              (async () => {
-                const { data } = await supabase
-                  .from("cron_logs")
-                  .select("*")
-                  .order("created_at", { ascending: false })
-                  .limit(30);
-                if (data && data.length > 0) {
-                  const logs = data.map((r) => ({
-                    date: r.date,
-                    timestamp: r.timestamp,
-                    success: r.success,
-                    log:
-                      typeof r.log === "string" ? JSON.parse(r.log) : r.log,
-                  }));
-                  cache.current.set("cron_log", JSON.stringify(logs));
-                }
-              })(),
-            ]);
-          } else {
-            console.info("[DataProvider] Tables exist but are empty — using app_data KV fallback. Run /api/migrate to populate tables.");
+        // Paginated fetch helper — Supabase caps at max_rows (default 1000).
+        const fetchAll = async (
+          table: string,
+          orderCol = "date",
+          ascending = true,
+        ): Promise<Record<string, unknown>[]> => {
+          const PAGE = 1000;
+          const all: Record<string, unknown>[] = [];
+          for (let from = 0; ; from += PAGE) {
+            const { data, error } = await supabase
+              .from(table)
+              .select("*")
+              .order(orderCol, { ascending })
+              .range(from, from + PAGE - 1);
+            if (error || !data || data.length === 0) break;
+            all.push(...(data as Record<string, unknown>[]));
+            if (data.length < PAGE) break;
           }
-        }
+          return all;
+        };
+
+        // Step 2: Each relational table-category probes & overrides
+        // independently. Tables can be populated at different rates (e.g.
+        // cron writes to snapshots even before the user adds income entries),
+        // so we don't gate on a single "migration done" check.
+        await Promise.all([
+          // 2a. Snapshots — split by type discriminator into the three KV
+          //     keys downstream code expects.
+          (async () => {
+            try {
+              const rows = await fetchAll("snapshots", "date");
+              if (rows.length === 0) return;
+              const all = rows.map((r) => rowToCamel(r));
+              for (const [key, type] of Object.entries(SNAPSHOT_KEYS)) {
+                const filtered = all
+                  .filter((s) => s.type === type)
+                  .map((s) => {
+                    const {
+                      id: _id,
+                      type: _type,
+                      createdAt: _ca,
+                      ...rest
+                    } = s as Record<string, unknown>;
+                    return rest;
+                  });
+                if (filtered.length > 0) {
+                  cache.current.set(key, JSON.stringify(filtered));
+                }
+              }
+              console.info(`[DataProvider] snapshots: ${all.length} rows from table`);
+            } catch (e) {
+              console.info(`[DataProvider] snapshots fallback to KV:`, e instanceof Error ? e.message : e);
+            }
+          })(),
+
+          // 2b. Entity tables — each one probed independently.
+          ...Object.entries(ENTITY_TABLES).map(async ([key, cfg]) => {
+            try {
+              const rows = await fetchAll(cfg.table, "id");
+              if (rows.length === 0) return;
+              const camelRows = rows.map((r) => rowToCamel(r));
+              cache.current.set(key, JSON.stringify(camelRows));
+              console.info(`[DataProvider] ${key}: ${camelRows.length} rows from table`);
+            } catch (e) {
+              console.info(`[DataProvider] ${key} fallback to KV:`, e instanceof Error ? e.message : e);
+            }
+          }),
+
+          // 2c. Custom categories — split by kind.
+          (async () => {
+            try {
+              const { data, error } = await supabase
+                .from("custom_categories")
+                .select("*");
+              if (error || !data || data.length === 0) return;
+              for (const [key, kind] of Object.entries(CATEGORY_KEYS)) {
+                const filtered = data
+                  .filter((c) => c.kind === kind)
+                  .map(({ kind: _, ...rest }) => rest);
+                if (filtered.length > 0) {
+                  cache.current.set(key, JSON.stringify(filtered));
+                }
+              }
+            } catch (e) {
+              console.info(`[DataProvider] custom_categories fallback to KV:`, e instanceof Error ? e.message : e);
+            }
+          })(),
+
+          // 2d. Cron logs.
+          (async () => {
+            try {
+              const { data, error } = await supabase
+                .from("cron_logs")
+                .select("*")
+                .order("created_at", { ascending: false })
+                .limit(30);
+              if (error || !data || data.length === 0) return;
+              const logs = data.map((r) => ({
+                date: r.date,
+                timestamp: r.timestamp,
+                success: r.success,
+                log:
+                  typeof r.log === "string" ? JSON.parse(r.log) : r.log,
+              }));
+              cache.current.set("cron_log", JSON.stringify(logs));
+            } catch (e) {
+              console.info(`[DataProvider] cron_logs fallback to KV:`, e instanceof Error ? e.message : e);
+            }
+          })(),
+        ]);
       } catch {
-        // Supabase unavailable — start with empty cache
+        // Supabase fully unavailable — start with empty cache.
       }
       setIsLoaded(true);
     }
