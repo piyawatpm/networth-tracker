@@ -23,7 +23,6 @@ import { useAlpacaWs } from "@/lib/hooks/use-alpaca-ws";
 import { useBinanceWs } from "@/lib/hooks/use-binance-ws";
 import {
   computeDailyPnl,
-  computePnlAnalysis,
   reconstructStockSnapshots,
   reconstructCryptoSnapshots,
   computeDailyPnlSeries,
@@ -42,7 +41,6 @@ import { PnlHeader } from "./_components/pnl-header";
 import { DailyCalendar } from "./_components/daily-calendar";
 import { ComparisonChart } from "./_components/comparison-chart";
 import { PnlByProduct } from "./_components/pnl-by-product";
-import { PnlAnalysisCard } from "./_components/pnl-analysis";
 import { HoldingsPnlTable } from "./_components/holdings-pnl-table";
 import { TopGainersLosers } from "./_components/top-gainers-losers";
 import { AssetAllocationDonut } from "./_components/asset-allocation-donut";
@@ -387,6 +385,22 @@ export default function AnalyticsPage() {
     return m;
   }, [twrSeries]);
 
+  // Per-day PnL $ in display currency, anchored to baseline. Delta between
+  // consecutive TWR points = that day's USD movement; convert for display.
+  // Pre-baseline days are excluded (twrSeries starts at baseline).
+  const pnlUsdByDate = useMemo(() => {
+    const m = new Map<string, number>();
+    if (!baseline || twrSeries.length === 0) return m;
+    const baselineValue = baseline.totals.combinedUsd;
+    for (let i = 0; i < twrSeries.length; i++) {
+      const p = twrSeries[i];
+      const prevValue = i > 0 ? twrSeries[i - 1].valueUsd : baselineValue;
+      const dayUsd = p.valueUsd - prevValue - p.depositsUsd;
+      m.set(p.date, convert(dayUsd, "USD"));
+    }
+    return m;
+  }, [twrSeries, baseline, convert]);
+
   // Pre-computed per-tick performance rows from the cron (15-min resolution).
   // Drives the hero chart directly — no client-side TWR recompute for the chart.
   const [perfSnapshots, setPerfSnapshots] = useState<{
@@ -549,7 +563,6 @@ export default function AnalyticsPage() {
   }, [baseline, livePortfolioHoldings, portfolioTransactions, cryptoHoldings, cryptoDeposits, convert]);
 
   // PnL analysis (win rate, cumulative profit/loss)
-  const pnlAnalysis = useMemo(() => computePnlAnalysis(last30), [last30]);
 
   // Estimated balance = sum of all portfolio + crypto values
   const estimatedBalance = useMemo(() => {
@@ -614,21 +627,23 @@ export default function AnalyticsPage() {
       </BlurFade>
 
       <BlurFade delay={D * 1.5}>
-        <DailyCalendar dailyPnl={dailyPnl} format={format} symbol={symbol} baselineDate={baseline.date} pctByDate={pctByDate} />
+        <DailyCalendar
+          dailyPnl={dailyPnl}
+          format={format}
+          symbol={symbol}
+          baselineDate={baseline.date}
+          pctByDate={pctByDate}
+          pnlUsdByDate={pnlUsdByDate}
+        />
       </BlurFade>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-        <BlurFade delay={D * 2}>
-          <PnlByProduct
-            portfolioPnl={pnlByProduct.portfolio}
-            cryptoPnl={pnlByProduct.crypto}
-            format={format}
-          />
-        </BlurFade>
-        <BlurFade delay={D * 3}>
-          <PnlAnalysisCard analysis={pnlAnalysis} format={format} />
-        </BlurFade>
-      </div>
+      <BlurFade delay={D * 2}>
+        <PnlByProduct
+          portfolioPnl={pnlByProduct.portfolio}
+          cryptoPnl={pnlByProduct.crypto}
+          format={format}
+        />
+      </BlurFade>
 
       <BlurFade delay={D * 4}>
         <AssetAllocationDonut
