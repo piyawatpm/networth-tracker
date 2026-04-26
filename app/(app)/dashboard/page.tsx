@@ -79,9 +79,13 @@ function debtRemaining(
   debt: DebtRecord,
   transactions: DebtTransaction[],
 ): number {
+  // Sum all transactions: positive = repayment (reduces debt),
+  // negative = borrowed more (increases debt). Must match the formula in
+  // app/(app)/liabilities/page.tsx and the cron snapshot writer, otherwise
+  // the dashboard's net worth diverges from the liabilities page.
   const payments = transactions
     .filter((t) => t.debtId === debt.id)
-    .reduce((sum, t) => sum + (t.amount > 0 ? t.amount : 0), 0);
+    .reduce((sum, t) => sum + t.amount, 0);
   return Math.max(0, debt.originalAmount - payments);
 }
 

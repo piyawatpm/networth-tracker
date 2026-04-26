@@ -12,6 +12,7 @@ import {
   type Time,
   CrosshairMode,
   LineStyle,
+  TickMarkType,
 } from "lightweight-charts";
 import { motion, AnimatePresence } from "motion/react";
 import { ChevronDown } from "lucide-react";
@@ -143,22 +144,66 @@ function hexToRgba(hex: string, alpha: number): string {
 function formatHoverTime(time: UTCTimestamp, period: Period): string {
   const date = new Date((time as number) * 1000);
   if (period === "1D") {
-    return date.toLocaleTimeString("en-US", {
+    // e.g. "Sat, Apr 25 · 14:30"
+    const datePart = date.toLocaleDateString("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+    });
+    const timePart = date.toLocaleTimeString("en-US", {
       hour: "2-digit",
       minute: "2-digit",
       hour12: false,
     });
+    return `${datePart} · ${timePart}`;
   }
   if (period === "1W" || period === "1M") {
+    // e.g. "Sat, Apr 25"
     return date.toLocaleDateString("en-US", {
+      weekday: "short",
       month: "short",
       day: "numeric",
     });
   }
+  // 6M / 1Y / ALL — include year for clarity
   return date.toLocaleDateString("en-US", {
     month: "short",
+    day: "numeric",
     year: "numeric",
   });
+}
+
+/**
+ * Build an x-axis tick formatter that adapts to the active period.
+ * For 1D we want time labels; for everything else we want date labels
+ * (the lib otherwise leans on time when `timeVisible` is true).
+ */
+function getTickMarkFormatter(period: Period) {
+  return (time: Time, tickType: TickMarkType): string => {
+    const date = new Date((time as number) * 1000);
+
+    if (period === "1D") {
+      return date.toLocaleTimeString("en-US", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      });
+    }
+
+    switch (tickType) {
+      case TickMarkType.Year:
+        return date.getFullYear().toString();
+      case TickMarkType.Month:
+        return date.toLocaleDateString("en-US", { month: "short" });
+      case TickMarkType.DayOfMonth:
+        return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      case TickMarkType.Time:
+      case TickMarkType.TimeWithSeconds:
+        // Non-1D periods should never show time on the axis — fall back to date
+        return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    }
+    return "";
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -204,8 +249,6 @@ export function PerformanceChart({
     type Entry = { value: number; components?: Record<string, number> };
     const byTime = new Map<UTCTimestamp, Entry>();
     for (const s of snapshots) {
-      // Skip zero/negative snapshots — they distort the y-axis range
-      if (s.value <= 0) continue;
       const cur = s.currency ?? "USD";
       const needsConvert = cur !== currency;
       const value = needsConvert
@@ -261,7 +304,7 @@ export function PerformanceChart({
   // overlay lines, and the hover lookup so every series reflects the same
   // "now" instead of diverging (main line live, overlays stuck at last cron).
   const livePoint = useMemo(() => {
-    if (currentValue <= 0 || filteredData.length === 0) return null;
+    if (filteredData.length === 0) return null;
     const liveTime = Math.floor(Date.now() / 1000) as UTCTimestamp;
     const last = filteredData[filteredData.length - 1];
     const time = (liveTime > last.time ? liveTime : last.time) as UTCTimestamp;
@@ -431,10 +474,11 @@ export function PerformanceChart({
       },
       timeScale: {
         borderVisible: false,
-        timeVisible: true,
+        timeVisible: period === "1D",
         secondsVisible: false,
         fixLeftEdge: true,
         fixRightEdge: true,
+        tickMarkFormatter: getTickMarkFormatter(period),
       },
       crosshair: {
         mode: CrosshairMode.Magnet,
@@ -565,6 +609,17 @@ export function PerformanceChart({
   // Clear stale hover info when switching periods
   useEffect(() => {
     setHoverInfo(null);
+  }, [period]);
+
+  // Re-apply x-axis formatting when period changes (chart isn't recreated).
+  useEffect(() => {
+    if (!chartRef.current) return;
+    chartRef.current.applyOptions({
+      timeScale: {
+        timeVisible: period === "1D",
+        tickMarkFormatter: getTickMarkFormatter(period),
+      },
+    });
   }, [period]);
 
   // Set data when chartData changes (both main + stacked series)
