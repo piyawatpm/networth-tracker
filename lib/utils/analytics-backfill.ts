@@ -51,19 +51,34 @@ export interface PerfBackfillRow {
 // ---------------------------------------------------------------------------
 
 /**
- * Pick the earliest Sydney date present in either snapshot stream.
- * Returns null only when both streams are empty.
+ * Pick the earliest Sydney date for which BOTH active streams have a snapshot.
+ * If only one stream has data ever, anchor on that stream's earliest date.
+ *
+ * Why MAX of stream-firsts (not MIN): when one stream starts later than the
+ * other, anchoring on the earlier date means the late-starting stream's
+ * first value (e.g. $19K of pre-existing super holdings the cron just
+ * started snapshotting) appears as a phantom gain — it's larger than the
+ * anchor combined, isn't backed by a transaction record, and gets counted
+ * as a return rather than a starting position. Anchoring where both
+ * streams have data lets each contribute a real value on day 1.
  */
 export function deriveAnchorDate(
   portfolioSnapshots: SnapshotRow[],
   cryptoSnapshots: SnapshotRow[],
 ): string | null {
-  const days: string[] = [];
-  for (const r of portfolioSnapshots) days.push(r.date.slice(0, 10));
-  for (const r of cryptoSnapshots) days.push(r.date.slice(0, 10));
-  if (days.length === 0) return null;
-  days.sort();
-  return days[0];
+  const earliest = (rows: SnapshotRow[]): string | null => {
+    if (rows.length === 0) return null;
+    let min: string | null = null;
+    for (const r of rows) {
+      const d = r.date.slice(0, 10);
+      if (min === null || d < min) min = d;
+    }
+    return min;
+  };
+  const portFirst = earliest(portfolioSnapshots);
+  const cryFirst = earliest(cryptoSnapshots);
+  if (portFirst && cryFirst) return portFirst > cryFirst ? portFirst : cryFirst;
+  return portFirst ?? cryFirst;
 }
 
 // ---------------------------------------------------------------------------
