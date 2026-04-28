@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useRef, useCallback } from "react";
-import ReactECharts from "echarts-for-react";
+import { ReactECharts, type EChartsReact } from "@/components/ui/lazy-echarts";
 import {
   Dialog,
   DialogContent,
@@ -82,8 +82,8 @@ export function InteractiveDonut({
 }: InteractiveDonutProps) {
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [modalOpen, setModalOpen] = useState(false);
-  const chartRef = useRef<ReactECharts>(null);
-  const modalChartRef = useRef<ReactECharts>(null);
+  const chartRef = useRef<EChartsReact>(null);
+  const modalChartRef = useRef<EChartsReact>(null);
 
   const toggle = useCallback((name: string) => {
     setHidden((prev) => {
@@ -143,7 +143,7 @@ export function InteractiveDonut({
     }],
   }), [visibleData]);
 
-  const makeHoverHandlers = useCallback((ref: React.RefObject<ReactECharts | null>) => ({
+  const makeHoverHandlers = useCallback((ref: React.RefObject<EChartsReact | null>) => ({
     onHover: (name: string) => {
       const instance = ref.current?.getEchartsInstance();
       if (instance) instance.dispatchAction({ type: "highlight", name });

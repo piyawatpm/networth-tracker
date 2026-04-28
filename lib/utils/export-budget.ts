@@ -1,4 +1,3 @@
-import * as XLSX from "xlsx";
 import type { IncomeEntry, ExpenseEntry } from "./types";
 import { INCOME_TYPE_LABELS, EXPENSE_TYPE_LABELS } from "./constants";
 import { getCurrencySymbol } from "./types";
@@ -12,7 +11,7 @@ interface BudgetExportData {
   convert: (amount: number, from: string, to: string) => number;
 }
 
-export function exportBudgetToXls(data: BudgetExportData) {
+export async function exportBudgetToXls(data: BudgetExportData) {
   const {
     month,
     incomeEntries,
@@ -22,6 +21,7 @@ export function exportBudgetToXls(data: BudgetExportData) {
     convert,
   } = data;
 
+  const XLSX = await import("xlsx");
   const wb = XLSX.utils.book_new();
 
   // Build the worksheet data as array of arrays

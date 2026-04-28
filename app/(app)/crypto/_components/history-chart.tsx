@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import ReactECharts from "echarts-for-react";
+import { ReactECharts } from "@/components/ui/lazy-echarts";
 import { cn } from "@/lib/utils";
 import { ECHARTS_COLORS, getCartesianBaseOption } from "@/lib/utils/echarts";
 import { BlurFade } from "@/components/ui/blur-fade";

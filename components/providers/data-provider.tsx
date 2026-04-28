@@ -62,14 +62,6 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     async function load() {
       try {
-        // Step 1: Always load app_data KV first as fallback.
-        const { data: kvData } = await supabase
-          .from("app_data")
-          .select("key, value");
-        for (const row of kvData ?? []) {
-          cache.current.set(row.key, row.value);
-        }
-
         // Paginated fetch helper — Supabase caps at max_rows (default 1000).
         const fetchAll = async (
           table: string,
@@ -91,13 +83,20 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
           return all;
         };
 
-        // Step 2: Each relational table-category probes & overrides
-        // independently. Tables can be populated at different rates (e.g.
-        // cron writes to snapshots even before the user adds income entries),
-        // so we don't gate on a single "migration done" check.
+        // Run KV + all relational queries in parallel. KV is applied last as
+        // a fallback for keys that no relational table populated, so table
+        // data still wins where both exist. cron_log is only used by the
+        // /debug page — it loads itself there to keep the cold path lean.
+        const kvPromise = supabase
+          .from("app_data")
+          .select("key, value")
+          .then(({ data }) => data ?? []);
+
+        const tableKeysSet = new Set<string>();
+
         await Promise.all([
-          // 2a. Snapshots — split by type discriminator into the three KV
-          //     keys downstream code expects.
+          // Snapshots — split by type discriminator into the three KV
+          // keys downstream code expects.
           (async () => {
             try {
               const rows = await fetchAll("snapshots", "date");
@@ -117,28 +116,28 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
                   });
                 if (filtered.length > 0) {
                   cache.current.set(key, JSON.stringify(filtered));
+                  tableKeysSet.add(key);
                 }
               }
-              console.info(`[DataProvider] snapshots: ${all.length} rows from table`);
-            } catch (e) {
-              console.info(`[DataProvider] snapshots fallback to KV:`, e instanceof Error ? e.message : e);
+            } catch {
+              // Table missing — KV fallback handles it.
             }
           })(),
 
-          // 2b. Entity tables — each one probed independently.
+          // Entity tables — each one probed independently.
           ...Object.entries(ENTITY_TABLES).map(async ([key, cfg]) => {
             try {
               const rows = await fetchAll(cfg.table, "id");
               if (rows.length === 0) return;
               const camelRows = rows.map((r) => rowToCamel(r));
               cache.current.set(key, JSON.stringify(camelRows));
-              console.info(`[DataProvider] ${key}: ${camelRows.length} rows from table`);
-            } catch (e) {
-              console.info(`[DataProvider] ${key} fallback to KV:`, e instanceof Error ? e.message : e);
+              tableKeysSet.add(key);
+            } catch {
+              // Table missing — KV fallback handles it.
             }
           }),
 
-          // 2c. Custom categories — split by kind.
+          // Custom categories — split by kind.
           (async () => {
             try {
               const { data, error } = await supabase
@@ -151,35 +150,22 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
                   .map(({ kind: _, ...rest }) => rest);
                 if (filtered.length > 0) {
                   cache.current.set(key, JSON.stringify(filtered));
+                  tableKeysSet.add(key);
                 }
               }
-            } catch (e) {
-              console.info(`[DataProvider] custom_categories fallback to KV:`, e instanceof Error ? e.message : e);
-            }
-          })(),
-
-          // 2d. Cron logs.
-          (async () => {
-            try {
-              const { data, error } = await supabase
-                .from("cron_logs")
-                .select("*")
-                .order("created_at", { ascending: false })
-                .limit(30);
-              if (error || !data || data.length === 0) return;
-              const logs = data.map((r) => ({
-                date: r.date,
-                timestamp: r.timestamp,
-                success: r.success,
-                log:
-                  typeof r.log === "string" ? JSON.parse(r.log) : r.log,
-              }));
-              cache.current.set("cron_log", JSON.stringify(logs));
-            } catch (e) {
-              console.info(`[DataProvider] cron_logs fallback to KV:`, e instanceof Error ? e.message : e);
+            } catch {
+              // Table missing — KV fallback handles it.
             }
           })(),
         ]);
+
+        // Apply KV only for keys that no relational table produced.
+        const kvRows = await kvPromise;
+        for (const row of kvRows) {
+          if (!tableKeysSet.has(row.key)) {
+            cache.current.set(row.key, row.value);
+          }
+        }
       } catch {
         // Supabase fully unavailable — start with empty cache.
       }

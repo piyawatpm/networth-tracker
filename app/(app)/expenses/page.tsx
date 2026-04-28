@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { useTheme } from "next-themes";
-import ReactECharts from "echarts-for-react";
+import { ReactECharts } from "@/components/ui/lazy-echarts";
 import { useCloudStorage } from "@/components/providers/data-provider";
 import { useCurrency } from "@/components/providers/currency-provider";
 import { useRecurringEntries } from "@/hooks/use-recurring-entries";
@@ -213,7 +213,6 @@ export default function ExpensesPage() {
     () => filterByDateRange(entries, activeDateRange),
     [entries, activeDateRange],
   );
-  const dateFilteredTotal = sumConverted(dateFilteredEntries, convert);
 
   const breakdownByType = useMemo(() => {
     const map: Record<string, number> = {};
@@ -230,6 +229,15 @@ export default function ExpensesPage() {
       }))
       .sort((a, b) => b.value - a.value);
   }, [dateFilteredEntries, convert, getLabel, getColor]);
+
+  // Total reflects only categories visible in the donut (legend toggles affect it).
+  const dateFilteredTotal = useMemo(
+    () =>
+      breakdownByType
+        .filter((item) => !hiddenCategories.has(item.type))
+        .reduce((sum, item) => sum + item.value, 0),
+    [breakdownByType, hiddenCategories],
+  );
 
   // Income for ratio
   const dateFilteredIncome = useMemo(() => {
@@ -498,12 +506,9 @@ export default function ExpensesPage() {
                   <div className="flex flex-col justify-center gap-2.5">
                     {breakdownByType.map((item) => {
                       const isHidden = hiddenCategories.has(item.type);
-                      const visibleTotal = breakdownByType
-                        .filter((d) => !hiddenCategories.has(d.type))
-                        .reduce((s, d) => s + d.value, 0);
                       const pct =
-                        !isHidden && visibleTotal > 0
-                          ? (item.value / visibleTotal) * 100
+                        !isHidden && dateFilteredTotal > 0
+                          ? (item.value / dateFilteredTotal) * 100
                           : 0;
                       const incomeRatio =
                         dateFilteredIncome > 0

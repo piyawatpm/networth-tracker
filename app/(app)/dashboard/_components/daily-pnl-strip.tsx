@@ -4,29 +4,40 @@ import { useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { BlurFade } from "@/components/ui/blur-fade";
 import { getSydneyDateString } from "@/lib/utils/timezone";
+import { useCurrency } from "@/components/providers/currency-provider";
 
 interface DailyPnlStripProps {
-  nwSnapshots: { date: string; value: number }[];
+  nwSnapshots: { date: string; value: number; currency?: string }[];
   format: (amount: number) => string;
+  /** Live total in the user's display currency — anchors "today" to the live header. */
+  currentValue?: number;
   delay: number;
 }
 
-export function DailyPnlStrip({ nwSnapshots, format, delay }: DailyPnlStripProps) {
-  const { todayPnl, todayPct, monthPnl, monthPct } = useMemo(() => {
-    if (nwSnapshots.length < 2) return { todayPnl: 0, todayPct: 0, monthPnl: 0, monthPct: 0 };
+export function DailyPnlStrip({ nwSnapshots, format, currentValue, delay }: DailyPnlStripProps) {
+  const { convert } = useCurrency();
 
-    // Build a daily map: day -> last snapshot value (last-write-wins from hourly snapshots)
+  const { todayPnl, todayPct, monthPnl, monthPct } = useMemo(() => {
+    if (nwSnapshots.length === 0 && currentValue == null) {
+      return { todayPnl: 0, todayPct: 0, monthPnl: 0, monthPct: 0 };
+    }
+
+    // Day → last snapshot value, converted to the user's display currency so
+    // PnL reacts to currency switches and uses the same units as the chart.
     const dailyMap = new Map<string, number>();
     for (const s of nwSnapshots) {
       const day = s.date.slice(0, 10);
-      dailyMap.set(day, s.value);
+      const cur = s.currency ?? "USD";
+      dailyMap.set(day, convert(s.value, cur));
     }
 
     const sortedDays = Array.from(dailyMap.keys()).sort();
     const today = getSydneyDateString();
-    const todayVal = dailyMap.get(today) ?? 0;
+    // Prefer the live value (already in user's currency) so this strip stays
+    // in lockstep with the live header instead of lagging the last cron tick.
+    const todayVal = currentValue ?? dailyMap.get(today) ?? 0;
 
-    // Find previous day value (the day before today that has data)
+    // Yesterday's close — last snapshot before today.
     let prevDayVal = 0;
     for (let i = sortedDays.length - 1; i >= 0; i--) {
       if (sortedDays[i] < today) {
@@ -35,8 +46,11 @@ export function DailyPnlStrip({ nwSnapshots, format, delay }: DailyPnlStripProps
       }
     }
 
-    // Find pre-month value (last snapshot before this month started)
-    const monthPrefix = today.slice(0, 7); // YYYY-MM
+    // Pre-month close — last snapshot before this month started. If none
+    // exists (new account, history doesn't reach back far enough), anchor on
+    // the first snapshot of the current month so the percentage isn't stuck
+    // at 0% while the absolute number reads as the whole current balance.
+    const monthPrefix = today.slice(0, 7);
     let preMonthVal = 0;
     for (let i = sortedDays.length - 1; i >= 0; i--) {
       if (sortedDays[i] < `${monthPrefix}-01`) {
@@ -44,14 +58,20 @@ export function DailyPnlStrip({ nwSnapshots, format, delay }: DailyPnlStripProps
         break;
       }
     }
+    if (preMonthVal === 0) {
+      const firstThisMonth = sortedDays.find((d) => d.startsWith(monthPrefix));
+      if (firstThisMonth) preMonthVal = dailyMap.get(firstThisMonth)!;
+    }
 
-    const tPnl = todayVal - prevDayVal;
+    // Without a prior reference, treat PnL as 0 instead of displaying the
+    // entire current balance as a fake "PnL" with 0% change.
+    const tPnl = prevDayVal !== 0 ? todayVal - prevDayVal : 0;
     const tPct = prevDayVal !== 0 ? (tPnl / Math.abs(prevDayVal)) * 100 : 0;
-    const mPnl = todayVal - preMonthVal;
+    const mPnl = preMonthVal !== 0 ? todayVal - preMonthVal : 0;
     const mPct = preMonthVal !== 0 ? (mPnl / Math.abs(preMonthVal)) * 100 : 0;
 
     return { todayPnl: tPnl, todayPct: tPct, monthPnl: mPnl, monthPct: mPct };
-  }, [nwSnapshots]);
+  }, [nwSnapshots, currentValue, convert]);
 
   if (todayPnl === 0 && monthPnl === 0) return null;
 

@@ -1,7 +1,6 @@
 import type { PortfolioHolding, HoldingType, AccountType } from "@/lib/utils/types";
 import { CHART_COLORS, HOLDING_TYPE_LABELS } from "@/lib/utils/constants";
 import { getSydneyDateString } from "@/lib/utils/timezone";
-import * as XLSX from "xlsx";
 
 // "savings" excluded — managed on the Emergency Fund page
 export const HOLDING_TYPES: HoldingType[] = ["stock", "etf", "fund", "bond", "other"];
@@ -44,10 +43,11 @@ export interface PortfolioTotals {
   count: number;
 }
 
-export function exportPortfolioXls(
+export async function exportPortfolioXls(
   holdings: PortfolioHolding[],
   convert: (value: number, currency: string) => number,
 ) {
+  const XLSX = await import("xlsx");
   const wb = XLSX.utils.book_new();
   const rows: (string | number | null)[][] = [];
 

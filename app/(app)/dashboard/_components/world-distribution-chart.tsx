@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useRef, useCallback } from "react";
-import ReactECharts from "echarts-for-react";
+import { ReactECharts, type EChartsReact } from "@/components/ui/lazy-echarts";
 import { useTheme } from "next-themes";
 import { Eye, EyeOff, Maximize2, Wallet } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -87,7 +87,7 @@ export function WorldDistributionChart({
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
   const { symbol } = useCurrency();
-  const chartRef = useRef<ReactECharts>(null);
+  const chartRef = useRef<EChartsReact>(null);
   const [hidden, setHidden] = useState<Set<FinancialWorld>>(new Set());
   const [hoveredKey, setHoveredKey] = useState<FinancialWorld | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);

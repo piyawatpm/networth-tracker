@@ -1,6 +1,6 @@
 "use client";
 
-import ReactECharts from "echarts-for-react";
+import { ReactECharts } from "@/components/ui/lazy-echarts";
 import { InteractiveDonut } from "@/components/ui/interactive-donut";
 import { BlurFade } from "@/components/ui/blur-fade";
 import { formatAxisValue } from "@/lib/utils/echarts";

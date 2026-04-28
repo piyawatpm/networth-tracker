@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import ReactECharts from "echarts-for-react";
+import { ReactECharts } from "@/components/ui/lazy-echarts";
 import { useTheme } from "next-themes";
 import { useCurrency } from "@/components/providers/currency-provider";
 import { getLastNMonthKeys, monthKeyToLabel, getMonthKey } from "@/lib/utils/timezone";

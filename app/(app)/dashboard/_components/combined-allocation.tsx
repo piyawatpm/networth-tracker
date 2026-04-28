@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useCallback, useState } from "react";
-import ReactECharts from "echarts-for-react";
+import { ReactECharts, type EChartsReact } from "@/components/ui/lazy-echarts";
 import { useTheme } from "next-themes";
 import { Eye, EyeOff, Layers, Layers2 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -38,7 +38,7 @@ export function CombinedAllocation({
 }: CombinedAllocationProps) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
-  const chartRef = useRef<ReactECharts>(null);
+  const chartRef = useRef<EChartsReact>(null);
   const [hoveredName, setHoveredName] = useState<string | null>(null);
   const [mergeStables, setMergeStables] = useState(true);
   const [hiddenAssets, setHiddenAssets] = useState<Set<string>>(new Set());

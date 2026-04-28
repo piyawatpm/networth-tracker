@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import ReactECharts from "echarts-for-react";
+import { ReactECharts, type EChartsReact } from "@/components/ui/lazy-echarts";
 import { getPieBaseOption } from "@/lib/utils/echarts";
 import { useCurrency } from "@/components/providers/currency-provider";
 
@@ -18,7 +18,7 @@ export function CryptoDonut({
 }: {
   chartData: DonutChartItem[];
   isDark: boolean;
-  chartRef: React.RefObject<ReactECharts | null>;
+  chartRef: React.RefObject<EChartsReact | null>;
 }) {
   const { symbol } = useCurrency();
   const base = getPieBaseOption(isDark, symbol);

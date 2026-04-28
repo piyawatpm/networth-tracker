@@ -276,18 +276,3 @@ export function normalizeExpenseEntry(e: Record<string, unknown>): ExpenseEntry 
   };
 }
 
-// ---------------------------------------------------------------------------
-// Crypto deposit ledger
-// ---------------------------------------------------------------------------
-
-export interface CryptoDeposit {
-  id: string;
-  /** ISO string — may contain time. */
-  date: string;
-  token: string;
-  amount: number;
-  usdValueAtDeposit: number;
-  kind: "stablecoin" | "crypto";
-  notes?: string;
-  createdAt: number;
-}

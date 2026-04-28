@@ -259,7 +259,7 @@ export function HoldingsBreakdown({
                 </button>
               </div>
             </div>
-            <div className="overflow-x-auto">
+            <div className="hidden sm:block overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border/60 text-left">
@@ -447,6 +447,103 @@ export function HoldingsBreakdown({
                   })}
                 </tbody>
               </table>
+            </div>
+
+            {/* Mobile cards (below sm breakpoint) */}
+            <div className="sm:hidden divide-y divide-border/40">
+              {sortedHoldings.map((h, i) => {
+                const rowPnl = h.currentValueUsd - h.totalCostUsd;
+                const pctOfPort =
+                  totalValueUsd > 0
+                    ? (h.currentValueUsd / totalValueUsd) * 100
+                    : 0;
+                const livePrice = livePrices[h.token];
+
+                return (
+                  <div
+                    key={h.token}
+                    className={cn(
+                      "px-5 py-3.5 transition-colors",
+                      selectedTokens[h.token] === false && "opacity-40",
+                    )}
+                  >
+                    <div className="mb-2 flex items-start justify-between gap-3">
+                      <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                        {coinImages[h.token] ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={coinImages[h.token]}
+                            alt=""
+                            className="h-7 w-7 shrink-0 rounded-full object-contain"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div
+                            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full"
+                            style={{
+                              backgroundColor:
+                                ECHARTS_COLORS[i % ECHARTS_COLORS.length],
+                              opacity: 0.15,
+                            }}
+                          >
+                            <Bitcoin
+                              className="h-3.5 w-3.5"
+                              style={{
+                                color:
+                                  ECHARTS_COLORS[i % ECHARTS_COLORS.length],
+                              }}
+                            />
+                          </div>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm font-medium">
+                            {h.token}
+                          </div>
+                          <div className="font-mono text-[11px] tabular-nums text-muted-foreground">
+                            {formatCryptoAmount(h.amount)}
+                            {livePrice != null && (
+                              <span className="ml-1 opacity-70">
+                                @ $
+                                {livePrice < 1
+                                  ? livePrice.toFixed(4)
+                                  : livePrice.toLocaleString("en-US", {
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits: 2,
+                                    })}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <div className="font-mono text-sm tabular-nums">
+                          {format(h.currentValueUsd, "USD")}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between text-xs">
+                      <div
+                        className={cn(
+                          "font-mono tabular-nums",
+                          rowPnl >= 0 ? "text-income" : "text-expense",
+                        )}
+                      >
+                        {`${rowPnl >= 0 ? "+" : "-"}${format(Math.abs(rowPnl), "USD")}`}
+                        {h.totalCostUsd > 0 && (
+                          <span className="ml-1 text-[10px] opacity-70">
+                            {rowPnl >= 0 ? "+" : ""}
+                            {((rowPnl / h.totalCostUsd) * 100).toFixed(1)}%
+                          </span>
+                        )}
+                      </div>
+                      <div className="font-mono tabular-nums text-muted-foreground">
+                        {pctOfPort.toFixed(1)}% of port
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </BlurFade>

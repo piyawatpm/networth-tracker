@@ -25,7 +25,11 @@ import type { FundAllocations } from "@/components/portfolio/fund-breakdown";
 import { Plus, Download } from "lucide-react";
 import { useAlpacaWs } from "@/lib/hooks/use-alpaca-ws";
 import { getUsMarketSession, pollIntervalForSession } from "@/lib/utils/market-session";
-import { PerformanceChart } from "@/components/ui/performance-chart";
+import dynamic from "next/dynamic";
+const PerformanceChart = dynamic(
+  () => import("@/components/ui/performance-chart").then((m) => m.PerformanceChart),
+  { ssr: false },
+);
 
 import { PortfolioCharts } from "./_components/portfolio-charts";
 import { HoldingsTable } from "./_components/holdings-table";

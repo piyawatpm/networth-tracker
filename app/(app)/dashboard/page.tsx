@@ -41,7 +41,12 @@ import { applyLivePrices } from "@/lib/utils/crypto-prices";
 import { canAutoUpdate } from "@/lib/utils/prices";
 
 // Sub-components
-import { PerformanceChart, type StackedCategory } from "@/components/ui/performance-chart";
+import dynamic from "next/dynamic";
+import type { StackedCategory } from "@/components/ui/performance-chart";
+const PerformanceChart = dynamic(
+  () => import("@/components/ui/performance-chart").then((m) => m.PerformanceChart),
+  { ssr: false },
+);
 
 // Net worth stacked-area categories (ordered bottom → top in the chart)
 const NW_STACKED_CATEGORIES: StackedCategory[] = [
@@ -237,10 +242,16 @@ export default function DashboardPage() {
 
   // ---- Derived data -------------------------------------------------------
 
-  const cryptoHoldings = useMemo(() => {
-    const tagged = applyStablecoinTags(rawCryptoHoldings, stablecoinTags);
-    return applyLivePrices(tagged, cryptoLivePrices);
-  }, [rawCryptoHoldings, stablecoinTags, cryptoLivePrices]);
+  // Live-priced raw holdings (no stablecoin merge) — for views that do their
+  // own merging based on user toggles (e.g. CombinedAllocation).
+  const liveRawCryptoHoldings = useMemo(
+    () => applyLivePrices(rawCryptoHoldings, cryptoLivePrices),
+    [rawCryptoHoldings, cryptoLivePrices],
+  );
+  const cryptoHoldings = useMemo(
+    () => applyStablecoinTags(liveRawCryptoHoldings, stablecoinTags),
+    [liveRawCryptoHoldings, stablecoinTags],
+  );
   const last6Keys = getLast6MonthKeys();
 
   const portfolioTotal = useMemo(() => livePortfolioHoldings.reduce((s, h) => s + convert(h.currentValue, h.currency), 0), [livePortfolioHoldings, convert]);
@@ -705,6 +716,7 @@ export default function DashboardPage() {
       {/* Net Worth Daily PnL */}
       <DailyPnlStrip
         nwSnapshots={nwChartSnapshots}
+        currentValue={netWorth}
         format={format}
         delay={D * 0.15}
       />
@@ -757,7 +769,7 @@ export default function DashboardPage() {
       {/* Combined all-assets allocation */}
       <CombinedAllocation
         portfolioHoldings={livePortfolioHoldings}
-        rawCryptoHoldings={rawCryptoHoldings}
+        rawCryptoHoldings={liveRawCryptoHoldings}
         stablecoinTags={stablecoinTags}
         convert={convert}
         format={format}
