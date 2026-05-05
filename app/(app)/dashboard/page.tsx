@@ -48,11 +48,15 @@ const PerformanceChart = dynamic(
   { ssr: false },
 );
 
-// Net worth stacked-area categories (ordered bottom → top in the chart)
+// Net worth stacked-area categories (ordered bottom → top in the chart).
+// `debt` is rendered as a 4th overlay line in expense-red — debt is a
+// liability (drag on net worth), so its line trending DOWN means you're
+// paying it off, which is intuitively "good" even though red signals "cost".
 const NW_STACKED_CATEGORIES: StackedCategory[] = [
   { key: "portfolio", label: "Portfolio", colorLight: "#4d7cc7", colorDark: "#6ea0e0" },
   { key: "crypto", label: "Crypto", colorLight: "#d4a033", colorDark: "#e8b94a" },
   { key: "other", label: "Other", colorLight: "#2ea598", colorDark: "#4fc1b4" },
+  { key: "debt", label: "Debt", colorLight: "#e11d48", colorDark: "#f43f5e" },
 ];
 import { TopMovers } from "./_components/top-movers";
 import {
@@ -92,6 +96,40 @@ function debtRemaining(
     .filter((t) => t.debtId === debt.id)
     .reduce((sum, t) => sum + t.amount, 0);
   return Math.max(0, debt.originalAmount - payments);
+}
+
+/**
+ * Reconstructs `iOwe` (total liabilities) as it stood on a historical date.
+ *
+ * We don't snapshot debt directly — instead we replay the debt records and
+ * transactions: a debt only counts if it was created on/before `date`, and
+ * payments only count if they were applied on/before `date`. This means the
+ * chart's debt line works even for snapshots from before debt tracking was
+ * added, so long as the records & transactions still exist.
+ *
+ * Returned value is in USD so it lines up with the rest of the snapshot's
+ * `components` (which the chart converts to display currency on render).
+ */
+function debtAtDate(
+  date: string,
+  debtRecords: DebtRecord[],
+  debtTransactions: DebtTransaction[],
+  toUsd: (amount: number, from: Currency) => number,
+): number {
+  // `createdAt` is a unix-ms timestamp; comparing against end-of-day captures
+  // any debt created earlier that day (avoids off-by-one excludes).
+  const dateMs = new Date(`${date}T23:59:59`).getTime();
+  let iOwe = 0;
+  for (const d of debtRecords) {
+    if (d.direction !== "i_owe") continue;
+    if (d.createdAt > dateMs) continue; // didn't exist yet on `date`
+    const paymentsAsOf = debtTransactions
+      .filter((t) => t.debtId === d.id && t.date <= date)
+      .reduce((sum, t) => sum + t.amount, 0);
+    const remaining = Math.max(0, d.originalAmount - paymentsAsOf);
+    iOwe += toUsd(remaining, d.currency);
+  }
+  return iOwe;
 }
 
 function getWeekStart(): string {
@@ -286,9 +324,13 @@ export default function DashboardPage() {
   // Also derive per-category components for the stacked-area view:
   //   - portfolio (from cron: portfolioTotal, includes super)
   //   - crypto
-  //   - other = total − portfolio − crypto (net debts: owed − iOwe)
+  //   - other = total − portfolio − crypto (net debts: owed − iOwe, ≥ 0)
+  //   - debt   = historical iOwe replayed from records + transactions
   // When !includeSuper, subtract the super delta from the portfolio band.
   const nwChartSnapshots = useMemo(() => {
+    // Snapshots are stored in USD; debt history must be in USD too so the
+    // chart's currency conversion can apply uniformly to every component.
+    const toUsd = (amount: number, from: Currency) => convert(amount, from, "USD");
     return nwSnapshots.map((s) => {
       const ext = s as {
         valueNoSuper?: number;
@@ -303,17 +345,18 @@ export default function DashboardPage() {
         : Math.max(0, (ext.portfolio ?? 0) - superDelta);
       const cryptoPart = ext.crypto ?? 0;
       const otherPart = Math.max(0, total - portfolioPart - cryptoPart);
+      const debtPart = debtAtDate(s.date, debtRecords, debtTransactions, toUsd);
       const hasBreakdown = ext.portfolio != null || ext.crypto != null;
       return {
         date: s.date,
         value: total,
         currency: ext.currency ?? "USD",
         components: hasBreakdown
-          ? { portfolio: portfolioPart, crypto: cryptoPart, other: otherPart }
+          ? { portfolio: portfolioPart, crypto: cryptoPart, other: otherPart, debt: debtPart }
           : undefined,
       };
     });
-  }, [nwSnapshots, includeSuper]);
+  }, [nwSnapshots, includeSuper, debtRecords, debtTransactions, convert]);
 
   // ---- Period-filtered income/expenses ------------------------------------
 
@@ -709,6 +752,10 @@ export default function DashboardPage() {
             portfolio: includeSuper ? portfolioTotal : normalTotal,
             crypto: cryptoTotal,
             other: Math.max(0, netWorth - (includeSuper ? portfolioTotal : normalTotal) - cryptoTotal),
+            // `iOwe` is in user currency; live components share the chart's
+            // display currency, so no conversion needed (unlike historical
+            // snapshots which are stored in USD).
+            debt: iOwe,
           }}
         />
       </BlurFade>
