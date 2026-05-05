@@ -30,6 +30,7 @@ import {
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { rowToCamel, rowToSnake } from "@/lib/supabase/tables";
+import { clearSnapshotCache } from "@/lib/storage/snapshot-cache";
 
 // ---------------------------------------------------------------------------
 // Page
@@ -194,6 +195,11 @@ export default function SettingsPage() {
           await supabase.from("app_data").upsert(kvRows, { onConflict: "key" });
         }
 
+        // Import does delete-then-insert on the snapshots table, so any
+        // localStorage snapshot cache we built up before is now stale.
+        // Wipe it; next page load will rebuild from the imported data.
+        clearSnapshotCache();
+
         setStatus({ type: "success", message: `Imported data. Reloading...` });
         setTimeout(() => window.location.reload(), 1000);
       } catch {
@@ -221,6 +227,10 @@ export default function SettingsPage() {
       await supabase.from("cron_logs").delete().neq("id", "00000000-0000-0000-0000-000000000000");
       // Delete KV
       await supabase.from("app_data").delete().neq("key", "");
+
+      // Snapshot localStorage cache mirrors the snapshots table — clear it
+      // too, otherwise the next load would resurrect old rows from the cache.
+      clearSnapshotCache();
 
       setShowClearConfirm(false);
       setStatus({ type: "success", message: "All data cleared. Reloading..." });
@@ -281,6 +291,11 @@ export default function SettingsPage() {
       if (kvRows.length > 0) {
         await supabase.from("app_data").upsert(kvRows, { onConflict: "key" });
       }
+
+      // Seeding inserts fresh snapshots directly (bypassing persist()), so
+      // the localStorage cache must be invalidated to avoid mixing seeded
+      // rows with whatever was cached previously.
+      clearSnapshotCache();
 
       setStatus({ type: "success", message: "Sample data loaded. Reloading..." });
       setTimeout(() => window.location.reload(), 1000);

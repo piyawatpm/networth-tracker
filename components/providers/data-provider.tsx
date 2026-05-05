@@ -20,6 +20,14 @@ import {
   syncSnapshots,
   syncCategories,
 } from "@/lib/supabase/tables";
+import {
+  readSnapshotCache,
+  writeSnapshotCache,
+  setSnapshotCacheKey,
+  getLatestCachedDate,
+  type SnapshotCache,
+  type SnapshotRow,
+} from "@/lib/storage/snapshot-cache";
 
 // ---------------------------------------------------------------------------
 // Context
@@ -95,15 +103,51 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         const tableKeysSet = new Set<string>();
 
         await Promise.all([
-          // Snapshots — split by type discriminator into the three KV
-          // keys downstream code expects.
+          // Snapshots — incrementally fetched.
+          //
+          // Snapshots are immutable historical rows (one per day per type), so
+          // anything we've already cached in localStorage is still valid. On
+          // the wire we only ask Supabase for rows newer than `maxCachedDate`
+          // — first visit fetches everything, every subsequent visit fetches
+          // just the day or two that have been added since.
+          //
+          // The merged result is fanned out into the three KV keys
+          // downstream code expects (`portfolio_snapshots`, `crypto_snapshots`,
+          // `networth_snapshots`) and written back to localStorage so the
+          // next load starts from an even fresher baseline.
           (async () => {
             try {
-              const rows = await fetchAll("snapshots", "date");
-              if (rows.length === 0) return;
-              const all = rows.map((r) => rowToCamel(r));
+              const cached: SnapshotCache = readSnapshotCache() ?? {};
+              const sinceDate = getLatestCachedDate(cached);
+
+              // Build a paginated fetcher that only pulls rows STRICTLY
+              // newer than `sinceDate`. Without a cache, `sinceDate` is
+              // undefined and we fall through to a full fetch (same as
+              // the original behaviour, just on first visit).
+              const newRows: Record<string, unknown>[] = [];
+              const PAGE = 1000;
+              for (let from = 0; ; from += PAGE) {
+                let q = supabase
+                  .from("snapshots")
+                  .select("*")
+                  .order("date", { ascending: true })
+                  .range(from, from + PAGE - 1);
+                if (sinceDate) q = q.gt("date", sinceDate);
+                const { data, error } = await q;
+                if (error || !data || data.length === 0) break;
+                newRows.push(...(data as Record<string, unknown>[]));
+                if (data.length < PAGE) break;
+              }
+
+              // Merge cached rows + freshly-fetched rows into one structure
+              // keyed by KV key (e.g. "portfolio_snapshots"). Cached rows
+              // are already stripped of `id`/`type`/`createdAt`; new rows
+              // still have them, so we strip during the merge.
+              const merged: SnapshotCache = { ...cached };
               for (const [key, type] of Object.entries(SNAPSHOT_KEYS)) {
-                const filtered = all
+                const cachedForKey = merged[key] ?? [];
+                const newForKey = newRows
+                  .map((r) => rowToCamel(r))
                   .filter((s) => s.type === type)
                   .map((s) => {
                     const {
@@ -112,15 +156,28 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
                       createdAt: _ca,
                       ...rest
                     } = s as Record<string, unknown>;
-                    return rest;
+                    return rest as SnapshotRow;
                   });
-                if (filtered.length > 0) {
-                  cache.current.set(key, JSON.stringify(filtered));
+                merged[key] = [...cachedForKey, ...newForKey];
+              }
+
+              // Populate the in-memory cache (what `useCloudStorage` reads).
+              for (const key of Object.keys(SNAPSHOT_KEYS)) {
+                const rows = merged[key];
+                if (rows && rows.length > 0) {
+                  cache.current.set(key, JSON.stringify(rows));
                   tableKeysSet.add(key);
                 }
               }
+
+              // Persist the merged result back to localStorage so the next
+              // load starts from this baseline. Only write when we actually
+              // pulled something new — avoids touching storage on a no-op load.
+              if (newRows.length > 0 || !sinceDate) {
+                writeSnapshotCache(merged);
+              }
             } catch {
-              // Table missing — KV fallback handles it.
+              // Table missing or storage misbehaving — KV fallback handles it.
             }
           })(),
 
@@ -184,6 +241,19 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     (key: string, value: string) => {
       // Update in-memory cache immediately
       cache.current.set(key, value);
+
+      // Mirror snapshot writes into the localStorage cache synchronously,
+      // so the cache stays consistent with `cache.current` even before the
+      // debounced Supabase write fires. If the user reloads the page during
+      // the debounce window, the next load will still see the fresh rows.
+      if (SNAPSHOT_KEYS[key]) {
+        try {
+          setSnapshotCacheKey(key, JSON.parse(value) as SnapshotRow[]);
+        } catch {
+          // Value isn't valid JSON for some reason — skip the cache update
+          // rather than crashing persist(). Supabase write below still runs.
+        }
+      }
 
       // Debounce the Supabase write
       const existing = pendingWrites.current.get(key);
