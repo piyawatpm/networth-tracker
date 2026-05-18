@@ -235,6 +235,10 @@ export function PerformanceChart({
     time: UTCTimestamp;
     x: number;
   } | null>(null);
+  const [highLowCoords, setHighLowCoords] = useState<{
+    high?: { x: number; y: number; value: number };
+    low?: { x: number; y: number; value: number };
+  }>({});
 
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -416,6 +420,20 @@ export function PerformanceChart({
   const hasStacked = showOverlay && hasStackedProp && Boolean(
     stackedChartData && stackedChartData.some((band) => band.length > 0),
   );
+
+  // High/low markers — only meaningful when the main $ line is visible (i.e.
+  // not in stacked-overlay mode, where the y-axis is % change).
+  const highLowPoints = useMemo(() => {
+    if (chartData.length < 2 || hasStacked) return null;
+    let high = chartData[0];
+    let low = chartData[0];
+    for (const pt of chartData) {
+      if (pt.value > high.value) high = pt;
+      if (pt.value < low.value) low = pt;
+    }
+    if (high.value === low.value) return null;
+    return { high, low };
+  }, [chartData, hasStacked]);
 
   // Compute PnL stats
   const stats = useMemo(() => {
@@ -641,6 +659,51 @@ export function PerformanceChart({
     chartRef.current.timeScale().fitContent();
   }, [chartData, stackedChartData, stackedCategories]);
 
+  // Convert high/low data points to pixel coords for the overlay labels.
+  // Re-runs when data changes or the chart is re-created (theme / mode switch),
+  // and on container resize so labels track the new layout.
+  useEffect(() => {
+    if (!highLowPoints) {
+      setHighLowCoords({});
+      return;
+    }
+
+    const update = () => {
+      const chart = chartRef.current;
+      const series = seriesRef.current;
+      if (!chart || !series) return;
+      const highX = chart.timeScale().timeToCoordinate(highLowPoints.high.time);
+      const highY = series.priceToCoordinate(highLowPoints.high.value);
+      const lowX = chart.timeScale().timeToCoordinate(highLowPoints.low.time);
+      const lowY = series.priceToCoordinate(highLowPoints.low.value);
+      setHighLowCoords({
+        high: highX != null && highY != null
+          ? { x: highX as number, y: highY as number, value: highLowPoints.high.value }
+          : undefined,
+        low: lowX != null && lowY != null
+          ? { x: lowX as number, y: lowY as number, value: highLowPoints.low.value }
+          : undefined,
+      });
+    };
+
+    // Defer to next frame so setData/fitContent have flushed.
+    const rafId = requestAnimationFrame(update);
+
+    const containerEl = containerRef.current;
+    let observer: ResizeObserver | null = null;
+    if (containerEl && typeof ResizeObserver !== "undefined") {
+      observer = new ResizeObserver(() => {
+        requestAnimationFrame(update);
+      });
+      observer.observe(containerEl);
+    }
+
+    return () => {
+      cancelAnimationFrame(rafId);
+      observer?.disconnect();
+    };
+  }, [highLowPoints, isDark, height, hasStacked]);
+
   const periods: Period[] = ["1D", "1W", "1M", "6M", "1Y"];
 
   // Visible breakdown rows + percentage shares (denominator: positive-only total)
@@ -805,15 +868,65 @@ export function PerformanceChart({
       {chartData.length > 1 ? (
         <div className="relative">
           <div ref={containerRef} style={{ height, width: "100%" }} />
-          {hoverInfo && hoverTimeLabel && (
-            <div
-              className="pointer-events-none absolute top-1 z-10 rounded-md bg-background/95 px-2 py-1.5 text-[10px] font-mono text-foreground shadow-sm ring-1 ring-border/60 backdrop-blur-sm"
-              style={{
-                left: hoverInfo.x,
-                transform: "translateX(-50%)",
-                minWidth: 140,
-              }}
-            >
+          {/* High / low value markers (current view) */}
+          {!hasStacked && highLowCoords.high && (() => {
+            const w = containerRef.current?.clientWidth ?? 1000;
+            const clampedX = Math.max(36, Math.min(highLowCoords.high.x, w - 36));
+            return (
+              <div
+                className="pointer-events-none absolute z-[5] text-[10px] font-mono text-foreground/60 tabular-nums whitespace-nowrap"
+                style={{
+                  left: clampedX,
+                  top: Math.max(0, highLowCoords.high.y - 16),
+                  transform: "translateX(-50%)",
+                }}
+              >
+                {symbol}
+                {highLowCoords.high.value.toLocaleString("en-US", {
+                  minimumFractionDigits: Math.abs(highLowCoords.high.value) >= 100 ? 0 : 2,
+                  maximumFractionDigits: Math.abs(highLowCoords.high.value) >= 100 ? 0 : 2,
+                })}
+              </div>
+            );
+          })()}
+          {!hasStacked && highLowCoords.low && (() => {
+            const w = containerRef.current?.clientWidth ?? 1000;
+            const clampedX = Math.max(36, Math.min(highLowCoords.low.x, w - 36));
+            return (
+              <div
+                className="pointer-events-none absolute z-[5] text-[10px] font-mono text-foreground/60 tabular-nums whitespace-nowrap"
+                style={{
+                  left: clampedX,
+                  top: highLowCoords.low.y + 6,
+                  transform: "translateX(-50%)",
+                }}
+              >
+                {symbol}
+                {highLowCoords.low.value.toLocaleString("en-US", {
+                  minimumFractionDigits: Math.abs(highLowCoords.low.value) >= 100 ? 0 : 2,
+                  maximumFractionDigits: Math.abs(highLowCoords.low.value) >= 100 ? 0 : 2,
+                })}
+              </div>
+            );
+          })()}
+          {hoverInfo && hoverTimeLabel && (() => {
+            // Offset tooltip 14px to the side of the cursor so it never
+            // covers the actual hover point. Flip sides past chart midpoint
+            // so it stays within the visible area.
+            const w = containerRef.current?.clientWidth ?? 0;
+            const flipToLeft = w > 0 && hoverInfo.x > w / 2;
+            const positionStyle: React.CSSProperties = flipToLeft
+              ? { right: w - hoverInfo.x + 14 }
+              : { left: hoverInfo.x + 14 };
+            return (
+              <div
+                className="pointer-events-none absolute top-1 z-10 rounded-md bg-background/95 px-2 py-1.5 text-[10px] font-mono text-foreground shadow-sm ring-1 ring-border/60 backdrop-blur-sm"
+                style={{
+                  ...positionStyle,
+                  minWidth: 140,
+                  maxWidth: 240,
+                }}
+              >
               <div className="text-muted-foreground">{hoverTimeLabel}</div>
               <div className="mt-0.5 flex items-center justify-between gap-3">
                 <span className="uppercase tracking-wide text-muted-foreground/80">
@@ -859,7 +972,8 @@ export function PerformanceChart({
                   );
                 })}
             </div>
-          )}
+            );
+          })()}
         </div>
       ) : (
         <div className="flex items-center justify-center" style={{ height }}>
