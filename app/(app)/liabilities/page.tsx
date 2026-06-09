@@ -107,26 +107,10 @@ export default function LiabilitiesPage() {
     return { owedToMe, iOwe, net: owedToMe - iOwe };
   }, [debts, transactions, convert]);
 
-  // ------ Sorted debts: active first, then completed ------
+  // ------ Sorted debts: newest first (paid-off entries stay put, never retired) ------
   const sortedDebts = useMemo(() => {
-    const active: DebtRecord[] = [];
-    const completed: DebtRecord[] = [];
-
-    for (const debt of debts) {
-      const remaining = getRemaining(debt, transactions);
-      if (remaining > 0) {
-        active.push(debt);
-      } else {
-        completed.push(debt);
-      }
-    }
-
-    // Within each group, newest first
-    active.sort((a, b) => b.createdAt - a.createdAt);
-    completed.sort((a, b) => b.createdAt - a.createdAt);
-
-    return [...active, ...completed];
-  }, [debts, transactions]);
+    return [...debts].sort((a, b) => b.createdAt - a.createdAt);
+  }, [debts]);
 
   // ------ Handlers ------
   function handleSaveDebt(saved: DebtRecord) {
@@ -232,18 +216,12 @@ export default function LiabilitiesPage() {
             const totalPaid = getTotalPaid(debt.id, transactions);
             const payments = getDebtPayments(debt.id, transactions);
             const isExpanded = expandedIds.has(debt.id);
-            const isCompleted = remaining <= 0;
             const isOwedToMe = debt.direction === "owed_to_me";
             const sym = CURRENCY_SYMBOLS[debt.currency];
 
             return (
               <BlurFade key={debt.id} delay={0.1 + idx * 0.03}>
-                <div
-                  className={cn(
-                    "finance-card p-5 space-y-4",
-                    isCompleted && "opacity-60"
-                  )}
-                >
+                <div className="finance-card p-5 space-y-4">
                   {/* Top row: person + direction badge */}
                   <div className="flex items-start justify-between gap-3">
                     <div className="space-y-1 min-w-0">
@@ -276,7 +254,7 @@ export default function LiabilitiesPage() {
                   <div className="flex items-baseline justify-between">
                     <div>
                       <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-0.5">
-                        {isCompleted ? "Settled" : "Remaining"}
+                        Remaining
                       </p>
                       <p className={cn("text-xl font-bold tabular-nums", isOwedToMe ? "text-income" : "text-expense")}>
                         {sym}{remaining.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -311,20 +289,18 @@ export default function LiabilitiesPage() {
 
                   {/* Action buttons */}
                   <div className="flex items-center gap-2 flex-wrap">
-                    {!isCompleted && (
-                      <PaymentDialog
-                        debtId={debt.id}
-                        direction={debt.direction}
-                        personName={debt.person}
-                        onSave={handleSaveTransaction}
-                        trigger={
-                          <Button size="sm" variant="outline" className="gap-1">
-                            <Plus className="h-3.5 w-3.5" />
-                            Add Transaction
-                          </Button>
-                        }
-                      />
-                    )}
+                    <PaymentDialog
+                      debtId={debt.id}
+                      direction={debt.direction}
+                      personName={debt.person}
+                      onSave={handleSaveTransaction}
+                      trigger={
+                        <Button size="sm" variant="outline" className="gap-1">
+                          <Plus className="h-3.5 w-3.5" />
+                          Add Transaction
+                        </Button>
+                      }
+                    />
 
                     {payments.length > 0 && (
                       <Button
