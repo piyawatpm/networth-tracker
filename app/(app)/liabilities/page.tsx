@@ -18,6 +18,7 @@ import {
   Handshake,
   ArrowUpRight,
   ArrowDownLeft,
+  ArrowLeftRight,
 } from "lucide-react";
 import type { DebtRecord, DebtTransaction } from "@/lib/utils/types";
 import { CURRENCY_SYMBOLS } from "@/lib/utils/types";
@@ -129,6 +130,17 @@ export default function LiabilitiesPage() {
     setDebts((prev) => prev.filter((d) => d.id !== id));
     // Clean up associated transactions
     setTransactions((prev) => prev.filter((t) => t.debtId !== id));
+  }
+
+  // Flip a debt between "Owed to Me" and "I Owe", keeping all payments intact.
+  function handleReverseDirection(id: string) {
+    setDebts((prev) =>
+      prev.map((d) =>
+        d.id === id
+          ? { ...d, direction: d.direction === "i_owe" ? "owed_to_me" : "i_owe" }
+          : d
+      )
+    );
   }
 
   function handleSaveTransaction(saved: DebtTransaction) {
@@ -319,6 +331,21 @@ export default function LiabilitiesPage() {
                     )}
 
                     <div className="ml-auto flex items-center gap-1">
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        className="text-muted-foreground"
+                        title={
+                          isOwedToMe
+                            ? "Reverse to “I Owe”"
+                            : "Reverse to “Owed to Me”"
+                        }
+                        aria-label="Reverse direction"
+                        onClick={() => handleReverseDirection(debt.id)}
+                      >
+                        <ArrowLeftRight className="h-3.5 w-3.5" />
+                      </Button>
+
                       <LiabilityDialog
                         debt={debt}
                         onSave={handleSaveDebt}
