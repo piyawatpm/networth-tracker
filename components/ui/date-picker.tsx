@@ -57,14 +57,15 @@ export function DatePicker({
         <DayPicker
           mode="single"
           selected={selected}
+          defaultMonth={selected}
           onSelect={handleSelect}
           showOutsideDays
           className="rdp-custom"
           classNames={{
             months: "flex gap-4",
-            month_caption: "flex items-center justify-center h-7 relative",
+            month_caption: "flex items-center justify-center h-7",
             caption_label: "text-sm font-medium",
-            nav: "flex items-center gap-1 absolute inset-x-0 justify-between",
+            nav: "flex items-center gap-1 absolute inset-x-0 justify-between z-10",
             button_previous: "h-6 w-6 inline-flex items-center justify-center rounded-md hover:bg-muted",
             button_next: "h-6 w-6 inline-flex items-center justify-center rounded-md hover:bg-muted",
             weekdays: "flex",
