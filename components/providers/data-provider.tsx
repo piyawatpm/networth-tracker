@@ -44,6 +44,9 @@ interface DataContextValue {
   saveAll: () => Promise<{ success: boolean; error?: string }>;
   /** Last save timestamp */
   lastSaveTime: number | null;
+  /** Subscribe to background updates for a key (e.g. the full snapshot history
+   *  that streams in after first paint). Returns an unsubscribe fn. */
+  subscribe: (key: string, cb: () => void) => () => void;
 }
 
 const DataContext = createContext<DataContextValue | null>(null);
@@ -65,6 +68,29 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const [isLoaded, setIsLoaded] = useState(false);
   const [lastSaveTime, setLastSaveTime] = useState<number | null>(null);
   const supabase = useMemo(() => createClient(), []);
+
+  // Subscribers that want to re-render when a key is updated *after* the
+  // initial load — used so charts pick up the full snapshot history once it
+  // finishes streaming in behind the (already-dismissed) loading screen.
+  const subscribers = useRef<Map<string, Set<() => void>>>(new Map());
+
+  const subscribe = useCallback((key: string, cb: () => void) => {
+    let set = subscribers.current.get(key);
+    if (!set) {
+      set = new Set();
+      subscribers.current.set(key, set);
+    }
+    set.add(cb);
+    return () => {
+      set!.delete(cb);
+    };
+  }, []);
+
+  const notify = useCallback((key: string) => {
+    const set = subscribers.current.get(key);
+    if (!set) return;
+    for (const cb of set) cb();
+  }, []);
 
   // Fetch all data from Supabase on mount
   useEffect(() => {
@@ -103,81 +129,43 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         const tableKeysSet = new Set<string>();
 
         await Promise.all([
-          // Snapshots — incrementally fetched.
+          // Snapshots — RECENT WINDOW ONLY (Phase A).
           //
-          // Snapshots are immutable historical rows (one per day per type), so
-          // anything we've already cached in localStorage is still valid. On
-          // the wire we only ask Supabase for rows newer than `maxCachedDate`
-          // — first visit fetches everything, every subsequent visit fetches
-          // just the day or two that have been added since.
-          //
-          // The merged result is fanned out into the three KV keys
-          // downstream code expects (`portfolio_snapshots`, `crypto_snapshots`,
-          // `networth_snapshots`) and written back to localStorage so the
-          // next load starts from an even fresher baseline.
+          // The `snapshots` table is the heaviest read on boot. Fetching its
+          // full history is what used to stall the loading screen behind ~30
+          // sequential paginated requests. Here we pull only the most recent
+          // slice (latest ~1000 rows) so the dashboard can paint immediately.
+          // The complete history streams in afterwards, off the critical path,
+          // via `loadFullSnapshotHistory()` — which notifies subscribers so any
+          // open charts fill in their older data once it lands.
           (async () => {
             try {
-              const cached: SnapshotCache = readSnapshotCache() ?? {};
-              const sinceDate = getLatestCachedDate(cached);
+              const { data, error } = await supabase
+                .from("snapshots")
+                .select("*")
+                .order("date", { ascending: false })
+                .limit(1000);
+              if (error || !data || data.length === 0) return;
 
-              // Build a paginated fetcher that only pulls rows STRICTLY
-              // newer than `sinceDate`. Without a cache, `sinceDate` is
-              // undefined and we fall through to a full fetch (same as
-              // the original behaviour, just on first visit).
-              const newRows: Record<string, unknown>[] = [];
-              const PAGE = 1000;
-              for (let from = 0; ; from += PAGE) {
-                let q = supabase
-                  .from("snapshots")
-                  .select("*")
-                  .order("date", { ascending: true })
-                  .range(from, from + PAGE - 1);
-                if (sinceDate) q = q.gt("date", sinceDate);
-                const { data, error } = await q;
-                if (error || !data || data.length === 0) break;
-                newRows.push(...(data as Record<string, unknown>[]));
-                if (data.length < PAGE) break;
-              }
-
-              // Merge cached rows + freshly-fetched rows into one structure
-              // keyed by KV key (e.g. "portfolio_snapshots"). Cached rows
-              // are already stripped of `id`/`type`/`createdAt`; new rows
-              // still have them, so we strip during the merge.
-              const merged: SnapshotCache = { ...cached };
+              // Fetched newest-first to honour the cap; flip to chronological
+              // order, which is what the chart consumers expect.
+              const asc = data.slice().reverse();
               for (const [key, type] of Object.entries(SNAPSHOT_KEYS)) {
-                const cachedForKey = merged[key] ?? [];
-                const newForKey = newRows
+                const rows = asc
                   .map((r) => rowToCamel(r))
                   .filter((s) => s.type === type)
                   .map((s) => {
-                    const {
-                      id: _id,
-                      type: _type,
-                      createdAt: _ca,
-                      ...rest
-                    } = s as Record<string, unknown>;
+                    const { id: _id, type: _type, createdAt: _ca, ...rest } =
+                      s as Record<string, unknown>;
                     return rest as SnapshotRow;
                   });
-                merged[key] = [...cachedForKey, ...newForKey];
-              }
-
-              // Populate the in-memory cache (what `useCloudStorage` reads).
-              for (const key of Object.keys(SNAPSHOT_KEYS)) {
-                const rows = merged[key];
-                if (rows && rows.length > 0) {
+                if (rows.length > 0) {
                   cache.current.set(key, JSON.stringify(rows));
                   tableKeysSet.add(key);
                 }
               }
-
-              // Persist the merged result back to localStorage so the next
-              // load starts from this baseline. Only write when we actually
-              // pulled something new — avoids touching storage on a no-op load.
-              if (newRows.length > 0 || !sinceDate) {
-                writeSnapshotCache(merged);
-              }
             } catch {
-              // Table missing or storage misbehaving — KV fallback handles it.
+              // Recent fetch failed — the background load / KV fallback covers it.
             }
           })(),
 
@@ -227,10 +215,81 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         // Supabase fully unavailable — start with empty cache.
       }
       setIsLoaded(true);
+
+      // Phase B — stream the COMPLETE snapshot history in *after* first paint,
+      // so the loading screen is already gone. Fire-and-forget.
+      loadFullSnapshotHistory();
+    }
+
+    // Background backfill of the full snapshot history. Reuses the incremental
+    // localStorage cache: a warm cache pulls only the rows added since the last
+    // visit; a cold cache pages through everything (the old boot-time cost, now
+    // off the critical path). Subscribers are notified as each key fills in so
+    // open charts redraw with their full history.
+    async function loadFullSnapshotHistory() {
+      try {
+        const cached: SnapshotCache = readSnapshotCache() ?? {};
+        const sinceDate = getLatestCachedDate(cached);
+
+        const newRows: Record<string, unknown>[] = [];
+        const PAGE = 1000;
+        let errored = false;
+        for (let from = 0; ; from += PAGE) {
+          let q = supabase
+            .from("snapshots")
+            .select("*")
+            .order("date", { ascending: true })
+            .range(from, from + PAGE - 1);
+          if (sinceDate) q = q.gt("date", sinceDate);
+          const { data, error } = await q;
+          if (error) { errored = true; break; }
+          if (!data || data.length === 0) break;
+          newRows.push(...(data as Record<string, unknown>[]));
+          if (data.length < PAGE) break;
+        }
+
+        // On a partial failure, leave the recent window from Phase A on screen
+        // rather than clobbering it with an incomplete history.
+        if (errored) return;
+
+        // Merge cached rows + freshly-fetched rows, keyed by KV key. Cached rows
+        // are already stripped of `id`/`type`/`createdAt`; new rows still carry
+        // them, so we strip during the merge.
+        const merged: SnapshotCache = { ...cached };
+        for (const [key, type] of Object.entries(SNAPSHOT_KEYS)) {
+          const cachedForKey = merged[key] ?? [];
+          const newForKey = newRows
+            .map((r) => rowToCamel(r))
+            .filter((s) => s.type === type)
+            .map((s) => {
+              const { id: _id, type: _type, createdAt: _ca, ...rest } =
+                s as Record<string, unknown>;
+              return rest as SnapshotRow;
+            });
+          merged[key] = [...cachedForKey, ...newForKey];
+        }
+
+        // Swap the in-memory cache up to the full history and wake consumers
+        // (the Phase A recent window is replaced in place).
+        for (const key of Object.keys(SNAPSHOT_KEYS)) {
+          const rows = merged[key];
+          if (rows && rows.length > 0) {
+            cache.current.set(key, JSON.stringify(rows));
+            notify(key);
+          }
+        }
+
+        // Persist the merged baseline so the next visit starts incremental.
+        if (newRows.length > 0 || !sinceDate) {
+          writeSnapshotCache(merged);
+        }
+      } catch {
+        // The recent window is already on screen — a failed backfill is harmless.
+      }
     }
 
     load();
-  }, [supabase]);
+  }, [supabase, notify]);
 
   // Write a single key to Supabase (debounced per key)
   const pendingWrites = useRef<Map<string, ReturnType<typeof setTimeout>>>(
@@ -396,7 +455,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <DataContext.Provider
-      value={{ cache, isLoaded, persist, saveAll, lastSaveTime }}
+      value={{ cache, isLoaded, persist, saveAll, lastSaveTime, subscribe }}
     >
       {children}
     </DataContext.Provider>
@@ -426,6 +485,21 @@ export function useCloudStorage<T>(
     }
     return initialValue;
   });
+
+  // Re-sync when the provider signals a background update for this key — e.g.
+  // the full snapshot history arriving after the initial recent-window paint.
+  const { subscribe, cache: dataCache } = ctx;
+  useEffect(() => {
+    return subscribe(key, () => {
+      const raw = dataCache.current.get(key);
+      if (raw === undefined) return;
+      try {
+        setStoredValue(JSON.parse(raw) as T);
+      } catch {
+        // Keep the current value if the cached blob is somehow invalid.
+      }
+    });
+  }, [key, subscribe, dataCache]);
 
   const setValue = useCallback(
     (value: T | ((prev: T) => T)) => {
