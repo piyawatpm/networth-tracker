@@ -47,9 +47,14 @@ function getTotalPaid(debtId: string, transactions: DebtTransaction[]): number {
     .reduce((sum, t) => sum + t.amount, 0);
 }
 
-function getRemaining(debt: DebtRecord, transactions: DebtTransaction[]): number {
+// Signed net position from *my* perspective: positive = others owe me,
+// negative = I owe others. Overpaying a loan flips the sign, which is how an
+// entry that was paid back more than it was borrowed correctly becomes
+// something I owe them — without discarding the original amount or payments.
+function getNetToMe(debt: DebtRecord, transactions: DebtTransaction[]): number {
   const paid = getTotalPaid(debt.id, transactions);
-  return Math.max(0, debt.originalAmount - paid);
+  const loanBalance = debt.originalAmount - paid; // remaining on the original loan (signed)
+  return debt.direction === "owed_to_me" ? loanBalance : -loanBalance;
 }
 
 function getProgressPercent(
@@ -94,11 +99,11 @@ export default function LiabilitiesPage() {
     let iOwe = 0;
 
     for (const debt of debts) {
-      const remaining = getRemaining(debt, transactions);
-      if (remaining <= 0) continue;
+      const netToMe = getNetToMe(debt, transactions);
+      if (netToMe === 0) continue;
 
-      const converted = convert(remaining, debt.currency);
-      if (debt.direction === "owed_to_me") {
+      const converted = convert(Math.abs(netToMe), debt.currency);
+      if (netToMe > 0) {
         owedToMe += converted;
       } else {
         iOwe += converted;
@@ -223,12 +228,19 @@ export default function LiabilitiesPage() {
       ) : (
         <div className="space-y-4">
           {sortedDebts.map((debt, idx) => {
-            const remaining = getRemaining(debt, transactions);
             const progressPct = getProgressPercent(debt, transactions);
             const totalPaid = getTotalPaid(debt.id, transactions);
             const payments = getDebtPayments(debt.id, transactions);
             const isExpanded = expandedIds.has(debt.id);
-            const isOwedToMe = debt.direction === "owed_to_me";
+            // `loanIsOwedToMe` anchors transaction labels to the original loan;
+            // `displayIsOwedToMe` follows the live net so an overpaid entry flips
+            // the card to show what I now owe them.
+            const loanIsOwedToMe = debt.direction === "owed_to_me";
+            const netToMe = getNetToMe(debt, transactions);
+            const displayIsOwedToMe =
+              netToMe > 0 || (netToMe === 0 && loanIsOwedToMe);
+            const headlineAmount = Math.abs(netToMe);
+            const isOverpaid = totalPaid > debt.originalAmount;
             const sym = CURRENCY_SYMBOLS[debt.currency];
 
             return (
@@ -248,17 +260,17 @@ export default function LiabilitiesPage() {
                     <span
                       className={cn(
                         "inline-flex items-center gap-1 shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium",
-                        isOwedToMe
+                        displayIsOwedToMe
                           ? "bg-income/10 text-income"
                           : "bg-expense/10 text-expense"
                       )}
                     >
-                      {isOwedToMe ? (
+                      {displayIsOwedToMe ? (
                         <ArrowDownLeft className="h-3 w-3" />
                       ) : (
                         <ArrowUpRight className="h-3 w-3" />
                       )}
-                      {isOwedToMe ? "Owed to Me" : "I Owe"}
+                      {displayIsOwedToMe ? "Owed to Me" : "I Owe"}
                     </span>
                   </div>
 
@@ -266,10 +278,14 @@ export default function LiabilitiesPage() {
                   <div className="flex items-baseline justify-between">
                     <div>
                       <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-0.5">
-                        Remaining
+                        {isOverpaid
+                          ? displayIsOwedToMe
+                            ? "Net owed to me"
+                            : "Net I owe"
+                          : "Remaining"}
                       </p>
-                      <p className={cn("text-xl font-bold tabular-nums", isOwedToMe ? "text-income" : "text-expense")}>
-                        {sym}{remaining.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      <p className={cn("text-xl font-bold tabular-nums", displayIsOwedToMe ? "text-income" : "text-expense")}>
+                        {sym}{headlineAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </p>
                     </div>
                     <div className="text-right">
@@ -286,9 +302,15 @@ export default function LiabilitiesPage() {
                       <span className="text-[10px] text-muted-foreground tabular-nums">
                         {sym}{totalPaid.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} paid
                       </span>
-                      <span className="ml-auto text-[10px] text-muted-foreground tabular-nums">
-                        {progressPct.toFixed(0)}%
-                      </span>
+                      {isOverpaid ? (
+                        <span className="ml-auto text-[10px] font-medium text-expense tabular-nums">
+                          Overpaid by {sym}{(totalPaid - debt.originalAmount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      ) : (
+                        <span className="ml-auto text-[10px] text-muted-foreground tabular-nums">
+                          {progressPct.toFixed(0)}%
+                        </span>
+                      )}
                     </Progress>
                   </div>
 
@@ -336,7 +358,7 @@ export default function LiabilitiesPage() {
                         variant="ghost"
                         className="text-muted-foreground"
                         title={
-                          isOwedToMe
+                          displayIsOwedToMe
                             ? "Reverse to “I Owe”"
                             : "Reverse to “Owed to Me”"
                         }
@@ -384,8 +406,8 @@ export default function LiabilitiesPage() {
                       {payments.map((txn) => {
                         const isPay = txn.amount >= 0;
                         const txLabel = isPay
-                          ? (isOwedToMe ? "Paid back" : "You paid")
-                          : (isOwedToMe ? "Borrowed more" : "You borrowed");
+                          ? (loanIsOwedToMe ? "Paid back" : "You paid")
+                          : (loanIsOwedToMe ? "Borrowed more" : "You borrowed");
                         return (
                         <div
                           key={txn.id}
