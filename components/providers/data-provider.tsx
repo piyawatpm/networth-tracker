@@ -21,10 +21,8 @@ import {
   syncCategories,
 } from "@/lib/supabase/tables";
 import {
-  readSnapshotCache,
   writeSnapshotCache,
   setSnapshotCacheKey,
-  getLatestCachedDate,
   type SnapshotCache,
   type SnapshotRow,
 } from "@/lib/storage/snapshot-cache";
@@ -67,6 +65,9 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const cache = useRef<Map<string, string>>(new Map());
   const [isLoaded, setIsLoaded] = useState(false);
   const [lastSaveTime, setLastSaveTime] = useState<number | null>(null);
+  // True while the background full-history backfill (Phase B) is running. Drives
+  // the non-blocking "syncing history" indicator — never gates the UI.
+  const [isBackfilling, setIsBackfilling] = useState(false);
   const supabase = useMemo(() => createClient(), []);
 
   // Subscribers that want to re-render when a key is updated *after* the
@@ -221,44 +222,40 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       loadFullSnapshotHistory();
     }
 
-    // Background backfill of the full snapshot history. Reuses the incremental
-    // localStorage cache: a warm cache pulls only the rows added since the last
-    // visit; a cold cache pages through everything (the old boot-time cost, now
-    // off the critical path). Subscribers are notified as each key fills in so
-    // open charts redraw with their full history.
+    // Background backfill of the COMPLETE snapshot history. We deliberately page
+    // through the WHOLE table every time (ascending from offset 0) rather than
+    // an incremental "rows newer than cache" fetch — an incremental fetch only
+    // ever moves forward, so it can never fill in older history that the recent
+    // window (Phase A) is missing. This guarantees "fetch all", and since it's
+    // off the critical path the extra reads don't affect time-to-paint.
+    // Subscribers are notified once so open charts redraw with the full range.
     async function loadFullSnapshotHistory() {
+      setIsBackfilling(true);
       try {
-        const cached: SnapshotCache = readSnapshotCache() ?? {};
-        const sinceDate = getLatestCachedDate(cached);
-
-        const newRows: Record<string, unknown>[] = [];
+        const allRows: Record<string, unknown>[] = [];
         const PAGE = 1000;
-        let errored = false;
+        let completed = false;
         for (let from = 0; ; from += PAGE) {
-          let q = supabase
+          const { data, error } = await supabase
             .from("snapshots")
             .select("*")
             .order("date", { ascending: true })
             .range(from, from + PAGE - 1);
-          if (sinceDate) q = q.gt("date", sinceDate);
-          const { data, error } = await q;
-          if (error) { errored = true; break; }
-          if (!data || data.length === 0) break;
-          newRows.push(...(data as Record<string, unknown>[]));
-          if (data.length < PAGE) break;
+          if (error) break; // completed stays false → keep Phase A window
+          if (!data || data.length === 0) { completed = true; break; }
+          allRows.push(...(data as Record<string, unknown>[]));
+          if (data.length < PAGE) { completed = true; break; }
         }
 
-        // On a partial failure, leave the recent window from Phase A on screen
-        // rather than clobbering it with an incomplete history.
-        if (errored) return;
+        // Only commit a fully-fetched history. On a partial failure, leave the
+        // recent window from Phase A on screen rather than clobbering it with an
+        // incomplete (oldest-first) slice.
+        if (!completed) return;
 
-        // Merge cached rows + freshly-fetched rows, keyed by KV key. Cached rows
-        // are already stripped of `id`/`type`/`createdAt`; new rows still carry
-        // them, so we strip during the merge.
-        const merged: SnapshotCache = { ...cached };
+        // Split the flat rows into the three KV keys, stripping DB-only fields.
+        const full: SnapshotCache = {};
         for (const [key, type] of Object.entries(SNAPSHOT_KEYS)) {
-          const cachedForKey = merged[key] ?? [];
-          const newForKey = newRows
+          full[key] = allRows
             .map((r) => rowToCamel(r))
             .filter((s) => s.type === type)
             .map((s) => {
@@ -266,25 +263,23 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
                 s as Record<string, unknown>;
               return rest as SnapshotRow;
             });
-          merged[key] = [...cachedForKey, ...newForKey];
         }
 
         // Swap the in-memory cache up to the full history and wake consumers
         // (the Phase A recent window is replaced in place).
         for (const key of Object.keys(SNAPSHOT_KEYS)) {
-          const rows = merged[key];
+          const rows = full[key];
           if (rows && rows.length > 0) {
             cache.current.set(key, JSON.stringify(rows));
             notify(key);
           }
         }
 
-        // Persist the merged baseline so the next visit starts incremental.
-        if (newRows.length > 0 || !sinceDate) {
-          writeSnapshotCache(merged);
-        }
+        writeSnapshotCache(full);
       } catch {
         // The recent window is already on screen — a failed backfill is harmless.
+      } finally {
+        setIsBackfilling(false);
       }
     }
 
@@ -458,6 +453,14 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       value={{ cache, isLoaded, persist, saveAll, lastSaveTime, subscribe }}
     >
       {children}
+      {/* Non-blocking indicator: the recent window is already interactive while
+          the full history streams in behind it. */}
+      {isBackfilling && (
+        <div className="pointer-events-none fixed bottom-4 right-4 z-50 flex items-center gap-2 rounded-full border border-border/60 bg-background/90 px-3 py-1.5 text-xs font-mono text-muted-foreground shadow-sm backdrop-blur-sm">
+          <RefreshCw className="h-3 w-3 animate-spin" />
+          <span>Syncing full history…</span>
+        </div>
+      )}
     </DataContext.Provider>
   );
 }
