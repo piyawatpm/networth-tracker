@@ -122,34 +122,53 @@ export async function syncEntityTable(
 }
 
 /**
- * Deletes all snapshots for the given type, then inserts the new set.
- * Removes any client-side `id` field before inserting (DB generates UUIDs).
- * Adds the `type` field.
+ * APPEND-ONLY sync for snapshots. Snapshots are immutable history, and the
+ * client's in-memory copy is frequently a capped/recent SUBSET of the full
+ * trail. So we must NEVER delete the server-side rows to "match" the client —
+ * doing that (a `delete().eq("type")` then re-insert of the short array) once
+ * wiped weeks of history. Instead we read the dates already stored and insert
+ * only the genuinely-new ones. The server table is the canonical superset.
+ *
+ * (Bulk wipes are handled explicitly elsewhere — Settings → Clear has its own
+ * delete path; this function is only used by the normal save flow.)
  */
 export async function syncSnapshots(
   supabase: SupabaseClient,
   snapshotType: string,
   rows: Record<string, unknown>[]
 ): Promise<void> {
-  const { error: deleteError } = await supabase
-    .from("snapshots")
-    .delete()
-    .eq("type", snapshotType);
-
-  if (deleteError) {
-    console.warn(`[syncSnapshots] delete failed for type "${snapshotType}":`, deleteError.message);
-    return;
-  }
-
   if (rows.length === 0) return;
 
-  const insertRows = rows.map((row) => {
-    // Convert keys to snake_case, strip client-generated id, and inject type
-    const snake = rowToSnake(row);
-    delete snake["id"];
-    snake["type"] = snapshotType;
-    return snake;
-  });
+  // Read the dates already stored for this type (paginated — the archive can be
+  // large) so we only ever ADD what's missing and never duplicate or delete.
+  const existingDates = new Set<unknown>();
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from("snapshots")
+      .select("date")
+      .eq("type", snapshotType)
+      .range(from, from + PAGE - 1);
+    if (error) {
+      console.warn(`[syncSnapshots] could not read existing dates for "${snapshotType}":`, error.message);
+      return; // bail rather than risk inserting duplicates
+    }
+    if (!data || data.length === 0) break;
+    for (const r of data) existingDates.add((r as { date: unknown }).date);
+    if (data.length < PAGE) break;
+  }
+
+  const insertRows = rows
+    .map((row) => {
+      // Convert keys to snake_case, strip client-generated id, and inject type
+      const snake = rowToSnake(row);
+      delete snake["id"];
+      snake["type"] = snapshotType;
+      return snake;
+    })
+    .filter((row) => !existingDates.has(row["date"]));
+
+  if (insertRows.length === 0) return;
 
   const { error: insertError } = await supabase
     .from("snapshots")
