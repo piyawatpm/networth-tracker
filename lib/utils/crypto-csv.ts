@@ -1,4 +1,4 @@
-import type { CryptoTransaction, CryptoHolding } from "./types";
+import type { CryptoTransaction, CryptoHolding, RealizedPnlResult, RealizedPnlByToken } from "./types";
 import { STABLECOINS, YIELD_PREFIXES, KNOWN_EXCHANGES } from "./constants";
 
 // ---------------------------------------------------------------------------
@@ -310,6 +310,70 @@ export function computeHoldings(transactions: CryptoTransaction[]): CryptoHoldin
   }
 
   return holdings.sort((a, b) => b.currentValueUsd - a.currentValueUsd);
+}
+
+// ---------------------------------------------------------------------------
+// Compute realized PnL per token (includes fully-sold coins)
+// ---------------------------------------------------------------------------
+// Unlike computeHoldings, this does NOT drop tokens whose current balance is
+// ~0 — those are exactly the positions you've fully exited, where realized
+// profit matters most. Mirrors the avg-buy-price method (cumulative buys define
+// the average; sells realize proceeds − soldAmount × avgBuyPrice) so the number
+// stays consistent with the cost basis used elsewhere. Stablecoins and dust
+// (<$0.01) are filtered out so the list stays clean.
+
+export function computeRealizedPnl(transactions: CryptoTransaction[]): RealizedPnlResult {
+  // Sort by date so each sell uses the avg-buy-price as it stood at that time.
+  const sorted = [...transactions].sort((a, b) =>
+    a.date < b.date ? -1 : a.date > b.date ? 1 : 0,
+  );
+
+  interface State {
+    totalBoughtAmount: number;
+    totalBoughtCost: number;
+    realizedPnl: number;
+  }
+  const map = new Map<string, State>();
+
+  for (const tx of sorted) {
+    if (!map.has(tx.token)) {
+      map.set(tx.token, { totalBoughtAmount: 0, totalBoughtCost: 0, realizedPnl: 0 });
+    }
+    const s = map.get(tx.token)!;
+
+    switch (tx.type) {
+      case "buy":
+      case "transferIn":
+        // transferIn rows often carry no USD value; only shift the average
+        // when the row has a cost, otherwise avg buy price drifts on deposits.
+        if (tx.totalValueUsd != null) {
+          s.totalBoughtAmount += tx.amount;
+          s.totalBoughtCost += tx.totalValueUsd;
+        }
+        break;
+      case "sell":
+      case "transferOut":
+        // A disposal only realizes PnL when it carries USD proceeds and we have
+        // a cost basis to compare against.
+        if (tx.totalValueUsd != null && s.totalBoughtAmount > 0) {
+          const avgBuy = s.totalBoughtCost / s.totalBoughtAmount;
+          s.realizedPnl += tx.totalValueUsd - tx.amount * avgBuy;
+        }
+        break;
+    }
+  }
+
+  const byToken: RealizedPnlByToken[] = [];
+  let total = 0;
+  for (const [token, data] of map) {
+    if (isStablecoin(token)) continue;
+    if (Math.abs(data.realizedPnl) < 0.01) continue;
+    byToken.push({ token, realizedPnlUsd: data.realizedPnl });
+    total += data.realizedPnl;
+  }
+
+  byToken.sort((a, b) => b.realizedPnlUsd - a.realizedPnlUsd);
+  return { total, byToken };
 }
 
 // ---------------------------------------------------------------------------

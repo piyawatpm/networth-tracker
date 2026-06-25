@@ -233,6 +233,16 @@ export interface CryptoTransaction {
   notes: string;
 }
 
+export interface RealizedPnlByToken {
+  token: string;
+  realizedPnlUsd: number;  // locked-in gain/loss from sells of this token
+}
+
+export interface RealizedPnlResult {
+  total: number;  // sum of realized PnL across all (non-stablecoin) tokens
+  byToken: RealizedPnlByToken[];  // sorted: biggest gain → biggest loss
+}
+
 export interface CachedRates {
   rates: Record<string, number>;
   fetchedAt: number; // unix timestamp ms

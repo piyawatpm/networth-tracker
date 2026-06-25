@@ -12,6 +12,8 @@ import {
   computePortfolioHistory,
   applyStablecoinTags,
   detectFormat,
+  parseCryptoCSV,
+  computeRealizedPnl,
 } from "@/lib/utils/crypto-csv";
 import {
   fetchCryptoPrices,
@@ -25,7 +27,7 @@ import { ECHARTS_COLORS } from "@/lib/utils/echarts";
 import dynamic from "next/dynamic";
 import { ReactECharts, type EChartsReact } from "@/components/ui/lazy-echarts";
 
-import { Settings2, Wifi, WifiOff, FileText, RefreshCw } from "lucide-react";
+import { Settings2, Wifi, WifiOff, FileText, RefreshCw, Receipt } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { BlurFade } from "@/components/ui/blur-fade";
 import { cn } from "@/lib/utils";
@@ -40,6 +42,7 @@ import { HistoryChart } from "./_components/history-chart";
 import { CryptoDonut } from "./_components/crypto-donut";
 import { HoldingsBreakdown } from "./_components/holdings-breakdown";
 import { TickerMappingDialog } from "./_components/ticker-mapping-dialog";
+import { RealizedPnl } from "./_components/realized-pnl";
 
 export default function CryptoPage() {
   const [csvText, setCsvText] = useCloudStorage<string>("crypto_csv_text", "");
@@ -53,6 +56,13 @@ export default function CryptoPage() {
     null,
   );
 
+  // Transaction History CSV (separate from the holdings CSV) — drives realized PnL
+  const [txCsvText, setTxCsvText] = useCloudStorage<string>("crypto_tx_csv_text", "");
+  const [txUploadedAt, setTxUploadedAt] = useCloudStorage<number | null>(
+    "crypto_tx_uploaded_at",
+    null,
+  );
+
   // Live prices
   const [livePrices, setLivePrices] = useState<Record<string, number>>({});
 
@@ -60,6 +70,8 @@ export default function CryptoPage() {
   const donutRef = useRef<EChartsReact>(null);
   // Hidden file input for Replace CSV action
   const replaceInputRef = useRef<HTMLInputElement>(null);
+  // Hidden file input for the Transaction History upload
+  const txInputRef = useRef<HTMLInputElement>(null);
   const highlightSlice = useCallback((name: string) => {
     donutRef.current?.getEchartsInstance()?.dispatchAction({ type: "highlight", name });
   }, []);
@@ -237,6 +249,12 @@ export default function CryptoPage() {
     [csvText],
   );
 
+  // Realized PnL from the (separate) Transaction History CSV — null until uploaded
+  const realizedPnl = useMemo(
+    () => (txCsvText ? computeRealizedPnl(parseCryptoCSV(txCsvText)) : null),
+    [txCsvText],
+  );
+
   // Apply stablecoin tags: merge user-tagged stablecoins into CASH
   const taggedHoldings = useMemo(
     () => applyStablecoinTags(holdings, stablecoinTags),
@@ -408,6 +426,7 @@ export default function CryptoPage() {
 
   // File handler for Replace CSV
   const [replaceStatus, setReplaceStatus] = useState<string | null>(null);
+  const [txStatus, setTxStatus] = useState<string | null>(null);
   const handleFile = useCallback(
     (file: File) => {
       setReplaceStatus("Reading file…");
@@ -477,6 +496,51 @@ export default function CryptoPage() {
     [handleFile],
   );
 
+  // Transaction History upload — realized PnL only, no holdings/snapshot impact
+  const handleTxFile = useCallback(
+    (file: File) => {
+      setTxStatus("Reading file…");
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const text = e.target?.result as string;
+        if (!text || text.trim().length === 0) {
+          setTxStatus("File was empty");
+          window.setTimeout(() => setTxStatus(null), 4000);
+          return;
+        }
+        if (detectFormat(text) !== "transactions") {
+          setTxStatus(
+            "Not a Transaction History export — this slot needs the transactions CSV (buy/sell rows), not Portfolio Overview.",
+          );
+          window.setTimeout(() => setTxStatus(null), 6000);
+          return;
+        }
+        const result = computeRealizedPnl(parseCryptoCSV(text));
+        setTxCsvText(text);
+        setTxUploadedAt(Date.now());
+        setTxStatus(`Loaded — realized PnL across ${result.byToken.length} coins`);
+        window.setTimeout(() => setTxStatus(null), 4000);
+      };
+      reader.onerror = () => setTxStatus("Error reading file");
+      reader.readAsText(file);
+    },
+    [setTxCsvText, setTxUploadedAt],
+  );
+
+  const onTxFileSelect = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (file) handleTxFile(file);
+      if (e.target) e.target.value = "";
+    },
+    [handleTxFile],
+  );
+
+  const clearTx = useCallback(() => {
+    setTxCsvText("");
+    setTxUploadedAt(null);
+  }, [setTxCsvText, setTxUploadedAt]);
+
   const clearCsv = useCallback(() => {
     setCsvText("");
     setCsvUploadedAt(null);
@@ -518,6 +582,14 @@ export default function CryptoPage() {
             <span className="hidden sm:inline">Replace CSV</span>
             <span className="sm:hidden">CSV</span>
           </button>
+          <button
+            onClick={() => txInputRef.current?.click()}
+            className="flex items-center gap-1.5 rounded-full bg-secondary px-3 py-1.5 text-xs font-medium text-secondary-foreground transition-colors hover:bg-secondary/80 shrink-0"
+          >
+            <Receipt className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Upload Transactions</span>
+            <span className="sm:hidden">Txns</span>
+          </button>
           <TickerMappingDialog
             tokens={taggedHoldings.map((h) => h.token)}
             mappings={tickerMappings}
@@ -537,9 +609,21 @@ export default function CryptoPage() {
             onChange={onFileSelect}
             className="hidden"
           />
+          <input
+            ref={txInputRef}
+            type="file"
+            accept=".csv,text/csv,text/plain,application/vnd.ms-excel"
+            onChange={onTxFileSelect}
+            className="hidden"
+          />
           {replaceStatus && (
             <span className="text-[10px] font-mono text-muted-foreground basis-full text-right">
               {replaceStatus}
+            </span>
+          )}
+          {txStatus && (
+            <span className="text-[10px] font-mono text-muted-foreground basis-full text-right">
+              {txStatus}
             </span>
           )}
         </div>
@@ -565,6 +649,14 @@ export default function CryptoPage() {
         filteredHoldings={filteredHoldings}
         allSelected={allSelected}
         setSelectedTokens={setSelectedTokens}
+      />
+
+      {/* ── Realized P&L (from Transaction History CSV) ── */}
+      <RealizedPnl
+        realized={realizedPnl}
+        onUpload={() => txInputRef.current?.click()}
+        uploadedAt={txUploadedAt}
+        onClear={clearTx}
       />
 
       {/* ── Live WebSocket Status (moved below overview) ── */}
