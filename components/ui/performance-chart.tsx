@@ -277,31 +277,44 @@ export function PerformanceChart({
     })).sort((a, b) => a.time - b.time);
   }, [snapshots, currency, convert]);
 
-  // Filter by period
+  // Filter by period, then downsample to a resolution that suits the range.
+  // Snapshots can be every few minutes, so rendering all of them on a 1Y view
+  // is noisy and slow. Each period keeps a sensible interval (best-practice):
+  //   1D → every point · 1W → hourly · 1M → 4-hourly · 6M → 12-hourly ·
+  //   1Y/ALL → daily. We keep the last point in each bucket (the "close" for
+  //   that interval) plus the very first point so the range start is accurate.
   const filteredData = useMemo(() => {
     if (convertedSnapshots.length === 0) return [];
     const nowSec = Math.floor(Date.now() / 1000);
-    let cutoff = 0;
+    const HOUR = 60 * 60;
+    const DAY = 24 * HOUR;
+    let cutoff = 0; // 0 = no lower bound (whole history)
+    let bucketSec = 0; // 0 = keep every point
     switch (period) {
-      case "1D":
-        cutoff = nowSec - 24 * 60 * 60;
-        break;
-      case "1W":
-        cutoff = nowSec - 7 * 24 * 60 * 60;
-        break;
-      case "1M":
-        cutoff = nowSec - 30 * 24 * 60 * 60;
-        break;
-      case "6M":
-        cutoff = nowSec - 180 * 24 * 60 * 60;
-        break;
-      case "1Y":
-        cutoff = nowSec - 365 * 24 * 60 * 60;
-        break;
-      case "ALL":
-        return convertedSnapshots;
+      case "1D": cutoff = nowSec - DAY;       bucketSec = 0;        break;
+      case "1W": cutoff = nowSec - 7 * DAY;   bucketSec = HOUR;     break;
+      case "1M": cutoff = nowSec - 30 * DAY;  bucketSec = 4 * HOUR; break;
+      case "6M": cutoff = nowSec - 180 * DAY; bucketSec = 12 * HOUR;break;
+      case "1Y": cutoff = nowSec - 365 * DAY; bucketSec = DAY;      break;
+      case "ALL": cutoff = 0;                 bucketSec = DAY;      break;
     }
-    return convertedSnapshots.filter((s) => s.time >= cutoff);
+
+    const inRange =
+      cutoff > 0
+        ? convertedSnapshots.filter((s) => s.time >= cutoff)
+        : convertedSnapshots;
+
+    if (bucketSec <= 0 || inRange.length === 0) return inRange;
+
+    const out: typeof inRange = [];
+    for (let i = 0; i < inRange.length; i++) {
+      const bucket = Math.floor((inRange[i].time as number) / bucketSec);
+      const lastInBucket =
+        i + 1 >= inRange.length ||
+        Math.floor((inRange[i + 1].time as number) / bucketSec) !== bucket;
+      if (i === 0 || lastInBucket) out.push(inRange[i]);
+    }
+    return out;
   }, [convertedSnapshots, period]);
 
   // Compute the single live data point once — reused by the main line, the
