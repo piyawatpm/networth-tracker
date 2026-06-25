@@ -21,6 +21,7 @@ import {
   syncCategories,
 } from "@/lib/supabase/tables";
 import {
+  readSnapshotCache,
   writeSnapshotCache,
   setSnapshotCacheKey,
   type SnapshotCache,
@@ -232,30 +233,33 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     async function loadFullSnapshotHistory() {
       setIsBackfilling(true);
       try {
+        // Anything already cached locally may be a LONGER history than the DB
+        // currently holds (e.g. if the server-side trail was truncated). We
+        // only ever ADD to it — never shrink it — so a reload is always safe
+        // and a browser that still has the full history keeps showing it.
+        const existing: SnapshotCache = readSnapshotCache() ?? {};
+
+        // Page through the COMPLETE server-side history.
         const allRows: Record<string, unknown>[] = [];
         const PAGE = 1000;
-        let completed = false;
         for (let from = 0; ; from += PAGE) {
           const { data, error } = await supabase
             .from("snapshots")
             .select("*")
             .order("date", { ascending: true })
             .range(from, from + PAGE - 1);
-          if (error) break; // completed stays false → keep Phase A window
-          if (!data || data.length === 0) { completed = true; break; }
+          if (error) break;
+          if (!data || data.length === 0) break;
           allRows.push(...(data as Record<string, unknown>[]));
-          if (data.length < PAGE) { completed = true; break; }
+          if (data.length < PAGE) break;
         }
 
-        // Only commit a fully-fetched history. On a partial failure, leave the
-        // recent window from Phase A on screen rather than clobbering it with an
-        // incomplete (oldest-first) slice.
-        if (!completed) return;
-
-        // Split the flat rows into the three KV keys, stripping DB-only fields.
-        const full: SnapshotCache = {};
+        // Union cached rows + server rows, keyed by `date` (server wins on a
+        // tie — it's the source of truth for that timestamp). Snapshots are
+        // immutable, so a union can only ever be MORE complete, never wrong.
+        const merged: SnapshotCache = {};
         for (const [key, type] of Object.entries(SNAPSHOT_KEYS)) {
-          full[key] = allRows
+          const dbRows = allRows
             .map((r) => rowToCamel(r))
             .filter((s) => s.type === type)
             .map((s) => {
@@ -263,19 +267,29 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
                 s as Record<string, unknown>;
               return rest as SnapshotRow;
             });
+          const byDate = new Map<string, SnapshotRow>();
+          for (const r of existing[key] ?? []) {
+            const d = (r as SnapshotRow)?.date;
+            if (typeof d === "string") byDate.set(d, r);
+          }
+          for (const r of dbRows) {
+            const d = r?.date;
+            if (typeof d === "string") byDate.set(d, r);
+          }
+          merged[key] = [...byDate.values()].sort((a, b) =>
+            String(a.date) < String(b.date) ? -1 : String(a.date) > String(b.date) ? 1 : 0,
+          );
         }
 
-        // Swap the in-memory cache up to the full history and wake consumers
-        // (the Phase A recent window is replaced in place).
+        // Publish the union to consumers and persist it back to localStorage.
         for (const key of Object.keys(SNAPSHOT_KEYS)) {
-          const rows = full[key];
+          const rows = merged[key];
           if (rows && rows.length > 0) {
             cache.current.set(key, JSON.stringify(rows));
             notify(key);
           }
         }
-
-        writeSnapshotCache(full);
+        writeSnapshotCache(merged);
       } catch {
         // The recent window is already on screen — a failed backfill is harmless.
       } finally {
