@@ -6,6 +6,7 @@ import { useCurrency } from "@/components/providers/currency-provider";
 import type { PortfolioHolding, HoldingType, AccountType, PortfolioTransaction } from "@/lib/utils/types";
 import { getSydneyDateString } from "@/lib/utils/timezone";
 import { TransactionHistory } from "@/components/portfolio/transaction-history";
+import { derivePosition } from "@/lib/utils/portfolio-transactions";
 import {
   getPriceCache,
   setPriceCache,
@@ -34,6 +35,7 @@ const PerformanceChart = dynamic(
 import { PortfolioCharts } from "./_components/portfolio-charts";
 import { HoldingsTable } from "./_components/holdings-table";
 import { PriceUpdateStatus } from "./_components/price-update-status";
+import { RealizedPnl, type RealizedHoldingRow } from "./_components/realized-pnl";
 import {
   type SortKey,
   type PortfolioSnapshot,
@@ -379,14 +381,49 @@ export default function PortfolioPage() {
     );
     const pnl = totalValue - totalInvested;
     const pnlPercent = totalInvested > 0 ? (pnl / totalInvested) * 100 : 0;
+    // Realized P&L = profit/loss locked in by past sells, replayed from the
+    // transaction log (average-cost). Disjoint from unrealized P&L, which only
+    // covers the units still held, so the two never double-count.
+    const realizedPnl = filteredHoldings.reduce((s, h) => {
+      const txs = transactions.filter((t) => t.holdingId === h.id);
+      if (txs.length === 0) return s;
+      const realized = derivePosition(txs, h.currency, convert).realizedPnl;
+      return s + convert(realized, h.currency);
+    }, 0);
     return {
       totalValue,
       totalInvested,
       pnl,
       pnlPercent,
+      realizedPnl,
       count: filteredHoldings.length,
     };
-  }, [filteredHoldings, convert]);
+  }, [filteredHoldings, convert, transactions]);
+
+  // Per-holding realized P&L breakdown for the Realized P&L card. Mirrors the
+  // crypto page's per-token list: only holdings with a recorded sell appear,
+  // sorted biggest gain → biggest loss. Values are pre-converted to the display
+  // currency so the card renders them as-is. Its total matches the Realized P&L
+  // summary tile (holdings with no sell contribute 0 to both).
+  const realizedBreakdown = useMemo(() => {
+    const rows = filteredHoldings
+      .map((h): RealizedHoldingRow | null => {
+        const txs = transactions.filter((t) => t.holdingId === h.id);
+        if (txs.length === 0) return null;
+        const pos = derivePosition(txs, h.currency, convert);
+        if (pos.totalSold <= 0) return null; // bought-only → nothing realized
+        return {
+          holdingId: h.id,
+          name: h.name,
+          ticker: h.ticker,
+          realizedPnl: convert(pos.realizedPnl, h.currency),
+        };
+      })
+      .filter((r): r is RealizedHoldingRow => r !== null)
+      .sort((a, b) => b.realizedPnl - a.realizedPnl);
+    const total = rows.reduce((s, r) => s + r.realizedPnl, 0);
+    return { rows, total };
+  }, [filteredHoldings, transactions, convert]);
 
   // Portfolio snapshots — no longer auto-saved client-side.
   // Snapshots are created by: manual snapshot button (📷) or daily cron.
@@ -404,25 +441,69 @@ export default function PortfolioPage() {
   }, [snapshots, includeSuper]);
 
 
-  function handleTransaction(tx: PortfolioTransaction) {
-    setTransactions((prev) => [tx, ...prev]);
+  // Re-derive a holding's units, cost basis and current value from its
+  // transaction log whenever a transaction is added, edited or deleted.
+  // Units/cost NOT explained by the log (legacy or manually-set positions) are
+  // preserved as an opening baseline, so reconciling never wipes a holding that
+  // predates transaction tracking. currentValue is rescaled at the last-known
+  // price/unit so unrealized P&L stays correct between price fetches — and
+  // forever, for manual holdings that have no live price.
+  function reconcileHolding(
+    holdingId: string,
+    oldTxs: PortfolioTransaction[],
+    newTxs: PortfolioTransaction[],
+  ) {
     setHoldings((prev) =>
       prev.map((h) => {
-        if (h.id !== tx.holdingId) return h;
-        if (tx.type === "buy") {
-          return {
-            ...h,
-            units: h.units + tx.units,
-            amountInvested: h.amountInvested + tx.totalAmount,
-          };
-        }
-        const fraction = h.units > 0 ? tx.units / h.units : 1;
-        return {
-          ...h,
-          units: h.units - tx.units,
-          amountInvested: h.amountInvested * (1 - fraction),
-        };
+        if (h.id !== holdingId) return h;
+        const before = derivePosition(oldTxs, h.currency, convert);
+        const after = derivePosition(newTxs, h.currency, convert);
+        const baseUnits = h.units - before.units;
+        const baseCost = h.amountInvested - before.costBasis;
+        const pricePerUnit = h.units > 1e-9 ? h.currentValue / h.units : 0;
+
+        let units = baseUnits + after.units;
+        let amountInvested = baseCost + after.costBasis;
+        if (Math.abs(units) < 1e-9) units = 0;
+        if (amountInvested < 1e-9) amountInvested = 0;
+
+        const currentValue =
+          units === 0
+            ? 0
+            : pricePerUnit > 0
+              ? pricePerUnit * units
+              : h.currentValue;
+
+        return { ...h, units, amountInvested, currentValue };
       }),
+    );
+  }
+
+  function handleTransaction(tx: PortfolioTransaction) {
+    const holdingTxs = transactions.filter((t) => t.holdingId === tx.holdingId);
+    setTransactions((prev) => [tx, ...prev]);
+    reconcileHolding(tx.holdingId, holdingTxs, [tx, ...holdingTxs]);
+  }
+
+  function handleDeleteTransaction(id: string) {
+    const tx = transactions.find((t) => t.id === id);
+    if (!tx) return;
+    const holdingTxs = transactions.filter((t) => t.holdingId === tx.holdingId);
+    setTransactions((prev) => prev.filter((t) => t.id !== id));
+    reconcileHolding(
+      tx.holdingId,
+      holdingTxs,
+      holdingTxs.filter((t) => t.id !== id),
+    );
+  }
+
+  function handleEditTransaction(updated: PortfolioTransaction) {
+    const holdingTxs = transactions.filter((t) => t.holdingId === updated.holdingId);
+    setTransactions((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+    reconcileHolding(
+      updated.holdingId,
+      holdingTxs,
+      holdingTxs.map((t) => (t.id === updated.id ? updated : t)),
     );
   }
 
@@ -526,7 +607,7 @@ export default function PortfolioPage() {
       {/* ── Summary Tiles ── */}
       <BlurFade delay={DELAY}>
         <div className="finance-card px-3 py-4 sm:p-5">
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-0 md:divide-x md:divide-border">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-5 md:gap-0 md:divide-x md:divide-border">
             <div className="md:pr-6 min-w-0">
               <p className="label-mono mb-1">Total Value</p>
               <p className="text-base sm:text-lg font-semibold tabular-nums truncate">
@@ -540,7 +621,7 @@ export default function PortfolioPage() {
               </p>
             </div>
             <div className="md:px-6 min-w-0">
-              <p className="label-mono mb-1">P&L</p>
+              <p className="label-mono mb-1">Unrealized P&L</p>
               <p
                 className={cn(
                   "text-base sm:text-lg font-semibold tabular-nums truncate",
@@ -555,6 +636,22 @@ export default function PortfolioPage() {
                 </span>
               </p>
             </div>
+            <div className="md:px-6 min-w-0">
+              <p className="label-mono mb-1">Realized P&L</p>
+              <p
+                className={cn(
+                  "text-base sm:text-lg font-semibold tabular-nums truncate",
+                  totals.realizedPnl > 0
+                    ? "text-income"
+                    : totals.realizedPnl < 0
+                      ? "text-expense"
+                      : "text-muted-foreground"
+                )}
+              >
+                {totals.realizedPnl > 0 ? "+" : ""}
+                {format(totals.realizedPnl)}
+              </p>
+            </div>
             <div className="md:pl-6 min-w-0">
               <p className="label-mono mb-1">Holdings</p>
               <p className="text-base sm:text-lg font-semibold tabular-nums">
@@ -564,6 +661,13 @@ export default function PortfolioPage() {
           </div>
         </div>
       </BlurFade>
+
+      {/* ── Realized P&L (per-holding breakdown from the transaction log) ── */}
+      <RealizedPnl
+        total={realizedBreakdown.total}
+        byHolding={realizedBreakdown.rows}
+        delay={DELAY}
+      />
 
       {/* ── Charts (donuts, broker, look-through) ── */}
       <PortfolioCharts
@@ -631,8 +735,8 @@ export default function PortfolioPage() {
         format={format}
         convert={convert}
         displayCurrency={currency}
-        onDeleteTransaction={(id) => setTransactions((prev) => prev.filter((t) => t.id !== id))}
-        onEditTransaction={(updated) => setTransactions((prev) => prev.map((t) => t.id === updated.id ? updated : t))}
+        onDeleteTransaction={handleDeleteTransaction}
+        onEditTransaction={handleEditTransaction}
       />
     </div>
   );

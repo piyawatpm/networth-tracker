@@ -97,7 +97,18 @@ export function TransactionDialog({ holding, onSave, trigger }: TransactionDialo
 
           {/* Units */}
           <div className="grid gap-1.5">
-            <Label>Units</Label>
+            <div className="flex items-center justify-between">
+              <Label>Units</Label>
+              {txType === "sell" && holding.units > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setUnits(String(holding.units))}
+                  className="text-[11px] font-medium text-accent hover:underline tabular-nums"
+                >
+                  Sell all ({holding.units.toLocaleString(undefined, { maximumFractionDigits: 6 })})
+                </button>
+              )}
+            </div>
             <Input type="number" min="0" step="any" value={units} onChange={(e) => setUnits(e.target.value)} placeholder="0" className="tabular-nums" />
           </div>
 

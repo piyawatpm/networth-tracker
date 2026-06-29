@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import type { PortfolioHolding, PortfolioTransaction } from "@/lib/utils/types";
+import { derivePosition } from "@/lib/utils/portfolio-transactions";
 import { formatDateString } from "@/lib/utils/timezone";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -41,6 +43,10 @@ export function TransactionHistory({
   const totalBought = entries.filter((tx) => tx.type === "buy").reduce((s, tx) => s + tx.units, 0);
   const totalSold = entries.filter((tx) => tx.type === "sell").reduce((s, tx) => s + tx.units, 0);
   const totalInvested = entries.filter((tx) => tx.type === "buy").reduce((s, tx) => s + tx.totalAmount, 0);
+
+  // Realized P&L from past sells (average-cost replay), in the holding's currency.
+  const realizedCurrency = holding?.currency ?? displayCurrency;
+  const realizedPnl = derivePosition(entries, realizedCurrency, convert).realizedPnl;
 
   function startEdit(tx: PortfolioTransaction) {
     setEditingId(tx.id);
@@ -86,6 +92,22 @@ export function TransactionHistory({
               <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Invested</p>
               <p className="text-sm font-semibold tabular-nums">{format(totalInvested, holding?.currency)}</p>
             </div>
+          </div>
+        )}
+
+        {/* Realized P&L — locked in once something has been sold */}
+        {totalSold > 0 && (
+          <div className={cn(
+            "flex items-center justify-between rounded-md border px-3 py-2",
+            realizedPnl >= 0 ? "border-income/30 bg-income/5" : "border-expense/30 bg-expense/5",
+          )}>
+            <span className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Realized P&L</span>
+            <span className={cn(
+              "text-sm font-semibold tabular-nums",
+              realizedPnl >= 0 ? "text-income" : "text-expense",
+            )}>
+              {realizedPnl >= 0 ? "+" : ""}{format(realizedPnl, realizedCurrency)}
+            </span>
           </div>
         )}
 

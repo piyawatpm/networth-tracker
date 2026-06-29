@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { PortfolioHolding, HoldingType, AccountType, PortfolioTransaction } from "@/lib/utils/types";
 import { HOLDING_TYPE_LABELS } from "@/lib/utils/constants";
+import { derivePosition } from "@/lib/utils/portfolio-transactions";
 import { canAutoUpdate, formatTimeAgo, type PriceCache } from "@/lib/utils/prices";
 import { cn } from "@/lib/utils";
 import { BlurFade } from "@/components/ui/blur-fade";
@@ -143,6 +144,11 @@ export function HoldingsTable({
               const current = convert(h.currentValue, h.currency);
               const pnl = current - invested;
               const pnlPct = invested > 0 ? (pnl / invested) * 100 : 0;
+              const holdingTxs = transactions.filter((t) => t.holdingId === h.id);
+              const hasSells = holdingTxs.some((t) => t.type === "sell");
+              const realizedPnl = hasSells
+                ? derivePosition(holdingTxs, h.currency, convert).realizedPnl
+                : 0;
               const isExpanded = expandedId === h.id;
               const typeColor = HOLDING_TYPE_COLOR_MAP[h.type] ?? "#708090";
               const logoKey = h.ticker
@@ -250,6 +256,16 @@ export function HoldingsTable({
                           </div>
                         ))}
                       </div>
+
+                      {/* Realized P&L — shown once the holding has booked a sell */}
+                      {hasSells && (
+                        <div className="flex items-center justify-between px-3 sm:px-4 py-1.5 border-t border-border/30">
+                          <span className="text-[9px] text-muted-foreground uppercase tracking-wider">Realized P&L</span>
+                          <span className={cn("text-xs font-medium tabular-nums", realizedPnl >= 0 ? "text-income" : "text-expense")}>
+                            {realizedPnl >= 0 ? "+" : ""}{format(realizedPnl, h.currency)}
+                          </span>
+                        </div>
+                      )}
 
                       {/* Action buttons */}
                       <div className="flex items-center justify-between px-2 sm:px-4 py-2 border-t border-border/30 bg-muted/10 gap-1 overflow-hidden">

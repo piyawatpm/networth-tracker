@@ -40,6 +40,8 @@ export interface PortfolioTotals {
   totalInvested: number;
   pnl: number;
   pnlPercent: number;
+  /** Locked-in profit/loss from past sells (average-cost), in display currency. */
+  realizedPnl: number;
   count: number;
 }
 
