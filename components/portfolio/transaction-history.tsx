@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { PortfolioHolding, PortfolioTransaction } from "@/lib/utils/types";
 import { derivePosition } from "@/lib/utils/portfolio-transactions";
+import { formatCurrency } from "@/lib/utils/fx";
 import { formatDateString } from "@/lib/utils/timezone";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -18,7 +19,7 @@ interface TransactionHistoryProps {
   holdingId: string | null;
   setHoldingId: (id: string | null) => void;
   format: (value: number, currency?: string) => string;
-  convert: (amount: number, from: string) => number;
+  convert: (amount: number, from: string, to?: string) => number;
   displayCurrency: string;
   onDeleteTransaction?: (id: string) => void;
   onEditTransaction?: (tx: PortfolioTransaction) => void;
@@ -40,12 +41,15 @@ export function TransactionHistory({
     .filter((tx) => tx.holdingId === holdingId)
     .sort((a, b) => b.createdAt - a.createdAt);
 
-  const totalBought = entries.filter((tx) => tx.type === "buy").reduce((s, tx) => s + tx.units, 0);
-  const totalSold = entries.filter((tx) => tx.type === "sell").reduce((s, tx) => s + tx.units, 0);
-  const totalInvested = entries.filter((tx) => tx.type === "buy").reduce((s, tx) => s + tx.totalAmount, 0);
-
   // Realized P&L from past sells (average-cost replay), in the holding's currency.
   const realizedCurrency = holding?.currency ?? displayCurrency;
+  const totalBought = entries.filter((tx) => tx.type === "buy").reduce((s, tx) => s + tx.units, 0);
+  const totalSold = entries.filter((tx) => tx.type === "sell").reduce((s, tx) => s + tx.units, 0);
+  // Legs can be denominated in different currencies, so convert each into the
+  // holding's currency before summing — a raw sum would mix denominations.
+  const totalInvested = entries
+    .filter((tx) => tx.type === "buy")
+    .reduce((s, tx) => s + convert(tx.totalAmount, tx.currency, realizedCurrency), 0);
   const realizedPnl = derivePosition(entries, realizedCurrency, convert).realizedPnl;
 
   function startEdit(tx: PortfolioTransaction) {
@@ -64,6 +68,10 @@ export function TransactionHistory({
       units,
       pricePerUnit: price,
       totalAmount: units * price,
+      // The edited price is in the holding's quote currency, so re-stamp the
+      // record with it — this also repairs records saved with a mismatched
+      // "Paid in" currency by the old transaction dialog.
+      currency: holding?.currency ?? tx.currency,
       date: editDate || tx.date,
     });
     setEditingId(null);
@@ -128,7 +136,7 @@ export function TransactionHistory({
                           className="h-7 text-xs tabular-nums" step="any" min="0" />
                       </div>
                       <div>
-                        <p className="text-[9px] text-muted-foreground uppercase mb-0.5">Price (USD)</p>
+                        <p className="text-[9px] text-muted-foreground uppercase mb-0.5">Price ({holding?.currency ?? "USD"})</p>
                         <Input type="number" value={editPrice} onChange={(e) => setEditPrice(e.target.value)}
                           className="h-7 text-xs tabular-nums" step="any" min="0" />
                       </div>
@@ -163,7 +171,8 @@ export function TransactionHistory({
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
                     <div className="text-right">
-                      <p className="text-xs font-mono tabular-nums font-medium">{format(tx.totalAmount, tx.currency)}</p>
+                      {/* Native amount first (format() would convert), display equivalent below */}
+                      <p className="text-xs font-mono tabular-nums font-medium">{formatCurrency(tx.totalAmount, tx.currency)}</p>
                       {tx.currency !== displayCurrency && (
                         <p className="text-[9px] text-muted-foreground tabular-nums">({format(convert(tx.totalAmount, tx.currency))})</p>
                       )}

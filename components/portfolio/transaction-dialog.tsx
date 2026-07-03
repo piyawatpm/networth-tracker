@@ -9,12 +9,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
 import { useCurrency } from "@/components/providers/currency-provider";
 import { getSydneyDateString } from "@/lib/utils/timezone";
-import type { PortfolioHolding, PortfolioTransaction, Currency } from "@/lib/utils/types";
+import type { PortfolioHolding, PortfolioTransaction } from "@/lib/utils/types";
 
 interface TransactionDialogProps {
   holding: PortfolioHolding;
@@ -23,12 +20,11 @@ interface TransactionDialogProps {
 }
 
 export function TransactionDialog({ holding, onSave, trigger }: TransactionDialogProps) {
-  const { enabledCurrencies } = useCurrency();
+  const { format, currency: displayCurrency } = useCurrency();
   const [open, setOpen] = useState(false);
   const [txType, setTxType] = useState<"buy" | "sell">("buy");
   const [units, setUnits] = useState("");
   const [pricePerUnit, setPricePerUnit] = useState("");
-  const [currency, setCurrency] = useState<Currency>(holding.currency);
   const [date, setDate] = useState(getSydneyDateString());
   const [notes, setNotes] = useState("");
   const [error, setError] = useState("");
@@ -40,7 +36,6 @@ export function TransactionDialog({ holding, onSave, trigger }: TransactionDialo
       setPricePerUnit(
         holding.units > 0 ? (holding.currentValue / holding.units).toFixed(4) : "",
       );
-      setCurrency(holding.currency);
       setDate(getSydneyDateString());
       setNotes("");
       setError("");
@@ -67,7 +62,10 @@ export function TransactionDialog({ holding, onSave, trigger }: TransactionDialo
       units: parsedUnits,
       pricePerUnit: parsedPrice,
       totalAmount,
-      currency,
+      // Price (and therefore units × price) is entered in the holding's quote
+      // currency, so the record must be stamped with it — stamping a different
+      // currency here silently rescales cost basis and realized P&L.
+      currency: holding.currency,
       date,
       notes: notes.trim(),
       createdAt: Date.now(),
@@ -112,31 +110,23 @@ export function TransactionDialog({ holding, onSave, trigger }: TransactionDialo
             <Input type="number" min="0" step="any" value={units} onChange={(e) => setUnits(e.target.value)} placeholder="0" className="tabular-nums" />
           </div>
 
-          {/* Price per Unit — always in USD */}
+          {/* Price per Unit — in the holding's quote currency */}
           <div className="grid gap-1.5">
-            <Label>Price per Unit (USD)</Label>
+            <Label>Price per Unit ({holding.currency})</Label>
             <div className="relative">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">$</span>
               <Input type="number" min="0" step="any" value={pricePerUnit} onChange={(e) => setPricePerUnit(e.target.value)} placeholder="0.00" className="tabular-nums pl-7" />
             </div>
-            <p className="text-[10px] text-muted-foreground">Stock/ETF price is always in USD</p>
+            <p className="text-[10px] text-muted-foreground">Use the market price in {holding.currency} — the currency this holding is quoted in</p>
           </div>
 
-          {/* Total Amount + Currency (user chooses payment currency) */}
-          <div className="grid grid-cols-[1fr_auto] gap-3">
-            <div className="grid gap-1.5">
-              <Label>Total Amount</Label>
-              <Input readOnly value={totalAmount > 0 ? totalAmount.toFixed(2) : ""} placeholder="0.00" className="tabular-nums bg-muted/50" />
-            </div>
-            <div className="grid gap-1.5">
-              <Label>Paid in</Label>
-              <Select value={currency} onValueChange={(v) => v && setCurrency(v as Currency)}>
-                <SelectTrigger className="w-20"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {enabledCurrencies.map((c) => (<SelectItem key={c} value={c}>{c}</SelectItem>))}
-                </SelectContent>
-              </Select>
-            </div>
+          {/* Total Amount — derived, same currency as the price */}
+          <div className="grid gap-1.5">
+            <Label>Total Amount ({holding.currency})</Label>
+            <Input readOnly value={totalAmount > 0 ? totalAmount.toFixed(2) : ""} placeholder="0.00" className="tabular-nums bg-muted/50" />
+            {totalAmount > 0 && holding.currency !== displayCurrency && (
+              <p className="text-[10px] text-muted-foreground tabular-nums">≈ {format(totalAmount, holding.currency)}</p>
+            )}
           </div>
 
           {/* Date */}

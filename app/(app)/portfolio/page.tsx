@@ -441,6 +441,30 @@ export default function PortfolioPage() {
   }, [snapshots, includeSuper]);
 
 
+  // Repair transactions saved by the old transaction dialog, which stamped the
+  // user-picked "Paid in" currency onto a totalAmount that was computed in the
+  // holding's quote currency (units × quote price). Those records misconvert
+  // everywhere (e.g. a USD amount labelled THB shrinks ~33×, inflating realized
+  // P&L). The fingerprint is exact — totalAmount still equals units × price and
+  // the stamp differs from the holding's currency — so re-stamp with the quote
+  // currency. "Initial holding" rows are skipped: their amount is genuinely in
+  // the currency chosen at creation, even if a later price fetch re-denominated
+  // the holding. Runs until nothing matches, then never writes again.
+  useEffect(() => {
+    if (holdings.length === 0 || transactions.length === 0) return;
+    const quoteCurrencyById = new Map(holdings.map((h) => [h.id, h.currency]));
+    let changed = false;
+    const repaired = transactions.map((tx) => {
+      const quote = quoteCurrencyById.get(tx.holdingId);
+      if (!quote || tx.currency === quote) return tx;
+      if (tx.notes === "Initial holding") return tx;
+      if (Math.abs(tx.totalAmount - tx.units * tx.pricePerUnit) > 0.01) return tx;
+      changed = true;
+      return { ...tx, currency: quote };
+    });
+    if (changed) setTransactions(repaired);
+  }, [holdings, transactions, setTransactions]);
+
   // Re-derive a holding's units, cost basis and current value from its
   // transaction log whenever a transaction is added, edited or deleted.
   // Units/cost NOT explained by the log (legacy or manually-set positions) are
