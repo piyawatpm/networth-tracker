@@ -211,11 +211,19 @@ interface PaymentDialogProps {
   debtId: string;
   direction: DebtDirection;
   personName: string;
+  transaction?: DebtTransaction;
   onSave: (t: DebtTransaction) => void;
   trigger: React.ReactNode;
 }
 
-export function PaymentDialog({ debtId, direction, personName, onSave, trigger }: PaymentDialogProps) {
+export function PaymentDialog({
+  debtId,
+  direction,
+  personName,
+  transaction,
+  onSave,
+  trigger,
+}: PaymentDialogProps) {
   const [open, setOpen] = useState(false);
   const [action, setAction] = useState<"pay" | "borrow">("pay");
   const [amount, setAmount] = useState("");
@@ -223,15 +231,23 @@ export function PaymentDialog({ debtId, direction, personName, onSave, trigger }
   const [notes, setNotes] = useState("");
 
   const isOwedToMe = direction === "owed_to_me";
+  const isEditing = Boolean(transaction);
 
   useEffect(() => {
     if (open) {
-      setAction("pay");
-      setAmount("");
-      setDate(getSydneyDateString());
-      setNotes("");
+      if (transaction) {
+        setAction(transaction.amount >= 0 ? "pay" : "borrow");
+        setAmount(Math.abs(transaction.amount).toString());
+        setDate(transaction.date);
+        setNotes(transaction.notes);
+      } else {
+        setAction("pay");
+        setAmount("");
+        setDate(getSydneyDateString());
+        setNotes("");
+      }
     }
-  }, [open]);
+  }, [open, transaction]);
 
   // Labels based on direction + action
   const payLabel = isOwedToMe ? `${personName} Paid Back` : "I Paid Back";
@@ -245,13 +261,13 @@ export function PaymentDialog({ debtId, direction, personName, onSave, trigger }
     const finalAmount = action === "pay" ? parsed : -parsed;
 
     const saved: DebtTransaction = {
-      id: crypto.randomUUID(),
+      id: transaction?.id ?? crypto.randomUUID(),
       debtId,
       amount: finalAmount,
       date,
       notes: notes.trim(),
-      images: [],
-      createdAt: Date.now(),
+      images: transaction?.images ?? [],
+      createdAt: transaction?.createdAt ?? Date.now(),
     };
 
     onSave(saved);
@@ -264,10 +280,16 @@ export function PaymentDialog({ debtId, direction, personName, onSave, trigger }
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
           <DialogTitle>
-            {isOwedToMe ? `${personName} owes you` : `You owe ${personName}`}
+            {isEditing
+              ? "Edit Transaction"
+              : isOwedToMe
+                ? `${personName} owes you`
+                : `You owe ${personName}`}
           </DialogTitle>
           <DialogDescription>
-            Record a payment or additional borrowing.
+            {isEditing
+              ? "Update this payment or borrowing record."
+              : "Record a payment or additional borrowing."}
           </DialogDescription>
         </DialogHeader>
 
@@ -338,7 +360,11 @@ export function PaymentDialog({ debtId, direction, personName, onSave, trigger }
             disabled={isNaN(parseFloat(amount)) || parseFloat(amount) <= 0}
             className={action === "borrow" ? "bg-expense hover:bg-expense/90" : ""}
           >
-            {action === "pay" ? "Record Payment" : "Record Borrowing"}
+            {isEditing
+              ? "Save Changes"
+              : action === "pay"
+                ? "Record Payment"
+                : "Record Borrowing"}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -66,6 +66,27 @@ function getProgressPercent(
   return Math.min(100, Math.max(0, (paid / debt.originalAmount) * 100));
 }
 
+// Running net balance after each txn. `payments` must be newest-first (same order
+// as getDebtPayments). Walks backwards: current balance, then undo each txn.
+function getBalanceAfterEachTransaction(
+  debt: DebtRecord,
+  payments: DebtTransaction[],
+  currentNetToMe: number
+): Map<string, number> {
+  const balances = new Map<string, number>();
+  let loanBalance =
+    debt.direction === "owed_to_me" ? currentNetToMe : -currentNetToMe;
+
+  for (const txn of payments) {
+    const netToMe =
+      debt.direction === "owed_to_me" ? loanBalance : -loanBalance;
+    balances.set(txn.id, netToMe);
+    loanBalance += txn.amount;
+  }
+
+  return balances;
+}
+
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
@@ -149,7 +170,15 @@ export default function LiabilitiesPage() {
   }
 
   function handleSaveTransaction(saved: DebtTransaction) {
-    setTransactions((prev) => [...prev, saved]);
+    setTransactions((prev) => {
+      const idx = prev.findIndex((t) => t.id === saved.id);
+      if (idx >= 0) {
+        const updated = [...prev];
+        updated[idx] = saved;
+        return updated;
+      }
+      return [...prev, saved];
+    });
   }
 
   function handleDeleteTransaction(id: string) {
@@ -242,6 +271,11 @@ export default function LiabilitiesPage() {
             const headlineAmount = Math.abs(netToMe);
             const isOverpaid = totalPaid > debt.originalAmount;
             const sym = CURRENCY_SYMBOLS[debt.currency];
+            const balanceAfterTxn = getBalanceAfterEachTransaction(
+              debt,
+              payments,
+              netToMe
+            );
 
             return (
               <BlurFade key={debt.id} delay={0.1 + idx * 0.03}>
@@ -408,13 +442,17 @@ export default function LiabilitiesPage() {
                         const txLabel = isPay
                           ? (loanIsOwedToMe ? "Paid back" : "You paid")
                           : (loanIsOwedToMe ? "Borrowed more" : "You borrowed");
+                        const netAfterTxn = balanceAfterTxn.get(txn.id) ?? 0;
+                        const afterIsOwedToMe =
+                          netAfterTxn > 0 ||
+                          (netAfterTxn === 0 && loanIsOwedToMe);
                         return (
                         <div
                           key={txn.id}
                           className="flex items-center justify-between gap-3 rounded-lg bg-muted/50 px-3 py-2"
                         >
                           <div className="min-w-0 space-y-0.5">
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                               <span className={cn(
                                 "text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded",
                                 isPay ? "text-income bg-income/10" : "text-expense bg-expense/10"
@@ -444,6 +482,43 @@ export default function LiabilitiesPage() {
                             )}
                           </div>
 
+                          <div className="flex items-center gap-1 shrink-0">
+                            <div className="text-right">
+                              <p className="text-[9px] text-muted-foreground uppercase tracking-wider">
+                                Balance
+                              </p>
+                              <p
+                                className={cn(
+                                  "text-sm font-medium tabular-nums",
+                                  afterIsOwedToMe ? "text-income" : "text-expense"
+                                )}
+                              >
+                                {sym}
+                                {Math.abs(netAfterTxn).toLocaleString("en-US", {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })}
+                              </p>
+                            </div>
+
+                            <PaymentDialog
+                              debtId={debt.id}
+                              direction={debt.direction}
+                              personName={debt.person}
+                              transaction={txn}
+                              onSave={handleSaveTransaction}
+                              trigger={
+                                <Button
+                                  size="icon-xs"
+                                  variant="ghost"
+                                  className="text-muted-foreground"
+                                  aria-label="Edit transaction"
+                                >
+                                  <Pencil className="h-3 w-3" />
+                                </Button>
+                              }
+                            />
+
                           <DeleteConfirmDialog
                             title="Delete Payment"
                             description="Are you sure you want to delete this payment record? This action cannot be undone."
@@ -458,6 +533,7 @@ export default function LiabilitiesPage() {
                               </Button>
                             }
                           />
+                          </div>
                         </div>
                         );
                       })}
