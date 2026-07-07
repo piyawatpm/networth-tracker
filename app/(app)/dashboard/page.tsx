@@ -36,6 +36,8 @@ import type {
 } from "@/lib/utils/types";
 import { ArrowUpRight, ArrowDownRight } from "lucide-react";
 import { useBinanceWs } from "@/lib/hooks/use-binance-ws";
+import { useGateWs } from "@/lib/hooks/use-gate-ws";
+import { getBinanceSymbolSet } from "@/lib/utils/binance-symbols";
 import { useAlpacaWs } from "@/lib/hooks/use-alpaca-ws";
 import { applyLivePrices } from "@/lib/utils/crypto-prices";
 import { canAutoUpdate } from "@/lib/utils/prices";
@@ -249,22 +251,48 @@ export default function DashboardPage() {
     }
     return syms;
   }, [rawCryptoHoldings, tickerMappings, stablecoinTags]);
-  const { livePrices: binancePrices, connected: cryptoWsConnected } = useBinanceWs(cryptoWsSymbols);
+  // Symbols Binance lists stream from its WS; the rest (OKB, HYPE, …) stream
+  // from Gate.io. Until the listing set loads, everything stays on Binance.
+  const [binanceSymbolSet, setBinanceSymbolSet] = useState<Set<string> | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getBinanceSymbolSet().then((set) => {
+      if (!cancelled && set) setBinanceSymbolSet(set);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  // Merge Binance WS prices into crypto holdings
+  const { binanceWsSymbols, gateWsPairs } = useMemo(() => {
+    if (!binanceSymbolSet) return { binanceWsSymbols: cryptoWsSymbols, gateWsPairs: [] };
+    const binance: string[] = [];
+    const gate: string[] = [];
+    for (const sym of cryptoWsSymbols) {
+      if (binanceSymbolSet.has(sym)) binance.push(sym);
+      else gate.push(sym.replace(/USDT$/, "_USDT"));
+    }
+    return { binanceWsSymbols: binance, gateWsPairs: gate };
+  }, [cryptoWsSymbols, binanceSymbolSet]);
+
+  const { livePrices: binancePrices, connected: binanceWsConnected } = useBinanceWs(binanceWsSymbols);
+  const { livePrices: gatePrices, connected: gateWsConnected } = useGateWs(gateWsPairs);
+  const cryptoWsConnected = binanceWsConnected || gateWsConnected;
+
+  // Merge Binance + Gate WS prices into crypto holdings
   const [cryptoLivePrices, setCryptoLivePrices] = useState<Record<string, number>>({});
   useEffect(() => {
-    if (Object.keys(binancePrices).length === 0) return;
+    if (Object.keys(binancePrices).length === 0 && Object.keys(gatePrices).length === 0) return;
     const mapped: Record<string, number> = {};
     for (const h of rawCryptoHoldings) {
-      const ticker = tickerMappings[h.token] ?? h.token;
-      const sym = `${ticker.toUpperCase()}USDT`;
-      if (binancePrices[sym]) mapped[h.token] = binancePrices[sym].price;
+      const ticker = (tickerMappings[h.token] ?? h.token).toUpperCase();
+      const live = binancePrices[`${ticker}USDT`] ?? gatePrices[`${ticker}_USDT`];
+      if (live) mapped[h.token] = live.price;
     }
     if (Object.keys(mapped).length > 0) {
       setCryptoLivePrices((prev) => ({ ...prev, ...mapped }));
     }
-  }, [binancePrices, rawCryptoHoldings, tickerMappings]);
+  }, [binancePrices, gatePrices, rawCryptoHoldings, tickerMappings]);
 
   // Live portfolio holdings with Finnhub prices applied
   const livePortfolioHoldings = useMemo(() => {

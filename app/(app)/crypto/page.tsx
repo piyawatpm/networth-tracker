@@ -22,6 +22,7 @@ import {
   applyLivePrices,
 } from "@/lib/utils/crypto-prices";
 import { resolveTokens, fetchCoinImages } from "@/lib/utils/crypto-symbol-resolver";
+import { getBinanceSymbolSet } from "@/lib/utils/binance-symbols";
 import type { CryptoHolding } from "@/lib/utils/types";
 import { ECHARTS_COLORS } from "@/lib/utils/echarts";
 import dynamic from "next/dynamic";
@@ -32,6 +33,7 @@ import { Button } from "@/components/ui/button";
 import { BlurFade } from "@/components/ui/blur-fade";
 import { cn } from "@/lib/utils";
 import { useBinanceWs } from "@/lib/hooks/use-binance-ws";
+import { useGateWs } from "@/lib/hooks/use-gate-ws";
 const PerformanceChart = dynamic(
   () => import("@/components/ui/performance-chart").then((m) => m.PerformanceChart),
   { ssr: false },
@@ -224,23 +226,54 @@ export default function CryptoPage() {
     return symbols;
   }, [rawHoldings, tickerMappings, stablecoinTags]);
 
-  const { livePrices: wsLivePrices, connected: wsConnected } = useBinanceWs(wsSymbols);
+  // Symbols Binance actually lists stream from its WS; the rest (OKB, HYPE, …)
+  // stream from Gate.io. Until the listing set loads, everything stays on
+  // Binance (the previous behavior).
+  const [binanceSymbolSet, setBinanceSymbolSet] = useState<Set<string> | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getBinanceSymbolSet().then((set) => {
+      if (!cancelled && set) setBinanceSymbolSet(set);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const { binanceWsSymbols, gateWsPairs } = useMemo(() => {
+    if (!binanceSymbolSet) return { binanceWsSymbols: wsSymbols, gateWsPairs: [] };
+    const binance: string[] = [];
+    const gate: string[] = [];
+    for (const sym of wsSymbols) {
+      if (binanceSymbolSet.has(sym)) binance.push(sym);
+      else gate.push(sym.replace(/USDT$/, "_USDT"));
+    }
+    return { binanceWsSymbols: binance, gateWsPairs: gate };
+  }, [wsSymbols, binanceSymbolSet]);
+
+  const { livePrices: wsLivePrices, connected: binanceWsConnected } = useBinanceWs(binanceWsSymbols);
+  const { livePrices: gateLivePrices, connected: gateWsConnected } = useGateWs(gateWsPairs);
+  const wsConnected = binanceWsConnected || gateWsConnected;
 
   // Merge WS prices into token-name keyed prices
   useEffect(() => {
-    if (Object.keys(wsLivePrices).length === 0) return;
+    if (
+      Object.keys(wsLivePrices).length === 0 &&
+      Object.keys(gateLivePrices).length === 0
+    )
+      return;
     const mapped: Record<string, number> = {};
     for (const h of rawHoldings) {
-      const ticker = tickerMappings[h.token] ?? h.token;
-      const sym = `${ticker.toUpperCase()}USDT`;
-      if (wsLivePrices[sym]) {
-        mapped[h.token] = wsLivePrices[sym].price;
+      const ticker = (tickerMappings[h.token] ?? h.token).toUpperCase();
+      const live = wsLivePrices[`${ticker}USDT`] ?? gateLivePrices[`${ticker}_USDT`];
+      if (live) {
+        mapped[h.token] = live.price;
       }
     }
     if (Object.keys(mapped).length > 0) {
       setLivePrices((prev) => ({ ...prev, ...mapped }));
     }
-  }, [wsLivePrices, rawHoldings, tickerMappings]);
+  }, [wsLivePrices, gateLivePrices, rawHoldings, tickerMappings]);
 
   const holdings = rawHoldings;
 
