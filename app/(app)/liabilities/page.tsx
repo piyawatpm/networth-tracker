@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import type { DebtRecord, DebtTransaction } from "@/lib/utils/types";
 import { CURRENCY_SYMBOLS } from "@/lib/utils/types";
+import { debtNetToMe } from "@/lib/utils/debts";
 import {
   LiabilityDialog,
   PaymentDialog,
@@ -45,16 +46,6 @@ function getTotalPaid(debtId: string, transactions: DebtTransaction[]): number {
   return transactions
     .filter((t) => t.debtId === debtId)
     .reduce((sum, t) => sum + t.amount, 0);
-}
-
-// Signed net position from *my* perspective: positive = others owe me,
-// negative = I owe others. Overpaying a loan flips the sign, which is how an
-// entry that was paid back more than it was borrowed correctly becomes
-// something I owe them — without discarding the original amount or payments.
-function getNetToMe(debt: DebtRecord, transactions: DebtTransaction[]): number {
-  const paid = getTotalPaid(debt.id, transactions);
-  const loanBalance = debt.originalAmount - paid; // remaining on the original loan (signed)
-  return debt.direction === "owed_to_me" ? loanBalance : -loanBalance;
 }
 
 function getProgressPercent(
@@ -120,7 +111,7 @@ export default function LiabilitiesPage() {
     let iOwe = 0;
 
     for (const debt of debts) {
-      const netToMe = getNetToMe(debt, transactions);
+      const netToMe = debtNetToMe(debt, transactions);
       if (netToMe === 0) continue;
 
       const converted = convert(Math.abs(netToMe), debt.currency);
@@ -265,7 +256,7 @@ export default function LiabilitiesPage() {
             // `displayIsOwedToMe` follows the live net so an overpaid entry flips
             // the card to show what I now owe them.
             const loanIsOwedToMe = debt.direction === "owed_to_me";
-            const netToMe = getNetToMe(debt, transactions);
+            const netToMe = debtNetToMe(debt, transactions);
             const displayIsOwedToMe =
               netToMe > 0 || (netToMe === 0 && loanIsOwedToMe);
             const headlineAmount = Math.abs(netToMe);

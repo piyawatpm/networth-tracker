@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { computeOccurrences } from "@/lib/utils/timezone";
 import { fetchExtendedStockQuote } from "@/lib/utils/stock-prices";
+import { computeDebtTotals } from "@/lib/utils/debts";
 
 // Use secret key for server-side cron (bypasses RLS)
 const supabase = createClient(
@@ -402,18 +403,15 @@ export async function GET(request: Request) {
       log.push(`Crypto snapshot: $${cryptoTotalUsd.toFixed(0)} USD`);
     }
 
-    // Debts (converted to USD)
+    // Debts (converted to USD) — signed math shared with the liabilities page
+    // and dashboard, so overpaid loans flip sides instead of clamping to zero.
     const debtRecords = parse<{ id: string; direction: string; originalAmount: number; currency: string }[]>("debt_records", []);
     const debtTransactions = parse<{ debtId: string; amount: number }[]>("debt_transactions", []);
-    let owedToMe = 0;
-    let iOwe = 0;
-    for (const d of debtRecords) {
-      const paid = debtTransactions.filter((t) => t.debtId === d.id).reduce((s, t) => s + t.amount, 0);
-      const remaining = Math.max(0, d.originalAmount - paid);
-      const inUsd = toUsd(remaining, d.currency ?? "AUD");
-      if (d.direction === "owed_to_me") owedToMe += inUsd;
-      else iOwe += inUsd;
-    }
+    const { owedToMe, iOwe } = computeDebtTotals(
+      debtRecords,
+      debtTransactions,
+      (amount, currency) => toUsd(amount, currency ?? "AUD"),
+    );
 
     // Net worth = portfolio + crypto + owed - owe (all in USD)
     const netWorth = portfolioTotal + cryptoTotalUsd + owedToMe - iOwe;

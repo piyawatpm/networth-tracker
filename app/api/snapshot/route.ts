@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { fetchExtendedStockQuote } from "@/lib/utils/stock-prices";
+import { computeDebtTotals } from "@/lib/utils/debts";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -146,18 +147,15 @@ export async function POST(request: NextRequest) {
     }
     const cryptoInUsd = toUsd(cryptoTotalUsd, "USD");
 
-    // Debts — convert each to display currency
+    // Debts (converted to USD) — signed math shared with the liabilities page
+    // and dashboard, so overpaid loans flip sides instead of clamping to zero.
     const debtRecords = parse<{ id: string; direction: string; originalAmount: number; currency: string }[]>("debt_records", []);
     const debtTransactions = parse<{ debtId: string; amount: number }[]>("debt_transactions", []);
-    let owedToMe = 0;
-    let iOwe = 0;
-    for (const d of debtRecords) {
-      const paid = debtTransactions.filter((t) => t.debtId === d.id).reduce((s, t) => s + t.amount, 0);
-      const remaining = Math.max(0, d.originalAmount - paid);
-      const converted = toUsd(remaining, d.currency ?? "AUD");
-      if (d.direction === "owed_to_me") owedToMe += converted;
-      else iOwe += converted;
-    }
+    const { owedToMe, iOwe } = computeDebtTotals(
+      debtRecords,
+      debtTransactions,
+      (amount, currency) => toUsd(amount, currency ?? "AUD"),
+    );
 
     const netWorth = portfolioTotal + cryptoInUsd + owedToMe - iOwe;
     const netWorthNoSuper = portfolioNoSuper + cryptoInUsd + owedToMe - iOwe;

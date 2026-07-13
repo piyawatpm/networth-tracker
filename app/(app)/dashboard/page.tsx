@@ -41,6 +41,7 @@ import { getBinanceSymbolSet } from "@/lib/utils/binance-symbols";
 import { useAlpacaWs } from "@/lib/hooks/use-alpaca-ws";
 import { applyLivePrices } from "@/lib/utils/crypto-prices";
 import { canAutoUpdate } from "@/lib/utils/prices";
+import { computeDebtTotals, computeDebtTotalsAtDate } from "@/lib/utils/debts";
 
 // Sub-components
 import dynamic from "next/dynamic";
@@ -85,54 +86,6 @@ import { totalInvestedInRange } from "@/lib/utils/portfolio-transactions";
 // ---------------------------------------------------------------------------
 
 type Period = "W" | "M" | "Y";
-
-function debtRemaining(
-  debt: DebtRecord,
-  transactions: DebtTransaction[],
-): number {
-  // Sum all transactions: positive = repayment (reduces debt),
-  // negative = borrowed more (increases debt). Must match the formula in
-  // app/(app)/liabilities/page.tsx and the cron snapshot writer, otherwise
-  // the dashboard's net worth diverges from the liabilities page.
-  const payments = transactions
-    .filter((t) => t.debtId === debt.id)
-    .reduce((sum, t) => sum + t.amount, 0);
-  return Math.max(0, debt.originalAmount - payments);
-}
-
-/**
- * Reconstructs `iOwe` (total liabilities) as it stood on a historical date.
- *
- * We don't snapshot debt directly — instead we replay the debt records and
- * transactions: a debt only counts if it was created on/before `date`, and
- * payments only count if they were applied on/before `date`. This means the
- * chart's debt line works even for snapshots from before debt tracking was
- * added, so long as the records & transactions still exist.
- *
- * Returned value is in USD so it lines up with the rest of the snapshot's
- * `components` (which the chart converts to display currency on render).
- */
-function debtAtDate(
-  date: string,
-  debtRecords: DebtRecord[],
-  debtTransactions: DebtTransaction[],
-  toUsd: (amount: number, from: Currency) => number,
-): number {
-  // `createdAt` is a unix-ms timestamp; comparing against end-of-day captures
-  // any debt created earlier that day (avoids off-by-one excludes).
-  const dateMs = new Date(`${date}T23:59:59`).getTime();
-  let iOwe = 0;
-  for (const d of debtRecords) {
-    if (d.direction !== "i_owe") continue;
-    if (d.createdAt > dateMs) continue; // didn't exist yet on `date`
-    const paymentsAsOf = debtTransactions
-      .filter((t) => t.debtId === d.id && t.date <= date)
-      .reduce((sum, t) => sum + t.amount, 0);
-    const remaining = Math.max(0, d.originalAmount - paymentsAsOf);
-    iOwe += toUsd(remaining, d.currency);
-  }
-  return iOwe;
-}
 
 function getWeekStart(): string {
   const now = new Date();
@@ -333,16 +286,13 @@ export default function DashboardPage() {
     [livePortfolioHoldings, convert],
   );
 
-  const { owedToMe, iOwe } = useMemo(() => {
-    let owedToMe = 0, iOwe = 0;
-    for (const d of debtRecords) {
-      const remaining = debtRemaining(d, debtTransactions);
-      const converted = convert(remaining, d.currency);
-      if (d.direction === "owed_to_me") owedToMe += converted;
-      else iOwe += converted;
-    }
-    return { owedToMe, iOwe };
-  }, [debtRecords, debtTransactions, convert]);
+  // Signed debt math shared with the liabilities page: each debt's net decides
+  // whether it counts as "owed to me" or "I owe" (an overpaid loan flips sides
+  // instead of clamping to zero and going invisible).
+  const { owedToMe, iOwe } = useMemo(
+    () => computeDebtTotals(debtRecords, debtTransactions, convert),
+    [debtRecords, debtTransactions, convert],
+  );
 
   const netWorthWithSuper = portfolioTotal + cryptoTotal + owedToMe - iOwe;
   const netWorthNoSuper = normalTotal + cryptoTotal + owedToMe - iOwe;
@@ -373,7 +323,9 @@ export default function DashboardPage() {
         : Math.max(0, (ext.portfolio ?? 0) - superDelta);
       const cryptoPart = ext.crypto ?? 0;
       const otherPart = Math.max(0, total - portfolioPart - cryptoPart);
-      const debtPart = debtAtDate(s.date, debtRecords, debtTransactions, toUsd);
+      // Historical debt replayed from records + transactions, in USD so the
+      // chart's currency conversion applies uniformly to every component.
+      const debtPart = computeDebtTotalsAtDate(s.date, debtRecords, debtTransactions, toUsd).iOwe;
       const hasBreakdown = ext.portfolio != null || ext.crypto != null;
       return {
         date: s.date,
