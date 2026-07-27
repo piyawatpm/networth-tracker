@@ -84,6 +84,22 @@ export function cryptoPotValues(
   return out;
 }
 
+/**
+ * Cached prices come from the cron's CoinGecko fetch, where a mis-mapped
+ * coin id occasionally returns a DIFFERENT coin's price (observed: GRAM
+ * briefly priced as TON, ~3.3x). If the cache disagrees with the user's
+ * last TRADED price by more than 3x either way, trust the trade — a silent
+ * 3x move between the last trade and now is far less likely than a bad id.
+ */
+function sanePrice(livePrice: number | undefined, lastTxPrice: number): number {
+  if (livePrice == null) return lastTxPrice;
+  if (lastTxPrice > 0) {
+    const ratio = livePrice / lastTxPrice;
+    if (ratio > 3 || ratio < 1 / 3) return lastTxPrice;
+  }
+  return livePrice;
+}
+
 /** Per-token performance rows for non-cash tokens, shaped like stock rows.
  * IMPORTANT: computeHoldings DROPS fully-sold tokens (|amount| < 0.0001), so
  * rows are built from the UNION of open holdings and tokens that appear in
@@ -109,7 +125,7 @@ export function perTokenStats(
     const own = txs.filter((t) => t.token === token);
     const livePrice = livePrices[token] ?? livePrices[tickerMappings[token] ?? token];
     const lastTxPrice = [...own].reverse().find((t) => t.priceUsd != null)?.priceUsd ?? 0;
-    const price = livePrice ?? lastTxPrice;
+    const price = sanePrice(livePrice, lastTxPrice);
     const closed = h == null || Math.abs(h.amount) < 1e-6;
     const valueUsd = closed ? 0 : h.amount * price;
     const grossBuysUsd = own
@@ -219,19 +235,21 @@ export function cryptoAllTimePnl(
   livePrices: Record<string, number>,
   tickerMappings: Record<string, string>,
   isCash: (token: string) => boolean,
-): { unrealizedUsd: number; realizedUsd: number; totalUsd: number } {
+): { unrealizedUsd: number; realizedUsd: number; totalUsd: number; costBasisUsd: number } {
   let unrealizedUsd = 0;
+  let costBasisUsd = 0;
   for (const h of computeHoldings(txs)) {
     if (isCash(h.token)) continue;
     const livePrice = livePrices[h.token] ?? livePrices[tickerMappings[h.token] ?? h.token];
     const lastTxPrice =
       [...txs].reverse().find((t) => t.token === h.token && t.priceUsd != null)?.priceUsd ?? 0;
-    const price = livePrice ?? lastTxPrice;
+    const price = sanePrice(livePrice, lastTxPrice);
     unrealizedUsd += h.amount * price - h.totalCostUsd;
+    costBasisUsd += h.totalCostUsd;
   }
   const realizedUsd = computeRealizedPnl(txs).byToken.reduce(
     (s, r) => (isCash(r.token) ? s : s + r.realizedPnlUsd),
     0,
   );
-  return { unrealizedUsd, realizedUsd, totalUsd: unrealizedUsd + realizedUsd };
+  return { unrealizedUsd, realizedUsd, totalUsd: unrealizedUsd + realizedUsd, costBasisUsd };
 }

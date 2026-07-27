@@ -15,6 +15,7 @@ export function PerfStats({
   twrPct,
   twrLabel,
   netGainUsd,
+  gainPct,
   gainSub,
   vs,
 }: {
@@ -22,6 +23,8 @@ export function PerfStats({
   twrPct: number | null;
   twrLabel: string;
   netGainUsd: number;
+  /** Gain as a fraction of capital (cost basis / net contributions), for the % display. */
+  gainPct: number | null;
   gainSub: string;
   vs: { label: string; pct: number | null; sub: string };
 }) {
@@ -43,7 +46,7 @@ export function PerfStats({
     },
     {
       label: "NET GAIN",
-      value: `${gain >= 0 ? "+" : "-"}${format(Math.abs(gain))}`,
+      value: `${gain >= 0 ? "+" : "-"}${format(Math.abs(gain))}${gainPct == null ? "" : ` (${pct(gainPct)})`}`,
       tone: gain >= 0 ? "up" : "down",
       sub: gainSub,
     },

@@ -268,3 +268,25 @@ describe("cryptoAllTimePnl", () => {
     expect(r.realizedUsd).toBeCloseTo(0);
   });
 });
+
+describe("price sanity guard", () => {
+  it("rejects a cached price that disagrees with the last traded price by >3x", () => {
+    // GRAM last traded at $1.35; a mis-mapped cache says $4.40 (TON's price).
+    const txs = [
+      ctx({ date: "2026-07-13 09:00:00", token: "GRAM", type: "buy", amount: 1000, priceUsd: 1.35, totalValueUsd: 1350 }),
+    ];
+    const r = cryptoAllTimePnl(txs, { GRAM: 4.4 }, {}, cash);
+    // Guard falls back to $1.35 → unrealized 0, not +$3,050.
+    expect(r.unrealizedUsd).toBeCloseTo(0);
+    const row = perTokenStats(txs, { GRAM: 4.4 }, {}, cash, "2026-07-27")[0];
+    expect(row.valueUsd).toBeCloseTo(1350);
+  });
+
+  it("accepts cached prices within the sane band", () => {
+    const txs = [
+      ctx({ token: "SOL", type: "buy", amount: 10, priceUsd: 80, totalValueUsd: 800 }),
+    ];
+    const r = cryptoAllTimePnl(txs, { SOL: 76 }, {}, cash);
+    expect(r.unrealizedUsd).toBeCloseTo(-40); // 760 − 800, cache accepted
+  });
+});

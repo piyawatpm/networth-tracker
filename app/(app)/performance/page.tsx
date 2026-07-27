@@ -412,6 +412,17 @@ export default function PerformancePage() {
     };
   }, [scope, twr.totalReturn, btcStats, spyStats]);
 
+  // Gain % — the comparable number: all-time P&L over cost basis for crypto
+  // (same denominator as the Crypto page / trackers); gain over net
+  // contributions for the flow-based scopes.
+  const gainPct =
+    scope === "crypto"
+      ? cryptoPnl.costBasisUsd > 0
+        ? cryptoPnl.totalUsd / cryptoPnl.costBasisUsd
+        : null
+      : netContributedUsd > 0
+        ? netGainUsd / netContributedUsd
+        : null;
   const fmtSignedUsd = (v: number) =>
     `${v >= 0 ? "+" : "-"}${format(Math.abs(convert(v, "USD")))}`;
   const gainSub =
@@ -542,6 +553,7 @@ export default function PerformancePage() {
         twrPct={twr.totalReturn}
         twrLabel={period === "All" ? "ALL" : period}
         netGainUsd={scope === "crypto" ? cryptoPnl.totalUsd : netGainUsd}
+        gainPct={gainPct}
         gainSub={gainSub}
         vs={vs}
       />
