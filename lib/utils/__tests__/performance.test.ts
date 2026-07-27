@@ -5,10 +5,31 @@ import {
   buildContributionSeries,
   dailySnapshotValues,
   computeTwr,
+  perHoldingStats,
+  costBasisDrift,
   type CashFlow,
   type DailyFlow,
 } from "../performance";
-import type { PortfolioTransaction } from "../types";
+import type { PortfolioHolding, PortfolioTransaction } from "../types";
+
+const holding = (o: Partial<PortfolioHolding>): PortfolioHolding => ({
+  id: o.id ?? "h1",
+  name: o.name ?? "Test Co",
+  ticker: o.ticker ?? "TST",
+  type: o.type ?? "stock",
+  accountType: o.accountType ?? "normal",
+  broker: "",
+  country: "US",
+  link: "",
+  units: o.units ?? 10,
+  amountInvested: o.amountInvested ?? 1000,
+  currentValue: o.currentValue ?? 1200,
+  currency: o.currency ?? "USD",
+  notes: "",
+  createdAt: 1,
+});
+
+const idUsd = (a: number) => a;
 
 const tx = (o: Partial<PortfolioTransaction>): PortfolioTransaction => ({
   id: o.id ?? Math.random().toString(36).slice(2),
@@ -216,5 +237,94 @@ describe("computeTwr", () => {
     // this test pins that the function doesn't blow up or go null.
     const { totalReturn } = computeTwr(values, flows);
     expect(totalReturn).not.toBeNull();
+  });
+});
+
+describe("perHoldingStats", () => {
+  it("computes invested, value, gain and return for an open holding", () => {
+    const h = holding({ id: "h1", amountInvested: 1000, currentValue: 1200 });
+    const txs = [
+      tx({ holdingId: "h1", date: "2025-01-01", totalAmount: 1000, units: 10, pricePerUnit: 100 }),
+    ];
+    const rows = perHoldingStats([h], txs, idUsd, "2026-07-27");
+    expect(rows).toHaveLength(1);
+    const r = rows[0];
+    expect(r.investedUsd).toBeCloseTo(1000);
+    expect(r.valueUsd).toBeCloseTo(1200);
+    expect(r.gainUsd).toBeCloseTo(200);
+    expect(r.returnPct).toBeCloseTo(0.2, 6);
+    expect(r.xirrPct).toBeCloseTo(0.125, 2); // ~12.5%/yr over ~1.57yr
+    expect(r.closed).toBe(false);
+  });
+
+  it("includes realized P&L in gain for a partially sold holding", () => {
+    const h = holding({ id: "h1", currentValue: 660 });
+    const txs = [
+      tx({ holdingId: "h1", date: "2025-01-01", type: "buy", units: 10, totalAmount: 1000, pricePerUnit: 100 }),
+      tx({ holdingId: "h1", date: "2025-06-01", type: "sell", units: 5, totalAmount: 600, pricePerUnit: 120 }),
+    ];
+    const r = perHoldingStats([h], txs, idUsd, "2026-07-27")[0];
+    // realized = 600 − 500 = 100; unrealized = 660 − 500 = 160; gain = 260
+    expect(r.gainUsd).toBeCloseTo(260);
+    // returnPct = gain / gross buys = 260 / 1000
+    expect(r.returnPct).toBeCloseTo(0.26, 6);
+  });
+
+  it("marks fully-sold holdings closed and skips terminal value in XIRR", () => {
+    const h = holding({ id: "h1", units: 0, currentValue: 0 });
+    const txs = [
+      tx({ holdingId: "h1", date: "2025-01-01", type: "buy", units: 10, totalAmount: 1000 }),
+      tx({ holdingId: "h1", date: "2026-01-01", type: "sell", units: 10, totalAmount: 1100 }),
+    ];
+    const r = perHoldingStats([h], txs, idUsd, "2026-07-27")[0];
+    expect(r.closed).toBe(true);
+    expect(r.xirrPct).toBeCloseTo(0.1, 3);
+  });
+
+  it("aggregates orphan transactions into one removed-holdings row", () => {
+    const txs = [
+      tx({ holdingId: "gone", holdingName: "Sold Co", date: "2025-01-01", type: "buy", totalAmount: 500, units: 5 }),
+      tx({ holdingId: "gone", holdingName: "Sold Co", date: "2025-12-01", type: "sell", totalAmount: 450, units: 5 }),
+    ];
+    const rows = perHoldingStats([], txs, idUsd, "2026-07-27");
+    expect(rows).toHaveLength(1);
+    const r = rows[0];
+    expect(r.holdingId).toBe("__removed__");
+    expect(r.isOrphan).toBe(true);
+    expect(r.gainUsd).toBeCloseTo(-50);
+    expect(r.closed).toBe(true);
+  });
+
+  it("skips holdings with no transactions", () => {
+    expect(perHoldingStats([holding({ id: "h9" })], [], idUsd, "2026-07-27")).toHaveLength(0);
+  });
+});
+
+describe("costBasisDrift", () => {
+  it("flags holdings whose manual invested amount drifts >1% and >$1 from tx cost basis", () => {
+    const drifted = holding({ id: "d1", name: "Drifty", amountInvested: 2000 });
+    const clean = holding({ id: "c1", name: "Clean", amountInvested: 1000 });
+    const txs = [
+      tx({ holdingId: "d1", date: "2025-01-01", totalAmount: 1000 }),
+      tx({ holdingId: "c1", date: "2025-01-01", totalAmount: 1000 }),
+    ];
+    const out = costBasisDrift([drifted, clean], txs, idUsd);
+    expect(out).toHaveLength(1);
+    expect(out[0].holdingId).toBe("d1");
+    expect(out[0].investedUsd).toBeCloseTo(2000);
+    expect(out[0].txCostUsd).toBeCloseTo(1000);
+  });
+
+  it("flags a holding with invested amount but zero transactions", () => {
+    const h = holding({ id: "h1", amountInvested: 500 });
+    const out = costBasisDrift([h], [], idUsd);
+    expect(out).toHaveLength(1);
+    expect(out[0].txCostUsd).toBe(0);
+  });
+
+  it("ignores sub-1% drift", () => {
+    const h = holding({ id: "h1", amountInvested: 1005 });
+    const txs = [tx({ holdingId: "h1", date: "2025-01-01", totalAmount: 1000 })];
+    expect(costBasisDrift([h], txs, idUsd)).toHaveLength(0);
   });
 });

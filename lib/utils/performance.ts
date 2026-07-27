@@ -1,6 +1,7 @@
 // Pure investment-performance math. No React, no app imports beyond siblings —
 // keeps this module unit-testable with zero vitest config.
-import type { PortfolioTransaction } from "./types";
+import type { PortfolioHolding, PortfolioTransaction } from "./types";
+import { derivePosition } from "./portfolio-transactions";
 
 export interface CashFlow {
   /** YYYY-MM-DD */
@@ -162,4 +163,128 @@ export function computeTwr(
     series.push({ date: cur.date, index });
   }
   return { series, totalReturn: index / 100 - 1 };
+}
+
+export interface HoldingPerfRow {
+  holdingId: string;
+  name: string;
+  ticker: string;
+  isOrphan: boolean;
+  accountType: "normal" | "super";
+  /** Remaining cost basis (avg-cost) in USD. */
+  investedUsd: number;
+  valueUsd: number;
+  /** Unrealized + realized. */
+  gainUsd: number;
+  /** gain / gross buys. */
+  returnPct: number | null;
+  xirrPct: number | null;
+  closed: boolean;
+}
+
+/** Per-holding performance rows + one aggregate row for orphaned (deleted-holding) txs. */
+export function perHoldingStats(
+  holdings: PortfolioHolding[],
+  txs: PortfolioTransaction[],
+  toUsd: (amount: number, from: string) => number,
+  todayIso: string,
+): HoldingPerfRow[] {
+  const rows: HoldingPerfRow[] = [];
+  const holdingIds = new Set(holdings.map((h) => h.id));
+  const txToFlows = (list: PortfolioTransaction[]): CashFlow[] =>
+    list.map((t) => ({
+      date: t.date.slice(0, 10),
+      amount:
+        t.type === "buy" ? -toUsd(t.totalAmount, t.currency) : toUsd(t.totalAmount, t.currency),
+    }));
+
+  for (const h of holdings) {
+    const own = txs.filter((t) => t.holdingId === h.id);
+    if (own.length === 0) continue;
+    const pos = derivePosition(own, "USD", (a, from) => toUsd(a, from));
+    const valueUsd = h.units > 0 ? toUsd(h.currentValue, h.currency) : 0;
+    const grossBuysUsd = own
+      .filter((t) => t.type === "buy")
+      .reduce((s, t) => s + toUsd(t.totalAmount, t.currency), 0);
+    const gainUsd = valueUsd - pos.costBasis + pos.realizedPnl;
+    const flows = txToFlows(own);
+    const closed = h.units <= 0;
+    if (!closed && valueUsd > 0) flows.push({ date: todayIso, amount: valueUsd });
+    rows.push({
+      holdingId: h.id,
+      name: h.name,
+      ticker: h.ticker,
+      isOrphan: false,
+      accountType: h.accountType === "super" ? "super" : "normal",
+      investedUsd: pos.costBasis,
+      valueUsd,
+      gainUsd,
+      returnPct: grossBuysUsd > 0 ? gainUsd / grossBuysUsd : null,
+      xirrPct: xirr(flows),
+      closed,
+    });
+  }
+
+  // Orphans: transactions whose holding was deleted. Real history — aggregate
+  // them so portfolio-level and table-level numbers stay honest.
+  const orphanTxs = txs.filter((t) => !holdingIds.has(t.holdingId));
+  if (orphanTxs.length > 0) {
+    const pos = derivePosition(orphanTxs, "USD", (a, from) => toUsd(a, from));
+    const grossBuysUsd = orphanTxs
+      .filter((t) => t.type === "buy")
+      .reduce((s, t) => s + toUsd(t.totalAmount, t.currency), 0);
+    // No live value for deleted holdings — only realized P&L survives, and any
+    // cost basis left in the log is money that went in and never came out.
+    const gainUsd = pos.realizedPnl - pos.costBasis;
+    rows.push({
+      holdingId: "__removed__",
+      name: "Removed holdings",
+      ticker: "",
+      isOrphan: true,
+      accountType: "normal",
+      investedUsd: pos.costBasis,
+      valueUsd: 0,
+      gainUsd,
+      returnPct: grossBuysUsd > 0 ? gainUsd / grossBuysUsd : null,
+      xirrPct: xirr(txToFlows(orphanTxs)),
+      closed: true,
+    });
+  }
+
+  return rows.sort((a, b) => {
+    if (a.isOrphan !== b.isOrphan) return a.isOrphan ? 1 : -1;
+    if (a.xirrPct == null && b.xirrPct == null) return b.gainUsd - a.gainUsd;
+    if (a.xirrPct == null) return 1;
+    if (b.xirrPct == null) return -1;
+    return b.xirrPct - a.xirrPct;
+  });
+}
+
+export interface DriftRow {
+  holdingId: string;
+  name: string;
+  investedUsd: number;
+  txCostUsd: number;
+}
+
+/** Holdings whose manual amountInvested disagrees with tx-derived cost basis (>1% and >$1). */
+export function costBasisDrift(
+  holdings: PortfolioHolding[],
+  txs: PortfolioTransaction[],
+  toUsd: (amount: number, from: string) => number,
+): DriftRow[] {
+  const out: DriftRow[] = [];
+  for (const h of holdings) {
+    const own = txs.filter((t) => t.holdingId === h.id);
+    const txCostUsd =
+      own.length > 0 ? derivePosition(own, "USD", (a, from) => toUsd(a, from)).costBasis : 0;
+    const investedUsd = toUsd(h.amountInvested ?? 0, h.currency);
+    const diff = Math.abs(investedUsd - txCostUsd);
+    const base = Math.max(investedUsd, txCostUsd);
+    if (base <= 0) continue;
+    if (diff > 1 && diff / base > 0.01) {
+      out.push({ holdingId: h.id, name: h.name, investedUsd, txCostUsd });
+    }
+  }
+  return out;
 }
