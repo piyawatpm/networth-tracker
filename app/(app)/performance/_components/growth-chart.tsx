@@ -5,29 +5,40 @@ import { ReactECharts } from "@/components/ui/lazy-echarts";
 import { getCartesianBaseOption, ECHARTS_COLORS } from "@/lib/utils/echarts";
 import { BlurFade } from "@/components/ui/blur-fade";
 
+export interface BenchmarkSeries {
+  name: string;
+  color: string;
+  dashType: "dashed" | "dotted";
+  series: { date: string; index: number }[];
+}
+
 export function GrowthChart({
   twrSeries,
-  spySeries,
+  benchmarks,
   isDark,
 }: {
   twrSeries: { date: string; index: number }[];
-  spySeries: { date: string; index: number }[] | null;
+  benchmarks: BenchmarkSeries[];
   isDark: boolean;
 }) {
-  // Align SPY onto the TWR date axis: carry the latest SPY index at or
-  // before each TWR date (SPY has no weekend closes; snapshots do).
-  const aligned = useMemo(() => {
-    if (!spySeries || spySeries.length === 0) return null;
-    let si = -1;
-    let level: number | null = null;
-    return twrSeries.map((p) => {
-      while (si + 1 < spySeries.length && spySeries[si + 1].date <= p.date) {
-        si++;
-        level = spySeries[si].index;
-      }
-      return level;
-    });
-  }, [twrSeries, spySeries]);
+  // Align each benchmark onto the TWR date axis: carry the latest index at or
+  // before each TWR date (benchmarks have no weekend closes; snapshots do).
+  const alignedAll = useMemo(
+    () =>
+      benchmarks.map((b) => {
+        if (b.series.length === 0) return null;
+        let si = -1;
+        let level: number | null = null;
+        return twrSeries.map((p) => {
+          while (si + 1 < b.series.length && b.series[si + 1].date <= p.date) {
+            si++;
+            level = b.series[si].index;
+          }
+          return level;
+        });
+      }),
+    [twrSeries, benchmarks],
+  );
 
   const option = useMemo(() => {
     const base = getCartesianBaseOption(isDark);
@@ -76,30 +87,32 @@ export function GrowthChart({
           showSymbol: false,
           lineStyle: { width: 2 },
         },
-        ...(aligned
-          ? [
-              {
-                name: "S&P 500",
-                type: "line" as const,
-                color: ECHARTS_COLORS[6],
-                data: aligned.map((v) => (v == null ? null : Math.round(v * 100) / 100)),
-                smooth: true,
-                showSymbol: false,
-                lineStyle: { width: 1.5, type: "dashed" as const },
-              },
-            ]
-          : []),
+        ...benchmarks.flatMap((b, i) => {
+          const aligned = alignedAll[i];
+          if (!aligned) return [];
+          return [
+            {
+              name: b.name,
+              type: "line" as const,
+              color: b.color,
+              data: aligned.map((v) => (v == null ? null : Math.round(v * 100) / 100)),
+              smooth: true,
+              showSymbol: false,
+              lineStyle: { width: 1.5, type: b.dashType },
+            },
+          ];
+        }),
       ],
     };
-  }, [twrSeries, aligned, isDark]);
+  }, [twrSeries, benchmarks, alignedAll, isDark]);
 
   return (
     <BlurFade delay={0.15}>
       <div className="finance-card p-6">
-        <p className="label-mono mb-1">GROWTH OF 100 — YOU VS S&P 500</p>
+        <p className="label-mono mb-1">GROWTH OF 100</p>
         <p className="text-xs text-muted-foreground mb-4">
-          Deposit timing removed (time-weighted). Above the S&P line = your picks beat the
-          index. History starts where your transaction log begins.
+          Deposit timing removed (time-weighted). Above a benchmark line = you beat it.
+          History starts where your transaction log begins.
         </p>
         {twrSeries.length > 1 ? (
           <div className="w-full overflow-hidden">

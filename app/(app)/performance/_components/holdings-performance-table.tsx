@@ -23,9 +23,11 @@ function Chip({ children }: { children: React.ReactNode }) {
 export function HoldingsPerformanceTable({
   rows,
   removedExcluded,
+  footnote,
 }: {
   rows: HoldingPerfRow[];
   removedExcluded: boolean;
+  footnote?: string;
 }) {
   const { format, convert } = useCurrency();
   if (rows.length === 0) return null;
@@ -38,6 +40,9 @@ export function HoldingsPerformanceTable({
           <p className="text-xs text-muted-foreground mt-0.5">
             Sorted by annualized return. Gain includes locked-in profit from sells.
           </p>
+          {footnote && (
+            <p className="text-[11px] text-muted-foreground mt-1">{footnote}</p>
+          )}
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -63,6 +68,7 @@ export function HoldingsPerformanceTable({
                     )}
                     {r.closed && !r.isOrphan && <Chip>CLOSED</Chip>}
                     {r.accountType === "super" && <Chip>SUPER</Chip>}
+                    {r.badge && <Chip>{r.badge}</Chip>}
                     {r.isOrphan && removedExcluded && <Chip>NOT IN STATS</Chip>}
                   </td>
                   <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">

@@ -15,19 +15,18 @@ export function PerfStats({
   twrPct,
   twrLabel,
   netGainUsd,
-  dividendsUsd,
-  vsSpyPct,
+  gainSub,
+  vs,
 }: {
   xirrPct: number | null;
   twrPct: number | null;
   twrLabel: string;
   netGainUsd: number;
-  dividendsUsd: number;
-  vsSpyPct: number | null;
+  gainSub: string;
+  vs: { label: string; pct: number | null; sub: string };
 }) {
   const { format, convert } = useCurrency();
   const gain = convert(netGainUsd, "USD");
-  const divs = convert(dividendsUsd, "USD");
 
   const tiles = [
     {
@@ -46,14 +45,13 @@ export function PerfStats({
       label: "NET GAIN",
       value: `${gain >= 0 ? "+" : "-"}${format(Math.abs(gain))}`,
       tone: gain >= 0 ? "up" : "down",
-      sub: divs > 0 ? `+ ${format(divs)} dividends received` : "value − net contributions",
+      sub: gainSub,
     },
     {
-      label: "VS S&P 500",
-      value:
-        vsSpyPct == null ? "—" : `${vsSpyPct >= 0 ? "+" : ""}${(vsSpyPct * 100).toFixed(1)}pp`,
-      tone: vsSpyPct == null ? "muted" : vsSpyPct >= 0 ? "up" : "down",
-      sub: "TWR minus SPY, same period",
+      label: vs.label,
+      value: vs.pct == null ? "—" : `${vs.pct >= 0 ? "+" : ""}${(vs.pct * 100).toFixed(1)}pp`,
+      tone: vs.pct == null ? "muted" : vs.pct >= 0 ? "up" : "down",
+      sub: vs.sub,
     },
   ] as const;
 

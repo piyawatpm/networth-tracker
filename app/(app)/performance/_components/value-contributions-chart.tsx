@@ -10,10 +10,12 @@ export function ValueContributionsChart({
   values,
   contributions,
   isDark,
+  subtitle,
 }: {
   values: { date: string; value: number }[];
   contributions: { date: string; contributed: number }[];
   isDark: boolean;
+  subtitle: string;
 }) {
   const { symbol, convert } = useCurrency();
 
@@ -100,9 +102,7 @@ export function ValueContributionsChart({
     <BlurFade delay={0.12}>
       <div className="finance-card p-6">
         <p className="label-mono mb-1">VALUE VS WHAT YOU PUT IN</p>
-        <p className="text-xs text-muted-foreground mb-4">
-          The gap between the lines is money your investments actually made.
-        </p>
+        <p className="text-xs text-muted-foreground mb-4">{subtitle}</p>
         {data.length > 1 ? (
           <div className="w-full overflow-hidden">
             <ReactECharts
