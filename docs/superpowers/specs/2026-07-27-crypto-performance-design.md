@@ -121,6 +121,29 @@ per-token stats (realized+unrealized gain, closed detection, XIRR flows,
 live-price application), isCashLikeToken boundary (syrupUSDC/USDe cash;
 XAUt not). Existing 24 tests must stay green.
 
+## Amendments from real-data verification
+
+- **`bootstrapCryptoWindow`** (added): trims leading pot days whose
+  flow-adjusted return exceeds +200% (first 14 days only) and books the first
+  trusted day's pot value as an opening deposit. On the live dataset this is a
+  NO-OP (the log fully explains the pot from day one) — it exists as tested
+  protection for partial-coverage onboarding.
+- **Terminal pot value** comes from the snapshot-based series (falls back to
+  Σ token×live price): coins in Earn/locked positions never appear in the tx
+  log but are in the holdings CSV → snapshots.
+- **BTC klines**: Binance returns the FIRST 1000 candles after `startTime`, so
+  the start is clamped to `now − 999d`; the client benchmark fetch uses
+  `cache: "no-store"` (browsers heuristically reused stale responses).
+- **data-provider fix** (shared infra): the snapshot backfill now pages
+  newest-first and unions the in-memory Phase A window, so a pagination that
+  dies early can no longer clobber the newest rows (production data was
+  silently truncated at 2026-05-08 for every chart in the app).
+- Verified end-to-end: an independent quote-aware replay reproduces the page's
+  crypto numbers exactly (TWR +21.0%, net gain ≈ +$1,331 on $22.9k
+  contributed as of 2026-07-27). Note for future diagnosis scripts: the tx CSV
+  quotes thousands separators — naive comma-splitting corrupts every row with
+  a 4+ digit value.
+
 ## Out of scope
 
 Fiat-deposit detection inside stablecoin buys (user confirmed deposits are
