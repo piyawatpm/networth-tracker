@@ -5,6 +5,7 @@ import {
   stableBalanceByDay,
   cryptoPotValues,
   perTokenStats,
+  bootstrapCryptoWindow,
 } from "../crypto-performance";
 import type { CryptoTransaction } from "../types";
 
@@ -170,5 +171,61 @@ describe("perTokenStats", () => {
     const r = perTokenStats(txs, { GT: 10 }, {}, cash, today)[0];
     expect(r.valueUsd).toBeCloseTo(150); // 15 units × $10 — yield units count
     expect(r.gainUsd).toBeCloseTo(50); // 150 − 100 cost
+  });
+});
+
+describe("bootstrapCryptoWindow", () => {
+  it("trims partial-coverage leading days and injects an opening deposit", () => {
+    // Days 1-2 captured only part of the stack; day 3 the full holdings
+    // appear (+1300% flow-adjusted) — classic onboarding noise.
+    const pot = [
+      { date: "2026-03-27", value: 470 },
+      { date: "2026-03-29", value: 473 },
+      { date: "2026-03-30", value: 7255 },
+      { date: "2026-04-02", value: 7500 },
+    ];
+    const flows = [
+      { date: "2026-03-26", amount: 400 },
+      { date: "2026-03-30", amount: 612 },
+      { date: "2026-04-02", amount: 100 },
+    ];
+    const w = bootstrapCryptoWindow(pot, flows);
+    expect(w.values[0]).toEqual({ date: "2026-03-30", value: 7255 });
+    // Opening deposit replaces all flows ≤ the trusted start date.
+    expect(w.flows[0]).toEqual({ date: "2026-03-30", amount: 7255 });
+    expect(w.flows.slice(1)).toEqual([{ date: "2026-04-02", amount: 100 }]);
+  });
+
+  it("keeps a clean series untouched apart from the opening deposit", () => {
+    const pot = [
+      { date: "2026-04-01", value: 1000 },
+      { date: "2026-04-02", value: 1100 },
+    ];
+    const flows = [
+      { date: "2026-04-01", amount: 1000 },
+      { date: "2026-04-02", amount: 50 },
+    ];
+    const w = bootstrapCryptoWindow(pot, flows);
+    expect(w.values).toEqual(pot);
+    expect(w.flows).toEqual([
+      { date: "2026-04-01", amount: 1000 }, // opening = day-1 pot value
+      { date: "2026-04-02", amount: 50 },
+    ]);
+  });
+
+  it("only trims inside the first 14 days — later spikes are real market moves", () => {
+    const pot = [
+      { date: "2026-04-01", value: 1000 },
+      { date: "2026-05-01", value: 1050 },
+      { date: "2026-05-02", value: 4000 }, // late spike: stays
+    ];
+    const flows = [{ date: "2026-04-01", amount: 1000 }];
+    const w = bootstrapCryptoWindow(pot, flows);
+    expect(w.values).toHaveLength(3);
+  });
+
+  it("handles empty inputs", () => {
+    expect(bootstrapCryptoWindow([], []).values).toEqual([]);
+    expect(bootstrapCryptoWindow([], []).flows).toEqual([]);
   });
 });

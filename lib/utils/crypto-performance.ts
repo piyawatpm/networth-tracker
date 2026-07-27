@@ -158,3 +158,53 @@ export function perTokenStats(
     return b.xirrPct - a.xirrPct;
   });
 }
+
+/**
+ * Onboarding guard for the crypto pot series. When tracking begins, the first
+ * holdings uploads often cover only part of the stack, so the pot value jumps
+ * violently once the full holdings appear — and pre-existing coins enter
+ * without any logged buy. Two corrections:
+ *
+ * 1. TRIM leading days whose flow-adjusted next-day return exceeds +200%
+ *    (only within the first 14 calendar days of the series — later spikes are
+ *    real market moves and stay).
+ * 2. OPENING DEPOSIT: the first trusted day's pot value counts as capital
+ *    deposited that day; logged flows on or before that date are inside that
+ *    value already and are replaced by it.
+ */
+export function bootstrapCryptoWindow(
+  potValues: { date: string; value: number }[],
+  flows: DailyFlow[],
+): { values: { date: string; value: number }[]; flows: DailyFlow[] } {
+  if (potValues.length === 0) return { values: [], flows: [] };
+
+  const trimLimitDate = new Date(
+    Date.parse(potValues[0].date + "T00:00:00Z") + 14 * 86400000,
+  )
+    .toISOString()
+    .slice(0, 10);
+
+  // Scan every consecutive pair inside the bootstrap window; the series is
+  // trusted only AFTER the last violent unexplained jump (both days of a
+  // partial-coverage stretch can look calm relative to each other).
+  let start = 0;
+  for (let i = 0; i < potValues.length - 1; i++) {
+    const prev = potValues[i];
+    if (prev.date > trimLimitDate) break;
+    const next = potValues[i + 1];
+    const flow = flows.reduce(
+      (s, f) => (f.date > prev.date && f.date <= next.date ? s + f.amount : s),
+      0,
+    );
+    const r = prev.value > 1e-9 ? (next.value - flow) / prev.value - 1 : 0;
+    if (r > 2) start = i + 1;
+  }
+
+  const values = potValues.slice(start);
+  const d0 = values[0];
+  const laterFlows = flows.filter((f) => f.date > d0.date);
+  return {
+    values,
+    flows: [{ date: d0.date, amount: d0.value }, ...laterFlows],
+  };
+}

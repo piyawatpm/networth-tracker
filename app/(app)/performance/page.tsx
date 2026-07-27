@@ -22,6 +22,7 @@ import {
   stableBalanceByDay,
   cryptoPotValues,
   perTokenStats,
+  bootstrapCryptoWindow,
 } from "@/lib/utils/crypto-performance";
 import { parseCryptoCSV } from "@/lib/utils/crypto-csv";
 import { ECHARTS_COLORS } from "@/lib/utils/echarts";
@@ -201,10 +202,16 @@ export default function PerformancePage() {
     () => cryptoNetFlowsByDay(cryptoTxs, isCash),
     [cryptoTxs, isCash],
   );
-  const cryptoValues = useMemo(() => {
+  // Bootstrap guard: trims partial-coverage onboarding days and turns the
+  // first trusted day's pot value into an opening deposit (pre-existing coins
+  // entered tracking without logged buys — that's capital, not profit).
+  const cryptoWindow = useMemo(() => {
     const snapVals = dailySnapshotValues(cryptoSnapshots, false);
-    return cryptoPotValues(snapVals, stableBalanceByDay(cryptoTxs, isCash));
-  }, [cryptoSnapshots, cryptoTxs, isCash]);
+    const pot = cryptoPotValues(snapVals, stableBalanceByDay(cryptoTxs, isCash));
+    return bootstrapCryptoWindow(pot, cryptoFlowsResult.flows);
+  }, [cryptoSnapshots, cryptoTxs, isCash, cryptoFlowsResult]);
+  const cryptoValues = cryptoWindow.values;
+  const cryptoFlows = cryptoWindow.flows;
   const cryptoRows = useMemo(
     () => perTokenStats(cryptoTxs, cryptoPrices.prices ?? {}, tickerMappings, isCash, today),
     [cryptoTxs, cryptoPrices, tickerMappings, isCash, today],
@@ -217,15 +224,15 @@ export default function PerformancePage() {
   // ── Scope selection ──
   const scopeFlows = useMemo(() => {
     if (scope === "stocks") return stockFlows;
-    if (scope === "crypto") return cryptoFlowsResult.flows;
+    if (scope === "crypto") return cryptoFlows;
     const merged = new Map<string, number>();
-    for (const f of [...stockFlows, ...cryptoFlowsResult.flows]) {
+    for (const f of [...stockFlows, ...cryptoFlows]) {
       merged.set(f.date, (merged.get(f.date) ?? 0) + f.amount);
     }
     return [...merged.entries()]
       .map(([date, amount]) => ({ date, amount }))
       .sort((a, b) => (a.date < b.date ? -1 : 1));
-  }, [scope, stockFlows, cryptoFlowsResult]);
+  }, [scope, stockFlows, cryptoFlows]);
 
   const scopeValues = useMemo(() => {
     if (scope === "stocks") return stockValues;
