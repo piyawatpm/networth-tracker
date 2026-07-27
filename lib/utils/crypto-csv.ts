@@ -86,7 +86,7 @@ function parsePortfolioOverview(csvText: string): CryptoHolding[] {
   return merged.sort((a, b) => b.currentValueUsd - a.currentValueUsd);
 }
 
-function isStablecoin(name: string): boolean {
+export function isStablecoin(name: string): boolean {
   const upper = name.toUpperCase();
   const lower = name.toLowerCase();
 
