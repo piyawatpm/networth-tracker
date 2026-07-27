@@ -155,10 +155,15 @@ export default function PerformancePage() {
     () => netFlowsByDay(transactions, toUsd, holdingFilter),
     [transactions, toUsd, holdingFilter],
   );
-  const stockValues = useMemo(
-    () => dailySnapshotValues(snapshots, includeSuper),
-    [snapshots, includeSuper],
-  );
+  // Clamped at the source to the first logged flow: snapshots that predate
+  // any logged capital (seeded/demo history) would otherwise leak into the
+  // All-scope merge via forward-fill even though the stocks scope excludes
+  // them.
+  const stockValues = useMemo(() => {
+    const all = dailySnapshotValues(snapshots, includeSuper);
+    const firstStockFlow = stockFlows[0]?.date ?? "0000-00-00";
+    return all.filter((v) => v.date >= firstStockFlow);
+  }, [snapshots, includeSuper, stockFlows]);
   const stockCurrentValueUsd = useMemo(
     () =>
       holdings
@@ -216,10 +221,15 @@ export default function PerformancePage() {
     () => perTokenStats(cryptoTxs, cryptoPrices.prices ?? {}, tickerMappings, isCash, today),
     [cryptoTxs, cryptoPrices, tickerMappings, isCash, today],
   );
-  const cryptoCurrentValueUsd = useMemo(
-    () => cryptoRows.reduce((s, r) => s + r.valueUsd, 0),
-    [cryptoRows],
-  );
+  // Terminal pot value comes from the snapshot-based series, NOT Σ(tx-log
+  // tokens × live price): coins held but never transacted (Earn/locked
+  // positions) exist only in the holdings CSV → snapshots. Falls back to the
+  // per-token sum when no snapshot history exists yet.
+  const cryptoCurrentValueUsd = useMemo(() => {
+    const lastPot = cryptoValues[cryptoValues.length - 1]?.value;
+    if (lastPot != null && lastPot > 0) return lastPot;
+    return cryptoRows.reduce((s, r) => s + r.valueUsd, 0);
+  }, [cryptoValues, cryptoRows]);
 
   // ── Scope selection ──
   const scopeFlows = useMemo(() => {

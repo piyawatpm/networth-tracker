@@ -41,9 +41,12 @@ async function fetchSpy(period1: number, period2: number) {
 }
 
 async function fetchBtc(startMs: number) {
-  // Binance caps limit at 1000 daily candles (~2.7y) — plenty for this app.
+  // Binance returns the FIRST 1000 daily candles after startTime, so clamp
+  // the start to keep the 1000-candle window ending at today — otherwise a
+  // far-past `from` returns 2020-2022 and never reaches the present.
+  const clampedStart = Math.max(startMs, Date.now() - 999 * 86400000);
   const res = await fetch(
-    `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&startTime=${startMs}&limit=1000`,
+    `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&startTime=${clampedStart}&limit=1000`,
     { signal: AbortSignal.timeout(8000), next: { revalidate: 21600 } },
   );
   if (!res.ok) return null;
