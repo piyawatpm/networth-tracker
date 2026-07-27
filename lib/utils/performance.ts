@@ -180,6 +180,8 @@ export interface HoldingPerfRow {
   returnPct: number | null;
   xirrPct: number | null;
   closed: boolean;
+  /** Optional UI chip label (e.g. "CRYPTO"). */
+  badge?: string;
 }
 
 /** Per-holding performance rows + one aggregate row for orphaned (deleted-holding) txs. */

@@ -4,6 +4,7 @@ import {
   cryptoNetFlowsByDay,
   stableBalanceByDay,
   cryptoPotValues,
+  perTokenStats,
 } from "../crypto-performance";
 import type { CryptoTransaction } from "../types";
 
@@ -113,5 +114,61 @@ describe("cryptoPotValues", () => {
       { date: "2026-03-30", value: 100 },
       { date: "2026-04-01", value: 50 },
     ]);
+  });
+});
+
+describe("perTokenStats", () => {
+  const today = "2026-07-27";
+  it("builds a row per non-cash token with live-price value and realized+unrealized gain", () => {
+    const txs = [
+      ctx({ date: "2026-04-01 09:00:00", token: "BTC", type: "buy", amount: 2, priceUsd: 100, totalValueUsd: 200 }),
+      ctx({ date: "2026-05-01 09:00:00", token: "BTC", type: "sell", amount: 1, priceUsd: 150, totalValueUsd: 150 }),
+      ctx({ date: "2026-04-01 09:00:00", token: "USDT", type: "buy", amount: 500, totalValueUsd: 500 }),
+    ];
+    const rows = perTokenStats(txs, { BTC: 180 }, {}, cash, today);
+    expect(rows).toHaveLength(1); // USDT is cash — excluded
+    const r = rows[0];
+    expect(r.ticker).toBe("BTC");
+    expect(r.badge).toBe("CRYPTO");
+    expect(r.valueUsd).toBeCloseTo(180); // 1 remaining × live 180
+    expect(r.investedUsd).toBeCloseTo(100); // avg-cost of remaining unit
+    // realized = 150 − 100 = 50; unrealized = 180 − 100 = 80; gain = 130
+    expect(r.gainUsd).toBeCloseTo(130);
+    expect(r.returnPct).toBeCloseTo(130 / 200, 6);
+    expect(r.xirrPct).not.toBeNull();
+    expect(r.closed).toBe(false);
+  });
+
+  it("resolves live price through ticker mappings and falls back to last tx price", () => {
+    const txs = [
+      ctx({ token: "GRAM", type: "buy", amount: 10, priceUsd: 2, totalValueUsd: 20 }),
+    ];
+    const viaMapping = perTokenStats(txs, { Telegram: 3 }, { GRAM: "Telegram" }, cash, today);
+    expect(viaMapping[0].valueUsd).toBeCloseTo(30);
+    const viaFallback = perTokenStats(txs, {}, {}, cash, today);
+    expect(viaFallback[0].valueUsd).toBeCloseTo(20); // last known priceUsd = 2
+  });
+
+  it("keeps fully-sold tokens as closed rows with realized P&L", () => {
+    const txs = [
+      ctx({ date: "2026-04-01 09:00:00", token: "APT", type: "buy", amount: 100, priceUsd: 1, totalValueUsd: 100 }),
+      ctx({ date: "2026-06-01 09:00:00", token: "APT", type: "sell", amount: 100, priceUsd: 1.5, totalValueUsd: 150 }),
+    ];
+    const rows = perTokenStats(txs, {}, {}, cash, today);
+    expect(rows).toHaveLength(1); // computeHoldings drops it; union keeps it
+    const r = rows[0];
+    expect(r.closed).toBe(true);
+    expect(r.valueUsd).toBe(0);
+    expect(r.gainUsd).toBeCloseTo(50);
+  });
+
+  it("includes yield transferIns in value but not in flows (return, not deposit)", () => {
+    const txs = [
+      ctx({ date: "2026-04-01 09:00:00", token: "GT", type: "buy", amount: 10, priceUsd: 10, totalValueUsd: 100 }),
+      ctx({ date: "2026-05-01 09:00:00", token: "GT", type: "transferIn", amount: 5, priceUsd: null, totalValueUsd: null }),
+    ];
+    const r = perTokenStats(txs, { GT: 10 }, {}, cash, today)[0];
+    expect(r.valueUsd).toBeCloseTo(150); // 15 units × $10 — yield units count
+    expect(r.gainUsd).toBeCloseTo(50); // 150 − 100 cost
   });
 });

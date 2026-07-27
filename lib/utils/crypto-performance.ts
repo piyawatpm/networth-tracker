@@ -4,8 +4,8 @@
 // (bot profits / yield / inter-exchange moves) are zero-flow — their value
 // surfaces in the pot's growth, i.e. as return.
 import type { CryptoTransaction } from "./types";
-import { isStablecoin } from "./crypto-csv";
-import type { DailyFlow } from "./performance";
+import { isStablecoin, computeHoldings, computeRealizedPnl } from "./crypto-csv";
+import { xirr, type CashFlow, type DailyFlow, type HoldingPerfRow } from "./performance";
 
 /** Dollar-pegged tokens the base classifier misses (yield-prefix exclusion
  * catches syrupUSDC; USDe/USDG/GUSD aren't in its name list). */
@@ -82,4 +82,79 @@ export function cryptoPotValues(
     if (v > 0) out.push({ date: s.date, value: v });
   }
   return out;
+}
+
+/** Per-token performance rows for non-cash tokens, shaped like stock rows.
+ * IMPORTANT: computeHoldings DROPS fully-sold tokens (|amount| < 0.0001), so
+ * rows are built from the UNION of open holdings and tokens that appear in
+ * computeRealizedPnl.byToken — exited positions keep their realized P&L row. */
+export function perTokenStats(
+  txs: CryptoTransaction[],
+  livePrices: Record<string, number>,
+  tickerMappings: Record<string, string>,
+  isCash: (token: string) => boolean,
+  todayIso: string,
+): HoldingPerfRow[] {
+  const holdings = computeHoldings(txs).filter((h) => !isCash(h.token));
+  const holdingByToken = new Map(holdings.map((h) => [h.token, h]));
+  const realizedByToken = new Map(
+    computeRealizedPnl(txs).byToken.map((r) => [r.token, r.realizedPnlUsd]),
+  );
+  const tokens = [...new Set([...holdingByToken.keys(), ...realizedByToken.keys()])].filter(
+    (t) => !isCash(t),
+  );
+
+  const rows: HoldingPerfRow[] = tokens.map((token) => {
+    const h = holdingByToken.get(token);
+    const own = txs.filter((t) => t.token === token);
+    const livePrice = livePrices[token] ?? livePrices[tickerMappings[token] ?? token];
+    const lastTxPrice = [...own].reverse().find((t) => t.priceUsd != null)?.priceUsd ?? 0;
+    const price = livePrice ?? lastTxPrice;
+    const closed = h == null || Math.abs(h.amount) < 1e-6;
+    const valueUsd = closed ? 0 : h.amount * price;
+    const grossBuysUsd = own
+      .filter((t) => t.type === "buy" && t.totalValueUsd != null)
+      .reduce((s, t) => s + (t.totalValueUsd as number), 0);
+    const grossSellsUsd = own
+      .filter((t) => t.type === "sell" && t.totalValueUsd != null)
+      .reduce((s, t) => s + (t.totalValueUsd as number), 0);
+    // Economic gain: value + withdrawals − deposits. Unlike avg-buy cost
+    // (which spreads cost over free yield units), this counts yield as gain —
+    // consistent with the pot-level net-gain and the transfers-are-returns
+    // flow model.
+    const gainUsd = valueUsd + grossSellsUsd - grossBuysUsd;
+    const flows: CashFlow[] = own
+      .filter(
+        (t) =>
+          (t.type === "buy" || t.type === "sell") &&
+          t.totalValueUsd != null &&
+          Number.isFinite(t.totalValueUsd),
+      )
+      .map((t) => ({
+        date: t.date.slice(0, 10),
+        amount: t.type === "buy" ? -(t.totalValueUsd as number) : (t.totalValueUsd as number),
+      }));
+    if (!closed && valueUsd > 0) flows.push({ date: todayIso, amount: valueUsd });
+    return {
+      holdingId: `crypto-${token}`,
+      name: token,
+      ticker: token,
+      isOrphan: false,
+      accountType: "normal" as const,
+      investedUsd: h?.totalCostUsd ?? 0,
+      valueUsd,
+      gainUsd,
+      returnPct: grossBuysUsd > 0 ? gainUsd / grossBuysUsd : null,
+      xirrPct: xirr(flows),
+      closed,
+      badge: "CRYPTO",
+    };
+  });
+
+  return rows.sort((a, b) => {
+    if (a.xirrPct == null && b.xirrPct == null) return b.gainUsd - a.gainUsd;
+    if (a.xirrPct == null) return 1;
+    if (b.xirrPct == null) return -1;
+    return b.xirrPct - a.xirrPct;
+  });
 }
