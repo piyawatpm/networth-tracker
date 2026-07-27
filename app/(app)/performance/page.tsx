@@ -12,6 +12,7 @@ import {
   dailySnapshotValues,
   netFlowsByDay,
   perHoldingStats,
+  syntheticSuperSeries,
   xirr,
   type CashFlow,
   type SnapshotLike,
@@ -160,15 +161,41 @@ export default function PerformancePage() {
     () => netFlowsByDay(transactions, toUsd, holdingFilter),
     [transactions, toUsd, holdingFilter],
   );
+  // Super holdings have no daily price feed — their recorded snapshot value
+  // is flat between manual updates, then jumps. Replace the recorded super
+  // component with a synthetic series built from logged super contributions
+  // × a geometric growth ramp that lands on today's live value.
+  const superFlows = useMemo(
+    () => netFlowsByDay(transactions, toUsd, (id) => superIds.has(id)),
+    [transactions, toUsd, superIds],
+  );
+  const currentSuperValueUsd = useMemo(
+    () =>
+      holdings
+        .filter((h) => h.type !== "savings" && h.accountType === "super")
+        .reduce((s, h) => s + toUsd(h.currentValue ?? 0, h.currency), 0),
+    [holdings, toUsd],
+  );
   // Clamped at the source to the first logged flow: snapshots that predate
   // any logged capital (seeded/demo history) would otherwise leak into the
   // All-scope merge via forward-fill even though the stocks scope excludes
   // them.
   const stockValues = useMemo(() => {
-    const all = dailySnapshotValues(snapshots, includeSuper);
+    const base = dailySnapshotValues(snapshots, false);
+    const withSuper = includeSuper
+      ? (() => {
+          const synth = syntheticSuperSeries(
+            base.map((v) => v.date),
+            superFlows,
+            currentSuperValueUsd,
+            today,
+          );
+          return base.map((v, i) => ({ date: v.date, value: v.value + synth[i].value }));
+        })()
+      : base;
     const firstStockFlow = stockFlows[0]?.date ?? "0000-00-00";
-    return all.filter((v) => v.date >= firstStockFlow);
-  }, [snapshots, includeSuper, stockFlows]);
+    return withSuper.filter((v) => v.date >= firstStockFlow);
+  }, [snapshots, includeSuper, stockFlows, superFlows, currentSuperValueUsd, today]);
   const stockCurrentValueUsd = useMemo(
     () =>
       holdings

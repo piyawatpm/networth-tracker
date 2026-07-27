@@ -7,6 +7,7 @@ import {
   computeTwr,
   perHoldingStats,
   costBasisDrift,
+  syntheticSuperSeries,
   type CashFlow,
   type DailyFlow,
 } from "../performance";
@@ -326,5 +327,63 @@ describe("costBasisDrift", () => {
     const h = holding({ id: "h1", amountInvested: 1005 });
     const txs = [tx({ holdingId: "h1", date: "2025-01-01", totalAmount: 1000 })];
     expect(costBasisDrift([h], txs, idUsd)).toHaveLength(0);
+  });
+});
+
+describe("syntheticSuperSeries", () => {
+  it("equals cost at the first flow and current value today, ramping between", () => {
+    const flows: DailyFlow[] = [{ date: "2026-01-01", amount: 1000 }];
+    const dates = ["2026-01-01", "2026-04-02", "2026-07-02"];
+    // ratio = 1210/1000 = 1.21 over 182 days; midpoint (91d) → ×1.21^0.5 = ×1.1
+    const s = syntheticSuperSeries(dates, flows, 1210, "2026-07-02");
+    expect(s[0]).toEqual({ date: "2026-01-01", value: 1000 });
+    expect(s[1].value).toBeCloseTo(1100, 0);
+    expect(s[2].value).toBeCloseTo(1210, 6);
+  });
+
+  it("steps the cost basis up at later contributions", () => {
+    const flows: DailyFlow[] = [
+      { date: "2026-01-01", amount: 1000 },
+      { date: "2026-07-02", amount: 500 },
+    ];
+    // total cost 1500, current 1815 → ratio 1.21 over 2026-01-01 → 2027-01-01
+    const s = syntheticSuperSeries(
+      ["2026-01-01", "2026-07-01", "2026-07-02", "2027-01-01"],
+      flows,
+      1815,
+      "2027-01-01",
+    );
+    expect(s[0].value).toBeCloseTo(1000, 6);
+    // day before the top-up: cost still 1000, ~half the ramp elapsed
+    expect(s[1].value).toBeCloseTo(1000 * Math.pow(1.21, 181 / 365), 0);
+    // top-up day: cost jumps to 1500
+    expect(s[2].value).toBeCloseTo(1500 * Math.pow(1.21, 182 / 365), 0);
+    expect(s[3].value).toBeCloseTo(1815, 6);
+  });
+
+  it("handles withdrawals by reducing the cost step", () => {
+    const flows: DailyFlow[] = [
+      { date: "2026-01-01", amount: 1000 },
+      { date: "2026-02-01", amount: -400 },
+    ];
+    const s = syntheticSuperSeries(["2026-02-01"], flows, 660, "2026-03-01");
+    // cost after withdrawal = 600; ratio = 660/600 = 1.1
+    expect(s[0].value).toBeCloseTo(600 * Math.pow(1.1, 31 / 59), 0);
+  });
+
+  it("returns zeros when there are no super flows or no current value", () => {
+    expect(syntheticSuperSeries(["2026-01-01"], [], 500, "2026-02-01")).toEqual([
+      { date: "2026-01-01", value: 0 },
+    ]);
+    expect(
+      syntheticSuperSeries(["2026-01-01"], [{ date: "2026-01-01", amount: 100 }], 0, "2026-02-01"),
+    ).toEqual([{ date: "2026-01-01", value: 0 }]);
+  });
+
+  it("evaluates dates before the first flow as zero", () => {
+    const flows: DailyFlow[] = [{ date: "2026-03-01", amount: 1000 }];
+    const s = syntheticSuperSeries(["2026-02-01", "2026-03-01"], flows, 1100, "2026-04-01");
+    expect(s[0].value).toBe(0);
+    expect(s[1].value).toBeCloseTo(1000, 6);
   });
 });

@@ -290,3 +290,41 @@ export function costBasisDrift(
   }
   return out;
 }
+
+/**
+ * Synthetic valuation history for super holdings, which have no daily price
+ * feed (their recorded snapshot value is flat between manual updates, then
+ * jumps). Value at date d = cost-basis-to-date(d) × ratio^frac(d), where
+ * ratio = currentValue / total logged cost and frac ramps 0→1 from the first
+ * super flow to today — cost at each contribution date, live value today,
+ * gain accrued at a constant daily rate in between (the honest default when
+ * the fund's actual growth path is unknown).
+ */
+export function syntheticSuperSeries(
+  dates: string[],
+  superFlows: DailyFlow[],
+  currentValueUsd: number,
+  todayIso: string,
+): { date: string; value: number }[] {
+  const totalCost = superFlows.reduce((s, f) => s + f.amount, 0);
+  if (superFlows.length === 0 || totalCost <= 0 || currentValueUsd <= 0) {
+    return dates.map((date) => ({ date, value: 0 }));
+  }
+  const ratio = currentValueUsd / totalCost;
+  const t0 = Date.parse(superFlows[0].date + "T00:00:00Z");
+  const tEnd = Date.parse(todayIso + "T00:00:00Z");
+  const span = Math.max(1, tEnd - t0);
+
+  let fi = -1;
+  let cost = 0;
+  return dates.map((date) => {
+    while (fi + 1 < superFlows.length && superFlows[fi + 1].date <= date) {
+      fi++;
+      cost += superFlows[fi].amount;
+    }
+    if (cost <= 0) return { date, value: 0 };
+    const t = Date.parse(date + "T00:00:00Z");
+    const frac = Math.min(1, Math.max(0, (t - t0) / span));
+    return { date, value: cost * Math.pow(ratio, frac) };
+  });
+}
