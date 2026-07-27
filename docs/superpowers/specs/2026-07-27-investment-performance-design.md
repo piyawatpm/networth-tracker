@@ -44,10 +44,21 @@ portfolio only (crypto follows in a later iteration).
 ## Orphan transactions (deleted holdings)
 
 `handleDelete` on the portfolio page removes the holding but keeps its
-transactions. These flows are real history and are INCLUDED in portfolio-level
-contributions/XIRR/TWR (excluding them would inflate results). They render as a
-single aggregated "Removed holdings" row in the table. Orphans have no
-`accountType`, so the include-super filter treats them as normal-account.
+transactions. **Amended after testing against real data:** the live dataset's
+orphans are dominated by renames/experiments with buys and no matching sells
+(they'd read as pure losses, e.g. −71%/yr XIRR), so a "Removed: in/out" toggle
+(default OUT) controls whether they count in the stats. The aggregated
+"Removed holdings" row always renders in the table — with a NOT IN STATS chip
+when excluded — so nothing is hidden. Orphans have no `accountType`, so the
+include-super filter treats them as normal-account.
+
+## TWR window (amended after testing against real data)
+
+Snapshot history can predate the transaction log (seeded/demo rows — the live
+table contains demo values through 2026-04-03 and a $11 garbage day on
+2026-04-04). Valuations that precede any logged capital would chain phantom
+returns into the index, so the TWR window is clamped to
+`max(period start, first logged flow date)`.
 
 ## Architecture
 
@@ -105,8 +116,19 @@ changes, no writes.
 - `valueWithSuper` vs `value` snapshot fields drive the include-super toggle;
   tx flows are filtered by the holding's `accountType`.
 
+## Chart colors (validated)
+
+Series colors were validated with the dataviz palette checker on both app
+surfaces (#f4f3ed light / #242424 dark): portfolio value/TWR = `ECHARTS_COLORS[0]`
+blue in BOTH charts (color follows the entity), net contributions =
+`ECHARTS_COLORS[3]` terracotta dashed, S&P 500 = `ECHARTS_COLORS[6]` orange
+dashed (purple `[7]` hard-failed the normal-vision separation floor next to
+blue; teal `[1]` warned on light-surface contrast). Series-level `color` keeps
+legend swatches in sync with line colors.
+
 ## Testing
 
+This is a pnpm project (`pnpm-lock.yaml`) — use `pnpm add -D`, not npm.
 Add `vitest` (devDependency) + `"test": "vitest run"` script. Tests only for
 `lib/utils/performance.ts`: XIRR against Excel-verified fixtures, TWR
 chaining/flow cases, contribution series with mixed currencies, per-holding
