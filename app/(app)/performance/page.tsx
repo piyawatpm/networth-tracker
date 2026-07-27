@@ -73,7 +73,12 @@ async function loadBenchmark(
     // fall through to refetch
   }
   try {
-    const res = await fetch(`/api/benchmark?symbol=${symbol}&from=2020-01-01`);
+    // no-store: the route's public/s-maxage headers otherwise let the browser
+    // heuristically reuse a stale response for this same URL; freshness is
+    // already governed by the 12h localStorage cache above.
+    const res = await fetch(`/api/benchmark?symbol=${symbol}&from=2020-01-01`, {
+      cache: "no-store",
+    });
     if (!res.ok) return;
     const data = (await res.json()) as { prices: BenchCache["prices"] };
     if (!data.prices?.length) return;

@@ -239,14 +239,18 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         // and a browser that still has the full history keeps showing it.
         const existing: SnapshotCache = readSnapshotCache() ?? {};
 
-        // Page through the COMPLETE server-side history.
+        // Page through the COMPLETE server-side history — NEWEST FIRST. Deep
+        // offsets on this table can hit the statement timeout and end the
+        // loop early; descending order means an early death costs the oldest
+        // tail (usually already in the local cache from a prior session)
+        // instead of silently truncating the series at some past date.
         const allRows: Record<string, unknown>[] = [];
         const PAGE = 1000;
         for (let from = 0; ; from += PAGE) {
           const { data, error } = await supabase
             .from("snapshots")
             .select("*")
-            .order("date", { ascending: true })
+            .order("date", { ascending: false })
             .range(from, from + PAGE - 1);
           if (error) break;
           if (!data || data.length === 0) break;
@@ -271,6 +275,20 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
           for (const r of existing[key] ?? []) {
             const d = (r as SnapshotRow)?.date;
             if (typeof d === "string") byDate.set(d, r);
+          }
+          // Phase A's recent window (already in memory) joins the union too —
+          // if the pagination above died early, publishing DB-only rows would
+          // otherwise CLOBBER the newest data the app already had on screen.
+          try {
+            const inMemory = cache.current.get(key);
+            if (inMemory) {
+              for (const r of JSON.parse(inMemory) as SnapshotRow[]) {
+                const d = r?.date;
+                if (typeof d === "string") byDate.set(d, r);
+              }
+            }
+          } catch {
+            // Unparseable in-memory value — DB + localStorage union stands.
           }
           for (const r of dbRows) {
             const d = r?.date;
