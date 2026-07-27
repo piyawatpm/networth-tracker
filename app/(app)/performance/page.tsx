@@ -24,6 +24,7 @@ import {
   cryptoPotValues,
   perTokenStats,
   bootstrapCryptoWindow,
+  cryptoAllTimePnl,
 } from "@/lib/utils/crypto-performance";
 import { parseCryptoCSV } from "@/lib/utils/crypto-csv";
 import { ECHARTS_COLORS } from "@/lib/utils/echarts";
@@ -253,6 +254,12 @@ export default function PerformancePage() {
     () => perTokenStats(cryptoTxs, cryptoPrices.prices ?? {}, tickerMappings, isCash, today),
     [cryptoTxs, cryptoPrices, tickerMappings, isCash, today],
   );
+  // All-time P&L in the crypto page's convention (unrealized + realized) —
+  // shown as the crypto scope's Net Gain so every surface agrees.
+  const cryptoPnl = useMemo(
+    () => cryptoAllTimePnl(cryptoTxs, cryptoPrices.prices ?? {}, tickerMappings, isCash),
+    [cryptoTxs, cryptoPrices, tickerMappings, isCash],
+  );
   // Terminal pot value comes from the snapshot-based series, NOT Σ(tx-log
   // tokens × live price): coins held but never transacted (Earn/locked
   // positions) exist only in the holdings CSV → snapshots. Falls back to the
@@ -405,11 +412,13 @@ export default function PerformancePage() {
     };
   }, [scope, twr.totalReturn, btcStats, spyStats]);
 
+  const fmtSignedUsd = (v: number) =>
+    `${v >= 0 ? "+" : "-"}${format(Math.abs(convert(v, "USD")))}`;
   const gainSub =
     scope === "stocks" && dividendsUsd > 0
       ? `+ ${format(convert(dividendsUsd, "USD"))} dividends received`
       : scope === "crypto"
-        ? "market gains + yield"
+        ? `unrealized ${fmtSignedUsd(cryptoPnl.unrealizedUsd)} + realized ${fmtSignedUsd(cryptoPnl.realizedUsd)}, all-time`
         : "value − net contributions";
 
   const showCryptoEmpty = scope !== "stocks" && cryptoTxs.length === 0;
@@ -532,7 +541,7 @@ export default function PerformancePage() {
         xirrPct={xirrAllTime}
         twrPct={twr.totalReturn}
         twrLabel={period === "All" ? "ALL" : period}
-        netGainUsd={netGainUsd}
+        netGainUsd={scope === "crypto" ? cryptoPnl.totalUsd : netGainUsd}
         gainSub={gainSub}
         vs={vs}
       />

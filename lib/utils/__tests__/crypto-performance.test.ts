@@ -6,6 +6,7 @@ import {
   cryptoPotValues,
   perTokenStats,
   bootstrapCryptoWindow,
+  cryptoAllTimePnl,
 } from "../crypto-performance";
 import type { CryptoTransaction } from "../types";
 
@@ -163,14 +164,16 @@ describe("perTokenStats", () => {
     expect(r.gainUsd).toBeCloseTo(50);
   });
 
-  it("includes yield transferIns in value but not in flows (return, not deposit)", () => {
+  it("includes yield transferIns in value; gain uses cost-basis convention (matches crypto page)", () => {
     const txs = [
       ctx({ date: "2026-04-01 09:00:00", token: "GT", type: "buy", amount: 10, priceUsd: 10, totalValueUsd: 100 }),
       ctx({ date: "2026-05-01 09:00:00", token: "GT", type: "transferIn", amount: 5, priceUsd: null, totalValueUsd: null }),
     ];
     const r = perTokenStats(txs, { GT: 10 }, {}, cash, today)[0];
     expect(r.valueUsd).toBeCloseTo(150); // 15 units × $10 — yield units count
-    expect(r.gainUsd).toBeCloseTo(50); // 150 − 100 cost
+    // Cost-basis gain: remCost = 15 × avg(10) = 150 → 0. Yield shows up in
+    // pot-level TWR, not per-token gain — same convention as the crypto page.
+    expect(r.gainUsd).toBeCloseTo(0);
   });
 });
 
@@ -227,5 +230,41 @@ describe("bootstrapCryptoWindow", () => {
   it("handles empty inputs", () => {
     expect(bootstrapCryptoWindow([], []).values).toEqual([]);
     expect(bootstrapCryptoWindow([], []).flows).toEqual([]);
+  });
+});
+
+describe("cryptoAllTimePnl", () => {
+  it("matches the crypto page: unrealized (value − avg-cost) + realized", () => {
+    const txs = [
+      ctx({ date: "2026-04-01 09:00:00", token: "BTC", type: "buy", amount: 2, priceUsd: 100, totalValueUsd: 200 }),
+      ctx({ date: "2026-05-01 09:00:00", token: "BTC", type: "sell", amount: 1, priceUsd: 150, totalValueUsd: 150 }),
+      ctx({ date: "2026-04-01 09:00:00", token: "USDT", type: "buy", amount: 500, totalValueUsd: 500 }),
+    ];
+    const r = cryptoAllTimePnl(txs, { BTC: 180 }, {}, cash);
+    // remaining cost = 1 × avg(100) = 100; unrealized = 180 − 100 = 80
+    expect(r.unrealizedUsd).toBeCloseTo(80);
+    expect(r.realizedUsd).toBeCloseTo(50); // 150 − 100
+    expect(r.totalUsd).toBeCloseTo(130);
+  });
+
+  it("gives yield units cost at the avg-buy price (yield invisible, like the crypto page)", () => {
+    const txs = [
+      ctx({ date: "2026-04-01 09:00:00", token: "GT", type: "buy", amount: 10, priceUsd: 10, totalValueUsd: 100 }),
+      ctx({ date: "2026-05-01 09:00:00", token: "GT", type: "transferIn", amount: 5, priceUsd: null, totalValueUsd: null }),
+    ];
+    const r = cryptoAllTimePnl(txs, { GT: 10 }, {}, cash);
+    // computeHoldings: remCost = 15 × avg(10) = 150; value = 150 → unrealized 0
+    expect(r.unrealizedUsd).toBeCloseTo(0);
+    expect(r.totalUsd).toBeCloseTo(0);
+  });
+
+  it("excludes cash tokens and tolerates missing prices via last tx price", () => {
+    const txs = [
+      ctx({ token: "USDT", type: "buy", amount: 1000, totalValueUsd: 1000 }),
+      ctx({ token: "GRAM", type: "buy", amount: 10, priceUsd: 2, totalValueUsd: 20 }),
+    ];
+    const r = cryptoAllTimePnl(txs, {}, {}, cash);
+    expect(r.unrealizedUsd).toBeCloseTo(0); // GRAM valued at last tx price = cost
+    expect(r.realizedUsd).toBeCloseTo(0);
   });
 });

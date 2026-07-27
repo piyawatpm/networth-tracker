@@ -115,14 +115,12 @@ export function perTokenStats(
     const grossBuysUsd = own
       .filter((t) => t.type === "buy" && t.totalValueUsd != null)
       .reduce((s, t) => s + (t.totalValueUsd as number), 0);
-    const grossSellsUsd = own
-      .filter((t) => t.type === "sell" && t.totalValueUsd != null)
-      .reduce((s, t) => s + (t.totalValueUsd as number), 0);
-    // Economic gain: value + withdrawals − deposits. Unlike avg-buy cost
-    // (which spreads cost over free yield units), this counts yield as gain —
-    // consistent with the pot-level net-gain and the transfers-are-returns
-    // flow model.
-    const gainUsd = valueUsd + grossSellsUsd - grossBuysUsd;
+    // Cost-basis gain — unrealized (value − remaining avg-cost) + realized —
+    // the SAME convention as the crypto page and external trackers, so the
+    // per-token rows agree everywhere the user looks. Yield units carry cost
+    // at the avg-buy price (invisible here; it surfaces in pot-level TWR).
+    const realized = realizedByToken.get(token) ?? 0;
+    const gainUsd = valueUsd - (h?.totalCostUsd ?? 0) + realized;
     const flows: CashFlow[] = own
       .filter(
         (t) =>
@@ -207,4 +205,33 @@ export function bootstrapCryptoWindow(
     values,
     flows: [{ date: d0.date, amount: d0.value }, ...laterFlows],
   };
+}
+
+/**
+ * All-time crypto P&L in the crypto page's convention: unrealized
+ * (live value − remaining avg-buy cost, via computeHoldings) + realized
+ * (computeRealizedPnl), non-cash tokens only. This is the number that
+ * matches the Crypto page and external trackers — use it for the crypto
+ * scope's Net Gain tile so every surface agrees.
+ */
+export function cryptoAllTimePnl(
+  txs: CryptoTransaction[],
+  livePrices: Record<string, number>,
+  tickerMappings: Record<string, string>,
+  isCash: (token: string) => boolean,
+): { unrealizedUsd: number; realizedUsd: number; totalUsd: number } {
+  let unrealizedUsd = 0;
+  for (const h of computeHoldings(txs)) {
+    if (isCash(h.token)) continue;
+    const livePrice = livePrices[h.token] ?? livePrices[tickerMappings[h.token] ?? h.token];
+    const lastTxPrice =
+      [...txs].reverse().find((t) => t.token === h.token && t.priceUsd != null)?.priceUsd ?? 0;
+    const price = livePrice ?? lastTxPrice;
+    unrealizedUsd += h.amount * price - h.totalCostUsd;
+  }
+  const realizedUsd = computeRealizedPnl(txs).byToken.reduce(
+    (s, r) => (isCash(r.token) ? s : s + r.realizedPnlUsd),
+    0,
+  );
+  return { unrealizedUsd, realizedUsd, totalUsd: unrealizedUsd + realizedUsd };
 }
