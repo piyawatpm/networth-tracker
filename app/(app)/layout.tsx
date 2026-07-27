@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "motion/react";
 import {
   LayoutDashboard,
+  LineChart,
   TrendingUp,
   Receipt,
   Bitcoin,
@@ -42,6 +43,7 @@ const PRIMARY_NAV = [
 ];
 
 const SECONDARY_NAV = [
+  { href: "/performance", label: "Performance", icon: LineChart },
   { href: "/liabilities", label: "Liabilities", icon: Handshake },
   { href: "/emergency-fund", label: "Emergency", icon: Shield },
   { href: "/budget", label: "Budget", icon: FileSpreadsheet },
