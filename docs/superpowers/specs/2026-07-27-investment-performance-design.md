@@ -126,6 +126,19 @@ dashed (purple `[7]` hard-failed the normal-vision separation floor next to
 blue; teal `[1]` warned on light-surface contrast). Series-level `color` keeps
 legend swatches in sync with line colors.
 
+## Super valuation history (amended 2026-07-27, user-directed)
+
+Super funds have no daily price feed; the recorded `valueWithSuper` snapshot
+component is flat between manual updates, then jumps. The performance page
+now synthesizes the super series instead (`syntheticSuperSeries`): value(d) =
+logged-super-cost-to-date(d) × ratio^frac(d), where ratio = current live
+super value ÷ total logged super cost and frac ramps 0→1 from the first
+super flow to today. Cost at each contribution date, live value today, gain
+accrued at a constant daily rate between (the honest default when the fund's
+actual growth path is unknown). Super: in = no-super snapshots + synthetic;
+Super: out unchanged; applies in Stocks and All scopes. The `valueWithSuper`
+field is no longer read by this page.
+
 ## Testing
 
 This is a pnpm project (`pnpm-lock.yaml`) — use `pnpm add -D`, not npm.
