@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { BlurFade } from "@/components/ui/blur-fade";
 import { useCloudStorage } from "@/components/providers/data-provider";
 import { useCurrency } from "@/components/providers/currency-provider";
+import { useRealizedIncome } from "@/hooks/use-realized-income";
 import { GoalSection } from "@/components/dashboard/goal-section";
 import {
   parseAndComputeHoldings,
@@ -152,7 +153,15 @@ function sumConverted(
 
 export default function DashboardPage() {
   // ---- Data sources -------------------------------------------------------
-  const [incomeEntries] = useCloudStorage<IncomeEntry[]>("income_entries", []);
+  const [storedIncomeEntries] = useCloudStorage<IncomeEntry[]>("income_entries", []);
+  // Realized sells projected from the portfolio + crypto transaction logs, so
+  // the dashboard's "earned" figures agree with the income page. Budget and the
+  // expenses savings ratio deliberately stay cash-only and do not merge these.
+  const { entries: realizedIncome } = useRealizedIncome();
+  const incomeEntries = useMemo(
+    () => [...storedIncomeEntries, ...realizedIncome],
+    [storedIncomeEntries, realizedIncome],
+  );
   const [expenseEntries] = useCloudStorage<ExpenseEntry[]>("expense_entries", []);
   const [cryptoCsvText] = useCloudStorage<string>("crypto_csv_text", "");
   const [portfolioHoldings] = useCloudStorage<PortfolioHolding[]>("portfolio_holdings", []);

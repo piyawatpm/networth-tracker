@@ -13,6 +13,8 @@ export const INCOME_TYPE_LABELS: Record<IncomeType, string> = {
   interest: "Interest",
   rental: "Rental",
   bonus: "Bonus",
+  realized_stocks: "Realized · Stocks",
+  realized_crypto: "Realized · Crypto",
   other: "Other",
 };
 
@@ -120,6 +122,8 @@ export const CHART_COLORS = [
   "#5f6b80",  // slate
   "#c4943a",  // gold
   "#2e7d7b",  // teal
+  "#4f7cac",  // azure
+  "#8f6bb0",  // iris
 ];
 
 export const INCOME_TYPE_COLORS: Record<IncomeType, string> = {
@@ -135,6 +139,8 @@ export const INCOME_TYPE_COLORS: Record<IncomeType, string> = {
   interest: CHART_COLORS[9],
   rental: CHART_COLORS[10],
   bonus: CHART_COLORS[11],
+  realized_stocks: CHART_COLORS[13],
+  realized_crypto: CHART_COLORS[14],
   other: CHART_COLORS[12],
 };
 

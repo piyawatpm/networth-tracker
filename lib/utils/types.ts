@@ -50,7 +50,12 @@ export type IncomeType =
   | "interest"
   | "rental"
   | "bonus"
+  | "realized_stocks"
+  | "realized_crypto"
   | "other";
+
+/** Income types that are derived from a transaction log rather than entered by hand. */
+export const DERIVED_INCOME_TYPES = ["realized_stocks", "realized_crypto"];
 
 export type ExpenseType =
   | "food"
@@ -88,10 +93,23 @@ export interface IncomeEntry {
   isRecurring?: boolean;
   recurringId?: string;
   createdAt: number;
+  /**
+   * Set on rows projected from a transaction log (realized sells) rather than
+   * entered by hand. Derived rows are read-only and are never written back to
+   * `income_entries` — they are recomputed from the source log on every render.
+   */
+  derived?: boolean;
 }
 
 /** Default income types considered passive (used when isPassive is undefined) */
-export const DEFAULT_PASSIVE_TYPES = ["dividend", "crypto_yield", "interest", "rental"];
+export const DEFAULT_PASSIVE_TYPES = [
+  "dividend",
+  "crypto_yield",
+  "interest",
+  "rental",
+  "realized_stocks",
+  "realized_crypto",
+];
 
 export interface CustomIncomeCategory {
   id: string;
@@ -241,6 +259,26 @@ export interface RealizedPnlByToken {
 export interface RealizedPnlResult {
   total: number;  // sum of realized PnL across all (non-stablecoin) tokens
   byToken: RealizedPnlByToken[];  // sorted: biggest gain → biggest loss
+}
+
+/**
+ * One sell that locked in a gain or loss — the atom the income page projects
+ * realized profit from. Both the portfolio (buy/sell log) and crypto (CSV)
+ * replays emit these so a single mapper can turn either into an IncomeEntry.
+ */
+export interface RealizedSaleEvent {
+  /** Deterministic across renders so React keys and dedupe stay stable. */
+  id: string;
+  source: "stocks" | "crypto";
+  /** YYYY-MM-DD — crypto rows carry a time component that gets truncated. */
+  date: string;
+  /** Holding name or token, for the description column. */
+  label: string;
+  /** Ticker/token symbol, for the source column. Falls back to `label`. */
+  ticker: string;
+  /** Signed profit/loss in `currency` — negative for a sell at a loss. */
+  realized: number;
+  currency: Currency;
 }
 
 export interface CachedRates {

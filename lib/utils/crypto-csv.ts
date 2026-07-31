@@ -1,4 +1,4 @@
-import type { CryptoTransaction, CryptoHolding, RealizedPnlResult, RealizedPnlByToken } from "./types";
+import type { CryptoTransaction, CryptoHolding, RealizedPnlResult, RealizedPnlByToken, RealizedSaleEvent } from "./types";
 import { STABLECOINS, YIELD_PREFIXES, KNOWN_EXCHANGES } from "./constants";
 
 // ---------------------------------------------------------------------------
@@ -374,6 +374,77 @@ export function computeRealizedPnl(transactions: CryptoTransaction[]): RealizedP
 
   byToken.sort((a, b) => b.realizedPnlUsd - a.realizedPnlUsd);
   return { total, byToken };
+}
+
+// ---------------------------------------------------------------------------
+// Per-sell realized events (for the income page)
+// ---------------------------------------------------------------------------
+// Same avg-buy replay as computeRealizedPnl, but emits one event per disposal
+// instead of a per-token total — and counts `sell` rows ONLY.
+//
+// computeRealizedPnl also books `transferOut` as a disposal, which is right for
+// the crypto page's cost-basis view but wrong for income: crypto-performance.ts
+// classifies transfers as yield / inter-exchange moves, so counting them here
+// would double-book against any Crypto Yield income logged by hand. That makes
+// this total intentionally lower than the crypto page's "All-Time Realized"
+// card. Excluding them does not shift any average buy price — the avg-buy
+// denominators only ever grow on buys and transferIns.
+
+export function computeRealizedSales(
+  transactions: CryptoTransaction[],
+): RealizedSaleEvent[] {
+  // Sort by date so each sell uses the avg-buy-price as it stood at that time.
+  const sorted = [...transactions].sort((a, b) =>
+    a.date < b.date ? -1 : a.date > b.date ? 1 : 0,
+  );
+
+  const cost = new Map<string, { amount: number; usd: number }>();
+  const seenPerDay = new Map<string, number>();
+  const events: RealizedSaleEvent[] = [];
+
+  for (const tx of sorted) {
+    let s = cost.get(tx.token);
+    if (!s) {
+      s = { amount: 0, usd: 0 };
+      cost.set(tx.token, s);
+    }
+
+    if (tx.type === "buy" || tx.type === "transferIn") {
+      // transferIn rows often carry no USD value; only shift the average when
+      // the row has a cost, otherwise avg buy price drifts on deposits.
+      if (tx.totalValueUsd != null) {
+        s.amount += tx.amount;
+        s.usd += tx.totalValueUsd;
+      }
+      continue;
+    }
+
+    if (tx.type !== "sell") continue; // transferOut — a move, not income
+    if (tx.totalValueUsd == null || s.amount <= 0) continue;
+    if (isStablecoin(tx.token)) continue; // a $1 peg realizes nothing
+
+    const realized = tx.totalValueUsd - tx.amount * (s.usd / s.amount);
+    if (Math.abs(realized) < 0.01) continue;
+
+    // CSV rows have no id, so key on the fields that identify the row. The
+    // ordinal disambiguates multiple sells of one token on the same day.
+    const date = tx.date.slice(0, 10);
+    const dayKey = `${date}-${tx.token}`;
+    const ordinal = seenPerDay.get(dayKey) ?? 0;
+    seenPerDay.set(dayKey, ordinal + 1);
+
+    events.push({
+      id: `rp-crypto-${dayKey}-${ordinal}`,
+      source: "crypto",
+      date,
+      label: tx.token,
+      ticker: tx.token,
+      realized,
+      currency: "USD",
+    });
+  }
+
+  return events;
 }
 
 // ---------------------------------------------------------------------------

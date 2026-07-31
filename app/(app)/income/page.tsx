@@ -7,8 +7,13 @@ import { useCloudStorage } from "@/components/providers/data-provider";
 import { useCurrency } from "@/components/providers/currency-provider";
 import { useRecurringEntries } from "@/hooks/use-recurring-entries";
 import { useCategories } from "@/hooks/use-categories";
+import { useRealizedIncome } from "@/hooks/use-realized-income";
 import type { IncomeEntry, IncomeType, RecurringIncome, ExpenseEntry } from "@/lib/utils/types";
-import { normalizeIncomeEntry, CURRENCY_SYMBOLS } from "@/lib/utils/types";
+import {
+  normalizeIncomeEntry,
+  CURRENCY_SYMBOLS,
+  DERIVED_INCOME_TYPES,
+} from "@/lib/utils/types";
 import {
   INCOME_TYPE_LABELS,
   INCOME_TYPE_COLORS,
@@ -53,6 +58,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ArrowUpDown,
+  Link2,
 } from "lucide-react";
 
 // Feature components
@@ -108,6 +114,20 @@ export default function IncomePage() {
     [rawEntries],
   );
 
+  // Realized sells projected from the portfolio + crypto transaction logs.
+  // Read-only: merged into `allEntries` for display and totals, but every
+  // save/delete below still targets `entries`, so these never hit storage.
+  const {
+    entries: derivedEntries,
+    hasSource: hasRealizedSource,
+    enabled: realizedEnabled,
+    setEnabled: setRealizedEnabled,
+  } = useRealizedIncome();
+  const allEntries = useMemo(
+    () => [...entries, ...derivedEntries],
+    [entries, derivedEntries],
+  );
+
   const [expenseEntries] = useCloudStorage<ExpenseEntry[]>("expense_entries", []);
   const { currency, format, convert, symbol } = useCurrency();
   const { resolvedTheme } = useTheme();
@@ -138,7 +158,17 @@ export default function IncomePage() {
   });
 
   // Category ids in use
-  const usedCategoryIds = useMemo(() => new Set(entries.map((e) => e.type)), [entries]);
+  const usedCategoryIds = useMemo(
+    () => new Set(allEntries.map((e) => e.type)),
+    [allEntries],
+  );
+
+  // Realized categories are projected from the transaction logs, so they must
+  // not be selectable when adding income by hand — that would double-count.
+  const manualCategoryTypes = useMemo(
+    () => categoryTypes.filter((t) => !DERIVED_INCOME_TYPES.includes(t)),
+    [categoryTypes],
+  );
 
   // ---- State ----------------------------------------------------------------
 
@@ -183,12 +213,12 @@ export default function IncomePage() {
   // ---- Derived data ---------------------------------------------------------
 
   const thisMonthEntries = useMemo(
-    () => entries.filter((e) => getMonthKey(e.date ?? "") === currentMonth),
-    [entries, currentMonth],
+    () => allEntries.filter((e) => getMonthKey(e.date ?? "") === currentMonth),
+    [allEntries, currentMonth],
   );
   const lastMonthEntries = useMemo(
-    () => entries.filter((e) => getMonthKey(e.date ?? "") === lastMonth),
-    [entries, lastMonth],
+    () => allEntries.filter((e) => getMonthKey(e.date ?? "") === lastMonth),
+    [allEntries, lastMonth],
   );
 
   const thisMonthTotal = sumConverted(thisMonthEntries, convert);
@@ -207,17 +237,20 @@ export default function IncomePage() {
 
   // Breakdown by type (date-range-filtered)
   const dateFilteredEntries = useMemo(
-    () => filterByDateRange(entries, activeDateRange),
-    [entries, activeDateRange],
+    () => filterByDateRange(allEntries, activeDateRange),
+    [allEntries, activeDateRange],
   );
 
+  // Realized losses can push a category net-negative, so keep every non-zero
+  // category here (the hero total must stay truthful) and let the donut alone
+  // drop the negatives — a pie can't draw a negative arc.
   const breakdownByType = useMemo(() => {
     const map: Record<string, number> = {};
     for (const e of dateFilteredEntries) {
       map[e.type] = (map[e.type] ?? 0) + convert(e.amount, e.currency);
     }
     return Object.entries(map)
-      .filter(([, v]) => v > 0)
+      .filter(([, v]) => Math.abs(v) >= 0.005)
       .map(([t, value]) => ({
         type: t,
         label: getLabel(t),
@@ -234,6 +267,16 @@ export default function IncomePage() {
         .filter((item) => !hiddenTypes.has(item.type))
         .reduce((sum, item) => sum + item.value, 0),
     [breakdownByType, hiddenTypes],
+  );
+
+  // Realized share of the selected period, for the opt-out banner.
+  const realizedInPeriod = useMemo(
+    () =>
+      sumConverted(
+        filterByDateRange(derivedEntries, activeDateRange),
+        convert,
+      ),
+    [derivedEntries, activeDateRange, convert],
   );
 
   // Expenses for savings ratio
@@ -255,7 +298,7 @@ export default function IncomePage() {
         center: ["50%", "50%"],
         padAngle: 2,
         data: breakdownByType
-          .filter((item) => !hiddenTypes.has(item.type))
+          .filter((item) => !hiddenTypes.has(item.type) && item.value > 0)
           .map((item) => ({
             name: item.label,
             value: item.value,
@@ -276,12 +319,12 @@ export default function IncomePage() {
   // Records tab filters
   const typesPresent = useMemo(() => {
     const set = new Set<string>();
-    entries.forEach((e) => set.add(e.type));
+    allEntries.forEach((e) => set.add(e.type));
     return Array.from(set);
-  }, [entries]);
+  }, [allEntries]);
 
   const filteredEntries = useMemo(() => {
-    let result = [...entries];
+    let result = [...allEntries];
     if (typeFilter !== "all") result = result.filter((e) => e.type === typeFilter);
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -302,7 +345,7 @@ export default function IncomePage() {
       return sortDir === "desc" ? bVal - aVal : aVal - bVal;
     });
     return result;
-  }, [entries, typeFilter, searchQuery, sortField, sortDir, convert]);
+  }, [allEntries, typeFilter, searchQuery, sortField, sortDir, convert]);
 
   // Pagination
   const totalPages = Math.max(1, Math.ceil(filteredEntries.length / PAGE_SIZE));
@@ -400,6 +443,46 @@ export default function IncomePage() {
               </div>
             </div>
           </div>
+
+          {/* Realized-gains projection: opt-out + provenance note */}
+          {hasRealizedSource && (
+            <div className="finance-card flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-2.5">
+                <Link2 className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm">
+                    Realized profit from your transaction logs
+                    {realizedEnabled && (
+                      <span
+                        className={cn(
+                          "ml-1.5 font-mono text-xs tabular-nums",
+                          realizedInPeriod < 0 ? "text-expense" : "text-income",
+                        )}
+                      >
+                        {realizedInPeriod < 0 ? "−" : "+"}
+                        {format(Math.abs(realizedInPeriod))} this period
+                      </span>
+                    )}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    One row per sell, priced against average cost. Crypto
+                    transfers are excluded — log those as Crypto Yield.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setRealizedEnabled(!realizedEnabled)}
+                className={cn(
+                  "shrink-0 rounded-full px-3 py-1 text-xs font-medium transition-colors self-start sm:self-auto",
+                  realizedEnabled
+                    ? "bg-foreground text-background"
+                    : "bg-secondary text-secondary-foreground hover:bg-secondary/80",
+                )}
+              >
+                {realizedEnabled ? "Included" : "Excluded"}
+              </button>
+            </div>
+          )}
         </section>
       </BlurFade>
 
@@ -455,7 +538,7 @@ export default function IncomePage() {
                   }
                 />
                 <IncomeDialog
-                  categoryTypes={categoryTypes} categoryLabels={categoryLabels} onSave={handleSave}
+                  categoryTypes={manualCategoryTypes} categoryLabels={categoryLabels} onSave={handleSave}
                   onCreateRecurring={addTemplate}
                   trigger={
                     <Button size="sm">
@@ -492,7 +575,11 @@ export default function IncomePage() {
                   <div className="flex flex-col justify-center gap-2">
                     {breakdownByType.map((item) => {
                       const isHidden = hiddenTypes.has(item.type);
-                      const pct = !isHidden && dateFilteredTotal > 0
+                      // A net-negative category (realized losses outweighing
+                      // gains) has no slice and no share of the total — show
+                      // the amount in red and skip the bar.
+                      const isNegative = item.value < 0;
+                      const pct = !isHidden && !isNegative && dateFilteredTotal > 0
                         ? (item.value / dateFilteredTotal) * 100
                         : 0;
                       return (
@@ -514,11 +601,22 @@ export default function IncomePage() {
                               />
                               <span className={cn(isHidden && "line-through text-muted-foreground")}>{item.label}</span>
                             </div>
-                            <span className="font-mono text-xs tabular-nums text-muted-foreground">
-                              {isHidden ? "—" : `${format(item.value)} (${pct.toFixed(1)}%)`}
+                            <span
+                              className={cn(
+                                "font-mono text-xs tabular-nums",
+                                !isHidden && isNegative
+                                  ? "text-expense"
+                                  : "text-muted-foreground",
+                              )}
+                            >
+                              {isHidden
+                                ? "—"
+                                : isNegative
+                                  ? `−${format(Math.abs(item.value))} net loss`
+                                  : `${format(item.value)} (${pct.toFixed(1)}%)`}
                             </span>
                           </div>
-                          {!isHidden && (
+                          {!isHidden && !isNegative && (
                             <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
                               <div
                                 className="h-full rounded-full transition-all duration-500"
@@ -606,7 +704,7 @@ export default function IncomePage() {
             {/* Add income button */}
             <div className="flex justify-end">
               <IncomeDialog
-                categoryTypes={categoryTypes}
+                categoryTypes={manualCategoryTypes}
                 categoryLabels={categoryLabels}
                 onSave={handleSave}
                 onCreateRecurring={addTemplate}
@@ -681,6 +779,12 @@ export default function IncomePage() {
                               {entry.isRecurring && (
                                 <RefreshCw className="h-3 w-3 text-muted-foreground" />
                               )}
+                              {entry.derived && (
+                                <Link2
+                                  className="h-3 w-3 text-muted-foreground"
+                                  aria-label="Derived from your transaction log"
+                                />
+                              )}
                               <span
                                 className="inline-block h-2 w-2 rounded-full"
                                 style={{
@@ -704,39 +808,52 @@ export default function IncomePage() {
                             </div>
                           </td>
                           <td className="px-4 py-3 text-right whitespace-nowrap">
-                            <span className="font-mono tabular-nums text-income">
+                            <span
+                              className={cn(
+                                "font-mono tabular-nums",
+                                entry.amount < 0 ? "text-expense" : "text-income",
+                              )}
+                            >
+                              {entry.amount < 0 && "−"}
                               {CURRENCY_SYMBOLS[entry.currency]}
-                              {entry.amount.toLocaleString("en-US", {
+                              {Math.abs(entry.amount).toLocaleString("en-US", {
                                 minimumFractionDigits: 2,
                                 maximumFractionDigits: 2,
                               })}
                             </span>
                             {entry.currency !== currency && (
                               <span className="ml-1.5 text-xs text-muted-foreground tabular-nums">
-                                ({format(entry.amount, entry.currency)})
+                                ({entry.amount < 0 && "−"}
+                                {format(Math.abs(entry.amount), entry.currency)})
                               </span>
                             )}
                           </td>
                           <td className="px-4 py-3 text-right whitespace-nowrap">
-                            <div className="inline-flex items-center gap-1">
-                              <IncomeDialog
-                                entry={entry}
-                                categoryTypes={categoryTypes} categoryLabels={categoryLabels} onSave={handleSave}
-                                trigger={
-                                  <Button variant="ghost" size="icon-xs">
-                                    <Pencil className="h-3.5 w-3.5" />
-                                  </Button>
-                                }
-                              />
-                              <Button
-                                variant="ghost"
-                                size="icon-xs"
-                                onClick={() => setDeleteTarget(entry)}
-                                className="text-destructive hover:text-destructive"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
-                            </div>
+                            {entry.derived ? (
+                              <span className="text-[10px] font-mono text-muted-foreground/60">
+                                from log
+                              </span>
+                            ) : (
+                              <div className="inline-flex items-center gap-1">
+                                <IncomeDialog
+                                  entry={entry}
+                                  categoryTypes={manualCategoryTypes} categoryLabels={categoryLabels} onSave={handleSave}
+                                  trigger={
+                                    <Button variant="ghost" size="icon-xs">
+                                      <Pencil className="h-3.5 w-3.5" />
+                                    </Button>
+                                  }
+                                />
+                                <Button
+                                  variant="ghost"
+                                  size="icon-xs"
+                                  onClick={() => setDeleteTarget(entry)}
+                                  className="text-destructive hover:text-destructive"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                              </div>
+                            )}
                           </td>
                         </tr>
                       ))}
@@ -779,24 +896,24 @@ export default function IncomePage() {
           {/* -------------------------------------------------------------- */}
           <TabsContent value="trends" className="space-y-6 pt-4">
             <div className="finance-card p-6">
-              <MonthlyTrendChart entries={entries} title="Monthly Income (12 months)" getLabel={getLabel} getColor={getColor} defaultChartType="bar" defaultBarColor={{ dark: "#2e8b57", light: "#2e7d5b" }} />
+              <MonthlyTrendChart entries={allEntries} title="Monthly Income (12 months)" getLabel={getLabel} getColor={getColor} defaultChartType="bar" defaultBarColor={{ dark: "#2e8b57", light: "#2e7d5b" }} />
             </div>
 
             <div className="finance-card p-6">
-              <PassiveVsActiveChart entries={entries} />
+              <PassiveVsActiveChart entries={allEntries} />
             </div>
 
             <div className="finance-card p-6">
-              <CumulativePaceChart entries={entries} title="Cumulative Income" currentColor={{ dark: "#4ade80", light: "#2e8b57" }} />
+              <CumulativePaceChart entries={allEntries} title="Cumulative Income" currentColor={{ dark: "#4ade80", light: "#2e8b57" }} />
             </div>
 
             <div className="finance-card p-6">
-              <IncomeInsights entries={entries} />
+              <IncomeInsights entries={allEntries} />
             </div>
 
             <div className="finance-card p-6">
               <ComparisonView
-                entries={entries}
+                entries={allEntries}
                 initialMonths={[lastMonth, currentMonth]}
                 getLabel={getLabel}
                 getColor={getColor}

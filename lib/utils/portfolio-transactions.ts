@@ -1,4 +1,4 @@
-import type { PortfolioTransaction } from "./types";
+import type { PortfolioTransaction, RealizedSaleEvent } from "./types";
 
 export interface DerivedPosition {
   /** Net units held according to the transaction log (buys − sells). */
@@ -31,6 +31,23 @@ export function derivePosition(
   targetCurrency: string,
   convert: (amount: number, from: string, to?: string) => number,
 ): DerivedPosition {
+  return replayTransactions(transactions, targetCurrency, convert);
+}
+
+/**
+ * The shared replay behind both `derivePosition` and `deriveRealizedSales`.
+ *
+ * `onSale` fires once per sell with that sell's own realized P&L, so the
+ * per-event breakdown and the aggregate always come from the same arithmetic —
+ * they cannot drift. It stays optional so the aggregate-only callers (which run
+ * this in per-holding loops on the performance page) allocate nothing extra.
+ */
+function replayTransactions(
+  transactions: PortfolioTransaction[],
+  targetCurrency: string,
+  convert: (amount: number, from: string, to?: string) => number,
+  onSale?: (tx: PortfolioTransaction, realized: number) => void,
+): DerivedPosition {
   const sorted = [...transactions].sort((a, b) =>
     a.date < b.date ? -1 : a.date > b.date ? 1 : a.createdAt - b.createdAt,
   );
@@ -53,10 +70,12 @@ export function derivePosition(
       const soldUnits = units > 0 ? Math.min(tx.units, units) : 0;
       const avgCost = units > 0 ? costBasis / units : 0;
       const costOfSold = avgCost * soldUnits;
-      realizedPnl += amount - costOfSold;
+      const gain = amount - costOfSold;
+      realizedPnl += gain;
       costBasis = Math.max(0, costBasis - costOfSold);
       units -= tx.units;
       totalSold += tx.units;
+      onSale?.(tx, gain);
     }
   }
 
@@ -65,6 +84,61 @@ export function derivePosition(
   if (costBasis < 1e-9) costBasis = 0;
 
   return { units, costBasis, realizedPnl, totalBought, totalSold };
+}
+
+/** Gains below this are rounding dust, not something worth a row on the income page. */
+const DUST_THRESHOLD = 0.01;
+
+/**
+ * Project the buy/sell log into one realized-gain event per sell.
+ *
+ * Each holding is replayed in its own quote currency (taken from its earliest
+ * transaction) rather than a shared display currency, so the event carries a
+ * native amount and the income page can convert it at render time like any
+ * hand-entered row. Transactions are grouped by `holdingId`, so a holding that
+ * has since been deleted still contributes its history.
+ *
+ * Summing the events of one holding reproduces `derivePosition(...).realizedPnl`
+ * for that holding, minus any sub-cent rows filtered as dust.
+ */
+export function deriveRealizedSales(
+  transactions: PortfolioTransaction[],
+  convert: (amount: number, from: string, to?: string) => number,
+  tickerFor?: (holdingId: string) => string | undefined,
+): RealizedSaleEvent[] {
+  const byHolding = new Map<string, PortfolioTransaction[]>();
+  for (const tx of transactions) {
+    const group = byHolding.get(tx.holdingId);
+    if (group) group.push(tx);
+    else byHolding.set(tx.holdingId, [tx]);
+  }
+
+  const events: RealizedSaleEvent[] = [];
+  for (const [holdingId, group] of byHolding) {
+    // Earliest leg defines the holding's quote currency (see the currency
+    // invariant: every leg of a holding is stamped with the same currency).
+    const baseCurrency = group.reduce((earliest, tx) =>
+      tx.date < earliest.date ||
+      (tx.date === earliest.date && tx.createdAt < earliest.createdAt)
+        ? tx
+        : earliest,
+    ).currency;
+
+    replayTransactions(group, baseCurrency, convert, (tx, realized) => {
+      if (Math.abs(realized) < DUST_THRESHOLD) return;
+      events.push({
+        id: `rp-stocks-${tx.id}`,
+        source: "stocks",
+        date: tx.date,
+        label: tx.holdingName,
+        ticker: tickerFor?.(holdingId) || tx.holdingName,
+        realized,
+        currency: baseCurrency,
+      });
+    });
+  }
+
+  return events;
 }
 
 export function getTransactionsForHolding(
