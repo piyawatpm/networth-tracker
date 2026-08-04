@@ -37,3 +37,9 @@ next-env.d.ts
 
 # worktrees
 .worktrees/
+
+# Xcode
+ios/build/
+*.xcuserdatad/
+ios/**/xcuserdata/
+.playwright-mcp/
