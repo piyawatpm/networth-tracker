@@ -79,8 +79,7 @@ struct SignInView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 6)
                     }
-                    .buttonStyle(.glassProminent)
-                    .tint(Ledger.income)
+                    .buttonStyle(VoltButtonStyle())
                     .disabled(busy || email.isEmpty || password.isEmpty)
                 }
                 .frame(maxWidth: 340)

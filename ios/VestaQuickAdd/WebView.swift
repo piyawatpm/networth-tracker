@@ -267,9 +267,5 @@ struct WebView: UIViewRepresentable {
 extension UIColor {
     /// Matches the web app's themeColor meta (#1a1a1a dark / #efeee5 light) so
     /// the shell never flashes white behind the page.
-    static let vestaBackground = UIColor { trait in
-        trait.userInterfaceStyle == .dark
-            ? UIColor(red: 26 / 255, green: 26 / 255, blue: 26 / 255, alpha: 1)
-            : UIColor(red: 239 / 255, green: 238 / 255, blue: 229 / 255, alpha: 1)
-    }
+    static let vestaBackground = UIColor(red: 0, green: 0, blue: 0, alpha: 1)
 }

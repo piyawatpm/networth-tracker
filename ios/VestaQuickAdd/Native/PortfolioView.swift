@@ -24,7 +24,7 @@ struct InvestView: View {
                     ScrollView {
                         PortfolioSection(zoom: zoom)
                             .padding(.horizontal, 16)
-                            .padding(.bottom, 32)
+                            .padding(.bottom, 110)
                     }
                     .refreshable { await store.refresh() }
                     .tag(0)
@@ -32,7 +32,7 @@ struct InvestView: View {
                     ScrollView {
                         CryptoSection()
                             .padding(.horizontal, 16)
-                            .padding(.bottom, 32)
+                            .padding(.bottom, 110)
                     }
                     .refreshable { await store.refresh() }
                     .tag(1)
@@ -155,9 +155,7 @@ private struct HoldingCard: View {
                     .font(.system(.footnote, design: .monospaced, weight: .semibold))
                     .contentTransition(.numericText(value: liveValue))
                     .animation(.spring(duration: 0.4), value: liveValue)
-                Text("\(gain >= 0 ? "+" : "")\(String(format: "%.1f", pct))%")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(gain >= 0 ? Ledger.income : Ledger.expense)
+                PctBadge(percent: pct)
             }
         }
         .padding(14)
@@ -226,6 +224,7 @@ struct HoldingDetailView: View {
                 .financeCard()
             }
             .padding(16)
+            .padding(.bottom, 110)
         }
         .background(Ledger.background)
         .navigationTitle(holding.ticker.isEmpty ? holding.name : holding.ticker)

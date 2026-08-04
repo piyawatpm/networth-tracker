@@ -1,13 +1,14 @@
 import SwiftUI
 
-/// The web app's Obsidian Ledger palette, so native screens read as the same
-/// product — not "the same data in Apple's default styling".
+/// OKX-style palette: pure black stage, elevated near-black cards, volt lime
+/// for money-up, hot pink for money-down. Dark-only by design — RootView pins
+/// the color scheme so every system control matches.
 enum Ledger {
-    static let background = Color(light: "#efeee5", dark: "#1a1a1a")
-    static let card = Color(light: "#f7f6ee", dark: "#222222")
-    static let income = Color(light: "#2e8b57", dark: "#4ade80")
-    static let expense = Color(light: "#c0504d", dark: "#f87171")
-    static let subtle = Color.primary.opacity(0.55)
+    static let background = Color(hex: "#000000")
+    static let card = Color(hex: "#1A1A1D")
+    static let income = Color(hex: "#CDF546") // volt
+    static let expense = Color(hex: "#FB3D7B") // hot pink
+    static let subtle = Color.white.opacity(0.55)
 
     /// CHART_COLORS from lib/utils/constants.ts, same order — category colors
     /// must match the web app or the same donut tells two different stories.
@@ -54,15 +55,48 @@ extension Color {
 
 // MARK: - Shared styling
 
-/// The web app's `finance-card`: soft rounded surface on the parchment/ink bg.
+/// OKX-style elevated card: near-black rounded surface on the pure-black stage.
 struct FinanceCard: ViewModifier {
     func body(content: Content) -> some View {
         content
-            .background(Ledger.card, in: .rect(cornerRadius: 18))
+            .background(Ledger.card, in: .rect(cornerRadius: 20))
             .overlay(
-                RoundedRectangle(cornerRadius: 18)
-                    .strokeBorder(Color.primary.opacity(0.06))
+                RoundedRectangle(cornerRadius: 20)
+                    .strokeBorder(Color.white.opacity(0.05))
             )
+    }
+}
+
+/// OKX's signed percent chip: tinted pill, volt for gains, pink for losses.
+struct PctBadge: View {
+    let percent: Double
+
+    var body: some View {
+        let tint = percent >= 0 ? Ledger.income : Ledger.expense
+        Text("\(percent >= 0 ? "+" : "")\(String(format: "%.2f", percent))%")
+            .font(.system(size: 13, weight: .semibold, design: .rounded))
+            .monospacedDigit()
+            .foregroundStyle(tint)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(tint.opacity(0.16), in: .rect(cornerRadius: 10))
+    }
+}
+
+/// OKX's primary action: volt capsule, black bold label.
+struct VoltButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(.body, design: .rounded, weight: .semibold))
+            .foregroundStyle(.black)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .background(
+                Ledger.income.opacity(configuration.isPressed ? 0.7 : 1),
+                in: .capsule
+            )
+            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .animation(.snappy(duration: 0.15), value: configuration.isPressed)
     }
 }
 

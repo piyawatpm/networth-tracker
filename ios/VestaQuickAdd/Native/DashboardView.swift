@@ -23,7 +23,7 @@ struct DashboardView: View {
                     recentActivityCard.entranceTransition()
                 }
                 .padding(.horizontal, 16)
-                .padding(.bottom, 32)
+                .padding(.bottom, 110)
             }
             .background(Ledger.background)
             .navigationTitle("Dashboard")

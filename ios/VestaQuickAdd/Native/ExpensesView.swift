@@ -59,6 +59,12 @@ struct ExpensesView: View {
                             }
                     }
                 }
+
+                Section {
+                    Color.clear.frame(height: 90)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                }
             }
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)

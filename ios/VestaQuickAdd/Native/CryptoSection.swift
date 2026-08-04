@@ -81,10 +81,7 @@ struct CryptoSection: View {
                         Text(store.format(store.convert(row.valueUsd, from: "USD"), compact: true))
                             .font(.system(.footnote, design: .monospaced, weight: .semibold))
                         if !row.isCash && row.costUsd > 0 {
-                            let pct = row.pnlUsd / row.costUsd * 100
-                            Text("\(pct >= 0 ? "+" : "")\(String(format: "%.1f", pct))%")
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(pct >= 0 ? Ledger.income : Ledger.expense)
+                            PctBadge(percent: row.pnlUsd / row.costUsd * 100)
                         }
                     }
                 }

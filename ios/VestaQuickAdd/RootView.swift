@@ -47,6 +47,8 @@ struct RootView: View {
             }
         }
         .tint(Ledger.income)
+        // OKX is a dark product — pin it so system controls match.
+        .preferredColorScheme(.dark)
     }
 }
 

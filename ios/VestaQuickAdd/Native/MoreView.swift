@@ -40,6 +40,12 @@ struct MoreView: View {
                         Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right")
                     }
                 }
+
+                Section {
+                    Color.clear.frame(height: 90)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                }
             }
             .scrollContentBackground(.hidden)
             .background(Ledger.background)
@@ -167,6 +173,12 @@ struct DebtsView: View {
                     }
                 }
             }
+
+                Section {
+                    Color.clear.frame(height: 90)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                }
         }
         .scrollContentBackground(.hidden)
         .background(Ledger.background)
@@ -248,11 +260,8 @@ struct DebtDetailView: View {
                             txKind = .repayment
                         } label: {
                             Label("Repayment", systemImage: "arrow.down.circle.fill")
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 6)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .tint(Ledger.income)
+                        .buttonStyle(VoltButtonStyle())
 
                         Button {
                             txKind = .borrowedMore
@@ -296,6 +305,7 @@ struct DebtDetailView: View {
                     .financeCard()
                 }
                 .padding(16)
+                .padding(.bottom, 110)
             }
             .background(Ledger.background)
             .navigationTitle(debt.person)
@@ -576,6 +586,7 @@ struct PerformanceLiteView: View {
                     .multilineTextAlignment(.center)
             }
             .padding(16)
+            .padding(.bottom, 110)
         }
         .background(Ledger.background)
         .navigationTitle("Performance")

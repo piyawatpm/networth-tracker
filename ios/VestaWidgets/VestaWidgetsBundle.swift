@@ -16,7 +16,7 @@ struct ExpenseActivityAttributes: ActivityAttributes {
     var id: String
 }
 
-private let ledgerGreen = Color(red: 0.29, green: 0.87, blue: 0.50)
+private let ledgerGreen = Color(red: 0.80, green: 0.96, blue: 0.27) // volt
 
 @main
 struct VestaWidgetsBundle: WidgetBundle {
