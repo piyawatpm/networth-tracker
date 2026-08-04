@@ -58,7 +58,7 @@ struct HistoryChartCard: View {
     var heroSize: CGFloat = 34
     var showUpdatedStamp = false
 
-    @State private var period: ChartPeriod = .m1
+    @State private var period: ChartPeriod = .d1
     @State private var scrubDate: Date?
     @State private var points: [Point] = []
 
