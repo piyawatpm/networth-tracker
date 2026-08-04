@@ -27,6 +27,12 @@ import {
   cryptoAllTimePnl,
 } from "@/lib/utils/crypto-performance";
 import { parseCryptoCSV } from "@/lib/utils/crypto-csv";
+import {
+  simulateDca,
+  valueAsOf,
+  windowPnl,
+  type DcaOutcome,
+} from "@/lib/utils/dca-benchmark";
 import { ECHARTS_COLORS } from "@/lib/utils/echarts";
 import { getSydneyDateString } from "@/lib/utils/timezone";
 import { BlurFade } from "@/components/ui/blur-fade";
@@ -36,6 +42,7 @@ import { PerfStats } from "./_components/perf-stats";
 import { ValueContributionsChart } from "./_components/value-contributions-chart";
 import { GrowthChart, type BenchmarkSeries } from "./_components/growth-chart";
 import { HoldingsPerformanceTable } from "./_components/holdings-performance-table";
+import { DcaComparison, type DcaRow } from "./_components/dca-comparison";
 
 type Period = "3M" | "6M" | "1Y" | "All";
 const PERIODS: Period[] = ["3M", "6M", "1Y", "All"];
@@ -57,11 +64,15 @@ interface BenchCache {
   prices: { date: string; close: number }[];
 }
 
+type BenchSymbol = "SPY" | "QQQ" | "BTC";
+
 async function loadBenchmark(
-  symbol: "SPY" | "BTC",
+  symbol: BenchSymbol,
   set: (prices: BenchCache["prices"]) => void,
 ): Promise<void> {
-  const cacheKey = symbol === "SPY" ? "benchmark_spy_cache" : "benchmark_btc_cache";
+  // v2: equity series switched from raw close to adjusted close, so any cache
+  // written by the previous build holds a different (dividend-less) basis.
+  const cacheKey = `benchmark_${symbol.toLowerCase()}_cache_v2`;
   try {
     const raw = localStorage.getItem(cacheKey);
     if (raw) {
@@ -125,7 +136,12 @@ export default function PerformancePage() {
   // them OUT of the stats; the table still shows the aggregate row.
   const [includeRemoved, setIncludeRemoved] = useState(false);
   const [spy, setSpy] = useState<BenchCache["prices"] | null>(null);
+  const [qqq, setQqq] = useState<BenchCache["prices"] | null>(null);
   const [btc, setBtc] = useState<BenchCache["prices"] | null>(null);
+  const [dcaStart, setDcaStart] = useCloudStorage<string>(
+    "dca_compare_start",
+    "2026-05-01",
+  );
 
   const today = getSydneyDateString();
   const toUsd = useMemo(
@@ -137,6 +153,9 @@ export default function PerformancePage() {
     let cancelled = false;
     loadBenchmark("SPY", (p) => {
       if (!cancelled) setSpy(p);
+    });
+    loadBenchmark("QQQ", (p) => {
+      if (!cancelled) setQqq(p);
     });
     loadBenchmark("BTC", (p) => {
       if (!cancelled) setBtc(p);
@@ -412,6 +431,84 @@ export default function PerformancePage() {
     };
   }, [scope, twr.totalReturn, btcStats, spyStats]);
 
+  // ── DCA counterfactual: same capital, same dates, into an index instead ──
+  // Distinct from the VS tile above, which compares TWR (deposit timing
+  // stripped) against a lump-sum index. Here the timing is kept, because
+  // whether you'd actually have more money depends on when the cash landed.
+  const dcaCompare = useMemo(() => {
+    const openingValue = valueAsOf(scopeValues, dcaStart);
+    if (scopeValues.length === 0) {
+      return { rows: [] as DcaRow[], reason: "No valuation history yet for this scope." };
+    }
+    if (openingValue == null) {
+      const firstTracked = scopeValues[0].date;
+      return {
+        rows: [] as DcaRow[],
+        reason: `No valuation on or before ${dcaStart} for this scope — tracked history starts ${firstTracked}. Pick a later start date.`,
+      };
+    }
+
+    // Live current value beats the last snapshot as the end point, and the
+    // index rows are priced at today's close, so both sides end together.
+    const mine = windowPnl(
+      scopeValues,
+      scopeFlows,
+      dcaStart,
+      today,
+      scopeCurrentValueUsd > 0 ? scopeCurrentValueUsd : undefined,
+    );
+
+    const sim = (prices: BenchCache["prices"] | null): DcaOutcome | null =>
+      prices ? simulateDca(openingValue, scopeFlows, prices, dcaStart, today) : null;
+
+    const rows: DcaRow[] = [
+      { name: "You", color: ECHARTS_COLORS[0], outcome: mine, isYou: true },
+      { name: "S&P 500 DCA", color: ECHARTS_COLORS[6], outcome: sim(spy) },
+      { name: "NASDAQ 100 DCA", color: ECHARTS_COLORS[7], outcome: sim(qqq) },
+    ];
+    if (scope === "crypto") {
+      rows.push({ name: "BTC DCA", color: BTC_COLOR, outcome: sim(btc) });
+    }
+    // Two ways the "You" row can flatter itself, both worth naming outright.
+    const caveats: string[] = [];
+    if (scope !== "crypto" && drift.length > 0) {
+      // Contributions that exist in the holding but not in the transaction log
+      // are never subtracted as capital, so they land in P&L as if they were
+      // gains — while the index rows only ever deploy logged money.
+      const unlogged = drift.reduce(
+        (s, d) => s + Math.max(0, d.investedUsd - d.txCostUsd),
+        0,
+      );
+      if (unlogged > 0) {
+        caveats.push(
+          `${drift.map((d) => d.name).join(", ")} ${drift.length === 1 ? "has" : "have"} ${format(convert(unlogged, "USD"))} invested that isn't in the transaction log. Unlogged contributions can't be subtracted as capital, so they read as profit here. Log those buys on the Portfolio page for a clean comparison.`,
+        );
+      }
+    }
+    if (scope !== "crypto" && includeSuper && superIds.size > 0) {
+      caveats.push(
+        "Super has no daily price feed, so its history is modelled as a smooth ramp to today's value rather than measured. Toggle Super: out for a comparison built only on real valuations.",
+      );
+    }
+
+    return { rows, reason: undefined as string | undefined, caveats };
+  }, [
+    scopeValues,
+    scopeFlows,
+    scopeCurrentValueUsd,
+    dcaStart,
+    today,
+    spy,
+    qqq,
+    btc,
+    scope,
+    drift,
+    includeSuper,
+    superIds,
+    format,
+    convert,
+  ]);
+
   // Gain % — the comparable number: all-time P&L over cost basis for crypto
   // (same denominator as the Crypto page / trackers); gain over net
   // contributions for the flow-based scopes.
@@ -556,6 +653,16 @@ export default function PerformancePage() {
         gainPct={gainPct}
         gainSub={gainSub}
         vs={vs}
+      />
+
+      {/* ── DCA counterfactual ── */}
+      <DcaComparison
+        rows={dcaCompare.rows}
+        start={dcaStart}
+        end={today}
+        onStartChange={setDcaStart}
+        unavailableReason={dcaCompare.reason}
+        caveats={dcaCompare.caveats}
       />
 
       {/* ── Charts ── */}

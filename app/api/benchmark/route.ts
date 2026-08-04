@@ -1,16 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// Daily-close history for benchmark indices. SPY proxies the same unofficial
-// Yahoo chart endpoint the snapshot cron relies on; BTC uses Binance klines
-// (the app's existing crypto price source, no key required).
+// Daily-close history for benchmark indices. SPY (S&P 500) and QQQ (NASDAQ
+// 100) proxy the same unofficial Yahoo chart endpoint the snapshot cron relies
+// on; BTC uses Binance klines (the app's existing crypto price source, no key
+// required).
+//
+// Equities report ADJUSTED close, which folds dividends back in. Raw close
+// would understate SPY by roughly its ~1.2%/yr yield, quietly biasing every
+// "did I beat the index" comparison in the portfolio's favour.
 
 const CACHE_HEADERS = {
   "Cache-Control": "public, s-maxage=21600, stale-while-revalidate=86400",
 };
 
-async function fetchSpy(period1: number, period2: number) {
+const EQUITY_SYMBOLS = new Set(["SPY", "QQQ"]);
+
+async function fetchEquity(symbol: string, period1: number, period2: number) {
   const res = await fetch(
-    `https://query1.finance.yahoo.com/v8/finance/chart/SPY?interval=1d&period1=${period1}&period2=${period2}`,
+    `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&period1=${period1}&period2=${period2}`,
     {
       headers: {
         "User-Agent":
@@ -27,10 +34,14 @@ async function fetchSpy(period1: number, period2: number) {
   const timestamps: number[] | undefined = result?.timestamp;
   const closes: (number | null)[] | undefined =
     result?.indicators?.quote?.[0]?.close;
+  // Total-return series; falls back to raw close if Yahoo omits the block.
+  const adjusted: (number | null)[] | undefined =
+    result?.indicators?.adjclose?.[0]?.adjclose;
   if (!Array.isArray(timestamps) || !Array.isArray(closes)) return null;
   const prices: { date: string; close: number }[] = [];
   for (let i = 0; i < timestamps.length; i++) {
-    const c = closes[i];
+    const a = adjusted?.[i];
+    const c = typeof a === "number" && Number.isFinite(a) ? a : closes[i];
     if (typeof c !== "number" || !Number.isFinite(c)) continue;
     prices.push({
       date: new Date(timestamps[i] * 1000).toISOString().slice(0, 10),
@@ -67,7 +78,7 @@ async function fetchBtc(startMs: number) {
 
 export async function GET(req: NextRequest) {
   const symbol = (req.nextUrl.searchParams.get("symbol") ?? "SPY").toUpperCase();
-  if (symbol !== "SPY" && symbol !== "BTC") {
+  if (!EQUITY_SYMBOLS.has(symbol) && symbol !== "BTC") {
     return NextResponse.json(
       { error: `unsupported symbol ${symbol}` },
       { status: 400 },
@@ -83,7 +94,11 @@ export async function GET(req: NextRequest) {
     const prices =
       symbol === "BTC"
         ? await fetchBtc(startMs)
-        : await fetchSpy(Math.floor(startMs / 1000), Math.floor(Date.now() / 1000));
+        : await fetchEquity(
+            symbol,
+            Math.floor(startMs / 1000),
+            Math.floor(Date.now() / 1000),
+          );
     if (!prices || prices.length === 0) {
       return NextResponse.json({ error: "upstream failed" }, { status: 502 });
     }
