@@ -4,6 +4,8 @@
 <dict>
 	<!-- Merged with the generated Info.plist (GENERATE_INFOPLIST_FILE stays on).
 	     Only the keys that have no INFOPLIST_KEY_ build setting live here. -->
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>com.piyawatpm.vesta.refresh</string>

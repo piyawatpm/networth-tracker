@@ -71,6 +71,15 @@ struct AddExpenseIntent: AppIntent {
         let delivered = try await PendingQueue.shared.submit(expense)
         let formatted = Self.currencyText(amount, code: expense.currency)
 
+        // The Dynamic Island receipt — this is what makes an Apple-Pay-tap →
+        // Shortcuts automation feel native instead of a silent background log.
+        ExpenseIslandPresenter.show(
+            amountText: formatted,
+            vendor: expense.vendor,
+            category: expense.type,
+            queued: !delivered
+        )
+
         // A queued expense is a success from the user's point of view — it's
         // recorded and will sync. Saying "failed" would invite a second tap.
         return .result(
