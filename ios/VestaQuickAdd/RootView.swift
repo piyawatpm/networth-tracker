@@ -23,20 +23,21 @@ struct RootView: View {
         .animation(.spring(duration: 0.45), value: store.needsManualSignIn)
         .task { await store.bootstrap() }
         .task {
-            // "Regularly, not all the time": a slow tick while the app is
-            // open, each firing skipped unless the data has actually aged.
+            // Fresh-while-open: a 2-minute tick keeps changes from other
+            // devices (web edits, cron-generated entries) flowing in without
+            // pull-to-refresh; sockets already stream prices in between.
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(600))
-                await store.refreshIfStale(maxAgeSeconds: 540)
+                try? await Task.sleep(for: .seconds(120))
+                await store.refreshIfStale(maxAgeSeconds: 100)
             }
         }
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .active:
-                // Returning from background = "first open" in spirit — refresh
-                // if stale, and reconnect the live price sockets.
+                // Every open refreshes — the 20s guard only debounces rapid
+                // app-switching, never a real return.
                 store.startLive()
-                Task { await store.refreshIfStale(maxAgeSeconds: 600) }
+                Task { await store.refreshIfStale(maxAgeSeconds: 20) }
             case .background, .inactive:
                 // Sockets don't survive suspension anyway — tear down cleanly
                 // instead of letting them die mid-frame and burn reconnects.

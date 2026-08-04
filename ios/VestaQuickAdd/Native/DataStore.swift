@@ -6,6 +6,12 @@ import SwiftUI
 /// every KV blob once, decode, expose typed collections; writes re-encode the
 /// whole array back to its blob (the same convention the web app uses, so the
 /// two clients can't corrupt each other's shape).
+extension Notification.Name {
+    /// Posted whenever a quick-add lands in Supabase — the store refreshes
+    /// immediately instead of waiting for a staleness window.
+    static let vestaDataDidChange = Notification.Name("vestaDataDidChange")
+}
+
 /// Everything needed to boot offline, snapshotted to one file after each
 /// successful refresh. Blobs stay raw strings so the cache can't drift from
 /// the decode logic — decode always runs the same path, cache or network.
@@ -170,6 +176,9 @@ final class DataStore {
     private let api = SupabaseAPI.shared
     /// Raw blobs from the last load — kept so cache saves exactly what came in.
     private var rawBlobs: [String: String] = [:]
+    /// Coalesces overlapping refresh triggers (foreground + timer + intent
+    /// signal can all fire together) into one network pass.
+    private var refreshInFlight = false
 
     // MARK: Session
 
@@ -206,6 +215,14 @@ final class DataStore {
             }
         }
 
+        // Quick-adds (Action Button / Apple Pay automation) write to Supabase
+        // directly — this signal pulls them into the UI the moment they land.
+        NotificationCenter.default.addObserver(
+            forName: .vestaDataDidChange, object: nil, queue: .main
+        ) { _ in
+            Task { @MainActor [weak self] in await self?.refresh() }
+        }
+
         // 3. Fresh data behind the cached paint.
         await refresh()
     }
@@ -233,7 +250,9 @@ final class DataStore {
     }
 
     func refresh() async {
-        guard isSignedIn else { return }
+        guard isSignedIn, !refreshInFlight else { return }
+        refreshInFlight = true
+        defer { refreshInFlight = false }
         isLoading = rawBlobs.isEmpty // skeletons only when there's no cache
         loadError = nil
         do {

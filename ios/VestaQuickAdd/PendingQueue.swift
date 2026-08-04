@@ -52,6 +52,8 @@ actor PendingQueue {
         do {
             try await SupabaseAPI.shared.appendExpense(expense)
             await flush()
+            // The store (same process) reloads instantly — no stale UI.
+            NotificationCenter.default.post(name: .vestaDataDidChange, object: nil)
             return true
         } catch {
             var items = load()
@@ -70,6 +72,7 @@ actor PendingQueue {
 
         var remaining: [PendingExpense] = []
         var stalled = false
+        var synced = false
 
         for item in items.sorted(by: { $0.createdAt < $1.createdAt }) {
             if stalled {
@@ -78,6 +81,7 @@ actor PendingQueue {
             }
             do {
                 try await SupabaseAPI.shared.appendExpense(item)
+                synced = true
             } catch {
                 stalled = true
                 remaining.append(item)
@@ -86,6 +90,9 @@ actor PendingQueue {
 
         items = remaining
         save(items)
+        if synced {
+            NotificationCenter.default.post(name: .vestaDataDidChange, object: nil)
+        }
     }
 
     func remove(_ id: String) {
