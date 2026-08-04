@@ -41,15 +41,14 @@ struct DashboardView: View {
                             store.setDisplayCurrency(cycle[(index + 1) % cycle.count])
                         }
                     } label: {
-                        HStack(spacing: 4) {
-                            Text("FX")
-                                .font(.system(size: 9, weight: .bold, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                            Text("\(Money.symbol(store.displayCurrency)) \(store.displayCurrency)")
-                                .font(.system(.caption, design: .monospaced, weight: .semibold))
-                                .contentTransition(.numericText())
-                                .foregroundStyle(.primary)
-                        }
+                        Text("\(Money.symbol(store.displayCurrency)) \(store.displayCurrency)")
+                            .font(.system(.subheadline, design: .monospaced, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(Ledger.card, in: .capsule)
+                            .overlay(Capsule().strokeBorder(Color.white.opacity(0.08)))
+                            .contentShape(.capsule)
                     }
                     // .plain, NOT .glass — the glass style's pressed state
                     // paints an opaque white square behind the text.
@@ -162,7 +161,6 @@ struct DashboardView: View {
             Text(store.format(value, compact: true))
                 .font(.system(.body, design: .rounded, weight: .semibold))
                 .monospacedDigit()
-                .contentTransition(.numericText(value: value))
                 .foregroundStyle(tint)
         }
         .frame(maxWidth: .infinity)

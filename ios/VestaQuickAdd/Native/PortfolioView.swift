@@ -153,8 +153,6 @@ private struct HoldingCard: View {
             VStack(alignment: .trailing, spacing: 3) {
                 Text(Money.format(liveValue, currency: holding.currency))
                     .font(.system(.footnote, design: .monospaced, weight: .semibold))
-                    .contentTransition(.numericText(value: liveValue))
-                    .animation(.spring(duration: 0.4), value: liveValue)
                 PctBadge(percent: pct)
             }
         }

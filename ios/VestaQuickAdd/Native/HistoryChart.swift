@@ -68,16 +68,27 @@ struct HistoryChartCard: View {
         var id: Date { date }
     }
 
+    /// `points` with the last value pinned to the CURRENT live value — the
+    /// rebuild pipeline is async (period/currency changes), and between
+    /// rebuilds the hero number moves with sockets and FX switches. Pinning at
+    /// render keeps the line's end glued to the number above it, always.
+    private var syncedPoints: [Point] {
+        guard let last = points.last, last.value != liveValue else { return points }
+        var copy = points
+        copy[copy.count - 1] = Point(date: last.date, value: liveValue)
+        return copy
+    }
+
     private var scrubbedPoint: Point? {
-        guard let scrubDate, !points.isEmpty else { return nil }
-        return points.min {
+        guard let scrubDate, !syncedPoints.isEmpty else { return nil }
+        return syncedPoints.min {
             abs($0.date.timeIntervalSince(scrubDate)) < abs($1.date.timeIntervalSince(scrubDate))
         }
     }
 
     var body: some View {
         let current = scrubbedPoint?.value ?? liveValue
-        let first = points.first?.value
+        let first = syncedPoints.first?.value
         let delta = first.map { (scrubbedPoint?.value ?? liveValue) - $0 }
         let deltaPct = first.flatMap { $0 > 0 ? (delta ?? 0) / $0 * 100 : nil }
 
@@ -243,13 +254,14 @@ struct HistoryChartCard: View {
 
     @ViewBuilder
     private var chart: some View {
-        if points.count < 2 {
+        if syncedPoints.count < 2 {
             Text("Snapshots build this chart as they accumulate.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, minHeight: 140)
         } else {
-            let values = points.map(\.value)
+            let chartPoints = syncedPoints
+            let values = chartPoints.map(\.value)
             let low = values.min() ?? 0
             let high = values.max() ?? 0
             let yBase = low - (high - low) * 0.06
@@ -259,15 +271,15 @@ struct HistoryChartCard: View {
             // Scrub splits the line: everything up to the finger stays lit,
             // the rest fades back — the OKX signature.
             let splitIndex = scrubbedPoint.flatMap { selected in
-                points.firstIndex { $0.date == selected.date }
+                chartPoints.firstIndex { $0.date == selected.date }
             }
-            let litSegment = splitIndex.map { Array(points[...$0]) } ?? points
+            let litSegment = splitIndex.map { Array(chartPoints[...$0]) } ?? chartPoints
             let dimSegment = splitIndex.map { index in
-                index < points.count - 1 ? Array(points[index...]) : []
+                index < chartPoints.count - 1 ? Array(chartPoints[index...]) : []
             } ?? []
 
-            let highPoint = points.first { $0.value == high }
-            let lowPoint = points.first { $0.value == low }
+            let highPoint = chartPoints.first { $0.value == high }
+            let lowPoint = chartPoints.first { $0.value == low }
 
             Chart {
                 neonSeries(litSegment, tint: tint, id: "lit", dimmed: false, yBase: yBase)

@@ -126,8 +126,9 @@ extension View {
     }
 }
 
-/// Big animated money figure — the native NumberTicker. `contentTransition`
-/// rolls digits individually instead of cross-fading the whole string.
+/// Big money figure. Deliberately NO contentTransition: numericText's
+/// fallback blur-crossfade (which kicks in whenever the string shape changes,
+/// e.g. an FX switch) reads as smearing. Crisp instant updates, like OKX.
 struct MoneyText: View {
     let amount: Double
     let currency: String
@@ -138,8 +139,6 @@ struct MoneyText: View {
         Text(Money.format(amount, currency: currency))
             .font(font)
             .monospacedDigit()
-            .contentTransition(.numericText(value: amount))
-            .animation(.spring(duration: 0.6), value: amount)
             .foregroundStyle(tint ?? .primary)
     }
 }
