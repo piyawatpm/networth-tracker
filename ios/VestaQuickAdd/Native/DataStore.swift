@@ -123,10 +123,78 @@ final class DataStore {
     var liveStockPrices: [String: Double] = [:]
     /// Invest-tab super toggle (persisted; net worth always includes super).
     var includeSuperStocks: Bool = Settings.defaults.object(forKey: "includeSuperStocks") as? Bool ?? true {
-        didSet { Settings.defaults.set(includeSuperStocks, forKey: "includeSuperStocks") }
+        didSet {
+            Settings.defaults.set(includeSuperStocks, forKey: "includeSuperStocks")
+            recomputeDerived()
+        }
     }
 
     private let sockets = PriceSocketCenter()
+
+    // MARK: Cached derivations
+    //
+    // These were computed properties, so they re-ran on EVERY view render —
+    // and the dashboard alone reads allIncome three times (month flow, recent
+    // activity, and inside freedom), each one re-sorting and replaying the
+    // whole crypto CSV. With price sockets ticking ~12x/second that was dozens
+    // of full replays per second. They are pure functions of the stored data,
+    // so they're computed once per data change instead.
+    private(set) var derivedRealizedIncome: [IncomeEntry] = []
+    private(set) var allIncome: [IncomeEntry] = []
+    private(set) var monthlyGrowth: [(label: String, deltaUsd: Double, partial: Bool)] = []
+    private(set) var freedom: (passive: Double, expenses: Double, coverage: Double) = (0, 0, 0)
+    /// Stocks overlay with the super delta already removed when the toggle is
+    /// off — the dashboard was re-mapping 20k rows on every render to do this.
+    private(set) var overlayStocksAdjusted: [(date: Date, valueUsd: Double)] = []
+
+    /// Recompute everything cached above. Cheap relative to doing it per frame.
+    func recomputeDerived() {
+        derivedRealizedIncome = computeDerivedRealizedIncome()
+        allIncome = income + derivedRealizedIncome
+        monthlyGrowth = computeMonthlyGrowth()
+        freedom = computeFreedom()
+        overlayStocksAdjusted = overlayPortfolio.map { point in
+            guard !includeSuperStocks, let delta = overlaySuperDelta[point.date] else { return point }
+            return (point.date, max(0, point.valueUsd - delta))
+        }
+    }
+
+    // MARK: Price-tick coalescing
+    //
+    // Binance/Gate/Alpaca push far faster than a screen needs to update, and
+    // every mutation invalidates the whole view tree. Buffer and flush a few
+    // times a second instead. @ObservationIgnored so the buffers themselves
+    // don't trigger renders.
+    @ObservationIgnored private var pendingCrypto: [String: Double] = [:]
+    @ObservationIgnored private var pendingStocks: [String: Double] = [:]
+    @ObservationIgnored private var flushTask: Task<Void, Never>?
+
+    private func queuePrice(crypto token: String, _ price: Double) {
+        pendingCrypto[token] = price
+        schedulePriceFlush()
+    }
+
+    private func queuePrice(stock ticker: String, _ price: Double) {
+        pendingStocks[ticker] = price
+        schedulePriceFlush()
+    }
+
+    private func schedulePriceFlush() {
+        guard flushTask == nil else { return }
+        flushTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(400))
+            guard let self else { return }
+            self.flushTask = nil
+            if !self.pendingCrypto.isEmpty {
+                self.livePrices.merge(self.pendingCrypto) { _, new in new }
+                self.pendingCrypto.removeAll()
+            }
+            if !self.pendingStocks.isEmpty {
+                self.liveStockPrices.merge(self.pendingStocks) { _, new in new }
+                self.pendingStocks.removeAll()
+            }
+        }
+    }
 
     private static let snapshotFormats: [DateFormatter] = {
         ["yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd HH:mm", "yyyy-MM-dd"].map { format in
@@ -284,6 +352,7 @@ final class DataStore {
             setHistory("networth", cache.networthHistory)
             setHistory("portfolio", cache.portfolioHistory)
             setHistory("crypto", cache.cryptoHistory)
+            recomputeDerived()
         }
 
         // 2. Session: keychain restore, else silent owner sign-in. The login
@@ -366,6 +435,7 @@ final class DataStore {
             await mergeHistory("networth")
             await mergeHistory("portfolio")
             await mergeHistory("crypto")
+            recomputeDerived()
 
             // Live prices for whatever the holdings CSV says we own.
             let tokens = cryptoCsvHoldings
@@ -450,11 +520,13 @@ final class DataStore {
         } else {
             income.append(entry)
         }
+        recomputeDerived()
         try await persist("income_entries", income)
     }
 
     func deleteIncome(_ id: String) async throws {
         income.removeAll { $0.id == id }
+        recomputeDerived()
         try await persist("income_entries", income)
     }
 
@@ -464,16 +536,19 @@ final class DataStore {
         } else {
             expenses.append(entry)
         }
+        recomputeDerived()
         try await persist("expense_entries", expenses)
     }
 
     func deleteExpense(_ id: String) async throws {
         expenses.removeAll { $0.id == id }
+        recomputeDerived()
         try await persist("expense_entries", expenses)
     }
 
     func savePortfolioTx(_ tx: PortfolioTransaction) async throws {
         portfolioTxs.append(tx)
+        recomputeDerived()
         try await persist("portfolio_transactions", portfolioTxs)
     }
 
@@ -483,6 +558,7 @@ final class DataStore {
         } else {
             debts.append(debt)
         }
+        recomputeDerived()
         try await persist("debt_records", debts)
     }
 
@@ -491,17 +567,21 @@ final class DataStore {
     func deleteDebt(_ id: String) async throws {
         debts.removeAll { $0.id == id }
         debtTxs.removeAll { $0.debtId == id }
+        recomputeDerived()
         try await persist("debt_records", debts)
+        recomputeDerived()
         try await persist("debt_transactions", debtTxs)
     }
 
     func saveDebtTx(_ tx: DebtTransaction) async throws {
         debtTxs.append(tx)
+        recomputeDerived()
         try await persist("debt_transactions", debtTxs)
     }
 
     func deleteDebtTx(_ id: String) async throws {
         debtTxs.removeAll { $0.id == id }
+        recomputeDerived()
         try await persist("debt_transactions", debtTxs)
     }
 
@@ -509,6 +589,7 @@ final class DataStore {
     /// web reads — switch on the phone and the website follows.
     func setDisplayCurrency(_ code: String) {
         displayCurrency = code
+        recomputeDerived() // `freedom` is denominated in the display currency
         Task { try? await persist("preferred_currency", code) }
     }
 
@@ -556,7 +637,7 @@ final class DataStore {
 
     // MARK: Derived — realized income (parity with the web income page)
 
-    var derivedRealizedIncome: [IncomeEntry] {
+    private func computeDerivedRealizedIncome() -> [IncomeEntry] {
         guard realizedIncomeEnabled else { return [] }
         let tickers = Dictionary(uniqueKeysWithValues: holdings.map { ($0.id, $0.ticker) })
         let stocks = PortfolioMath.realizedSales(portfolioTxs) { tickers[$0] }
@@ -577,7 +658,7 @@ final class DataStore {
         }
     }
 
-    var allIncome: [IncomeEntry] { income + derivedRealizedIncome }
+
 
     // MARK: Derived — net worth pieces (all in display currency)
 
@@ -640,10 +721,10 @@ final class DataStore {
             gateMap: gateMap,
             stockSymbols: stockSymbols,
             onCrypto: { token, price in
-                Task { @MainActor [weak self] in self?.livePrices[token] = price }
+                Task { @MainActor [weak self] in self?.queuePrice(crypto: token, price) }
             },
             onStock: { ticker, price in
-                Task { @MainActor [weak self] in self?.liveStockPrices[ticker] = price }
+                Task { @MainActor [weak self] in self?.queuePrice(stock: ticker, price) }
             }
         )
     }
@@ -768,7 +849,7 @@ final class DataStore {
 
     /// Month-over-month net-worth CHANGE, USD, oldest first. The last entry
     /// is the current (partial) month, flagged so the UI can say so.
-    var monthlyGrowth: [(label: String, deltaUsd: Double, partial: Bool)] {
+    private func computeMonthlyGrowth() -> [(label: String, deltaUsd: Double, partial: Bool)] {
         var firstPerMonth: [String: SnapshotPoint] = [:]
         for row in networthHistory {
             let month = String(row.date.prefix(7))
@@ -827,7 +908,7 @@ final class DataStore {
 
     /// Passive income vs expenses over the trailing 30 days, in display
     /// currency — "how much of my burn is already covered without working".
-    var freedom: (passive: Double, expenses: Double, coverage: Double) {
+    private func computeFreedom() -> (passive: Double, expenses: Double, coverage: Double) {
         let cutoff = Calendar.current.date(byAdding: .day, value: -30, to: Date())
             .map { date -> String in
                 let f = DateFormatter()

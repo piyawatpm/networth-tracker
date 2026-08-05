@@ -68,19 +68,20 @@ struct MainTabView: View {
     ]
 
     var body: some View {
-        // All five stay mounted so scroll positions and drill-ins survive tab
-        // hops. Tabs are laid out side by side and SLIDE with the selection —
-        // a directional pager, not a cross-fade, so two screens never ghost
-        // over each other. Scrubbing the bar drags the whole strip along.
-        GeometryReader { geo in
-            ZStack {
-                tabContent(DashboardView(), index: 0, width: geo.size.width)
-                tabContent(IncomeView(), index: 1, width: geo.size.width)
-                tabContent(ExpensesView(), index: 2, width: geo.size.width)
-                tabContent(InvestView(), index: 3, width: geo.size.width)
-                tabContent(MoreView(), index: 4, width: geo.size.width)
-            }
+        // A native TabView, with the system bar hidden so the custom glass bar
+        // can drive it. The hand-rolled ZStack this replaced kept all five
+        // pages mounted at once, so every price tick re-evaluated five view
+        // trees — three lists and three charts — which is what made tab
+        // switching feel heavy. TabView builds a page on first visit, keeps
+        // its state, and leaves off-screen pages alone.
+        TabView(selection: $selection) {
+            Tab(value: 0) { DashboardView() }
+            Tab(value: 1) { IncomeView() }
+            Tab(value: 2) { ExpensesView() }
+            Tab(value: 3) { InvestView() }
+            Tab(value: 4) { MoreView() }
         }
+        .toolbar(.hidden, for: .tabBar)
         .safeAreaInset(edge: .bottom) {
             VestaTabBar(tabs: Self.tabs, selection: $selection)
                 .padding(.bottom, 4)
@@ -100,13 +101,6 @@ struct MainTabView: View {
         .animation(.spring(duration: 0.3), value: store.loadError)
     }
 
-    @ViewBuilder
-    private func tabContent(_ view: some View, index: Int, width: CGFloat) -> some View {
-        view
-            .offset(x: CGFloat(index - selection) * width)
-            .allowsHitTesting(selection == index)
-            .animation(.snappy(duration: 0.32, extraBounce: 0.02), value: selection)
-    }
 }
 
 #Preview {

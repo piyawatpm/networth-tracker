@@ -208,12 +208,41 @@ extension View {
     func shimmering() -> some View { modifier(Shimmer()) }
 }
 
+/// Decoded logos kept in memory across renders.
+///
+/// AsyncImage re-issues its load every time the row is rebuilt, so with live
+/// prices ticking the holdings lists re-fetched and re-decoded ~19 logos over
+/// and over. Once decoded, a logo never changes — cache it.
+@MainActor
+final class LogoCache {
+    static let shared = LogoCache()
+    private let cache = NSCache<NSURL, UIImage>()
+    private var inFlight: Set<URL> = []
+
+    func image(for url: URL) -> UIImage? {
+        cache.object(forKey: url as NSURL)
+    }
+
+    func load(_ url: URL) async -> UIImage? {
+        if let hit = cache.object(forKey: url as NSURL) { return hit }
+        guard !inFlight.contains(url) else { return nil }
+        inFlight.insert(url)
+        defer { inFlight.remove(url) }
+        guard let (data, _) = try? await URLSession.shared.data(from: url),
+              let image = UIImage(data: data) else { return nil }
+        cache.setObject(image, forKey: url as NSURL)
+        return image
+    }
+}
+
 /// Circular asset logo with a monogram fallback, so rows never show a blank
 /// hole while the image loads (or when a token has no image yet).
 struct LogoCircle: View {
     let url: URL?
     let fallback: String
     var size: CGFloat = 26
+
+    @State private var image: UIImage?
 
     var body: some View {
         ZStack {
@@ -222,16 +251,23 @@ struct LogoCircle: View {
             Text(String(fallback.prefix(2)).uppercased())
                 .font(.system(size: size * 0.34, weight: .bold, design: .rounded))
                 .foregroundStyle(Ledger.hashedColor(fallback))
-            if let url {
-                AsyncImage(url: url) { phase in
-                    if case .success(let image) = phase {
-                        image.resizable().scaledToFill()
-                    }
-                }
-                .frame(width: size, height: size)
-                .clipShape(.circle)
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: size, height: size)
+                    .clipShape(.circle)
             }
         }
         .frame(width: size, height: size)
+        .task(id: url) {
+            guard let url else { return }
+            // Synchronous cache hit avoids a frame of the monogram flashing.
+            if let hit = LogoCache.shared.image(for: url) {
+                image = hit
+                return
+            }
+            image = await LogoCache.shared.load(url)
+        }
     }
 }
