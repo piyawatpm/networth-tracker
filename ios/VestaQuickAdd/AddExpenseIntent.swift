@@ -40,8 +40,13 @@ struct AddExpenseIntent: AppIntent {
     )
     static let openAppWhenRun = false
 
+    // IntentCurrencyAmount, NOT Double: the Wallet Transaction automation
+    // passes a transaction object, and Shortcuts can coerce it into a currency
+    // amount losslessly — a plain Number slot coerced it to 0 and every
+    // auto-logged payment failed with "must be more than zero". This also
+    // carries the card's real currency instead of assuming the default.
     @Parameter(title: "Amount", requestValueDialog: "How much?")
-    var amount: Double
+    var amount: IntentCurrencyAmount
 
     @Parameter(title: "Category", optionsProvider: CategoryOptionsProvider())
     var category: String?
@@ -58,18 +63,22 @@ struct AddExpenseIntent: AppIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         // No server config needed — writes ride the app's own Supabase
         // session (or the offline queue). The old token setup is legacy.
-        guard amount > 0 else {
+        let value = (amount.amount as NSDecimalNumber).doubleValue
+        guard value > 0 else {
             throw QuickExpenseError.rejected("Amount must be more than zero.")
         }
+        let code = amount.currencyCode.isEmpty
+            ? Settings.defaultCurrency : amount.currencyCode
 
         let expense = PendingExpense(
-            amount: amount,
+            amount: value,
             type: category ?? Settings.defaultCategory,
-            vendor: vendor ?? ""
+            vendor: vendor ?? "",
+            currency: code
         )
 
         let delivered = try await PendingQueue.shared.submit(expense)
-        let formatted = Self.currencyText(amount, code: expense.currency)
+        let formatted = Self.currencyText(value, code: expense.currency)
 
         // The Dynamic Island receipt — this is what makes an Apple-Pay-tap →
         // Shortcuts automation feel native instead of a silent background log.
