@@ -29,45 +29,72 @@ enum CryptoSplit {
         tx.totalValueUsd ?? (tx.priceUsd ?? 1) * tx.amount
     }
 
+    /// The token's logged price nearest in time to `date` — how a coin
+    /// transfer (Earn interest paid in ETH, bot rewards in kind) gets valued
+    /// at ARRIVAL, since the CSV leaves transfers priceless.
+    static func nearestPrices(_ txs: [CryptoTransaction]) -> (String, String) -> Double? {
+        var points: [String: [(date: Date, price: Double)]] = [:]
+        for tx in txs {
+            if let p = tx.priceUsd, p > 0, let d = SnapshotDate.parse(tx.date) {
+                points[tx.token, default: []].append((d, p))
+            }
+        }
+        return { token, dateString in
+            guard let candidates = points[token], let date = SnapshotDate.parse(dateString)
+            else { return nil }
+            return candidates.min {
+                abs($0.date.timeIntervalSince(date)) < abs($1.date.timeIntervalSince(date))
+            }?.price
+        }
+    }
+
     static func compute(
         txs: [CryptoTransaction],
         tags: [String: Bool],
         livePrice: (String) -> Double?
     ) -> Split {
         var split = Split()
+        let arrivalPrice = nearestPrices(txs)
 
-        // Yield: stables moving in/out. ArenaBot pays in USDT, so transferIn
-        // of a cash token IS the bot's income event.
-        for tx in txs where CryptoMath.isCashLike(tx.token, tags: tags) {
-            if tx.type == "transferIn" { split.yieldInUsd += stableValue(tx) }
-            if tx.type == "transferOut" { split.yieldOutUsd += stableValue(tx) }
-        }
-
-        // Trading: avg-cost replay where transferred-in coins carry ZERO cost.
-        // computeHoldings (the holdings-page port) bills free units at the
-        // average buy price — defensible for a balance sheet, but here it
-        // manufactures cost that was never invested, and the split stops
-        // reconciling with the snapshot-based compare card on the same
-        // screen. Zero-cost keeps the identity: yield + realized + unrealized
-        // ≈ pot − invested.
+        // Trading replay with transfers booked as INCOME AT ARRIVAL VALUE —
+        // Earn pays in kind (ETH, BTC…) as well as USDT, and pricing those
+        // arrivals at zero was hiding ฿35K of yield inside "unrealized".
+        // A transferred coin gets its arrival value as cost basis, so the
+        // trading rows measure only what happened AFTER it arrived.
         var lastPrice: [String: Double] = [:]
         var bags: [String: (amount: Double, cost: Double)] = [:]
         for tx in txs.sorted(by: { $0.date < $1.date }) {
             if let p = tx.priceUsd, p > 0 { lastPrice[tx.token] = p }
-            guard !CryptoMath.isCashLike(tx.token, tags: tags) else { continue }
+            if CryptoMath.isCashLike(tx.token, tags: tags) {
+                if tx.type == "transferIn" { split.yieldInUsd += stableValue(tx) }
+                if tx.type == "transferOut" { split.yieldOutUsd += stableValue(tx) }
+                continue
+            }
             var bag = bags[tx.token] ?? (0, 0)
             switch tx.type {
             case "buy":
                 bag.amount += tx.amount
                 bag.cost += tx.totalValueUsd ?? 0
             case "transferIn":
-                bag.amount += tx.amount // bot-minted / moved in — no cost here
+                bag.amount += tx.amount
+                if let px = arrivalPrice(tx.token, tx.date) {
+                    let value = tx.amount * px
+                    split.yieldInUsd += value
+                    bag.cost += value // arrival basis, not zero
+                }
             case "sell", "transferOut":
                 guard bag.amount > 1e-9 else { break }
                 let take = min(tx.amount, bag.amount)
                 let avg = bag.cost / bag.amount
                 if tx.type == "sell", let value = tx.totalValueUsd {
                     split.realizedUsd += value - avg * take
+                } else if tx.type == "transferOut" {
+                    // Leaving at market value: income reversed at today's
+                    // worth of what left, basis released quietly.
+                    if let px = arrivalPrice(tx.token, tx.date) {
+                        split.yieldOutUsd += take * px
+                        split.realizedUsd += take * px - avg * take
+                    }
                 }
                 bag.amount -= take
                 bag.cost -= avg * take
@@ -87,25 +114,27 @@ enum CryptoSplit {
 
     struct CoinPnl: Identifiable {
         let token: String
+        let earnedUsd: Double     // transfers valued at arrival — Earn/bot in kind
         let realizedUsd: Double
         let unrealizedUsd: Double
         let heldAmount: Double
         let priced: Bool
-        var netUsd: Double { realizedUsd + unrealizedUsd }
+        var netUsd: Double { earnedUsd + realizedUsd + unrealizedUsd }
         var id: String { token }
     }
 
-    /// Net earn per coin — the same zero-cost replay, kept per token.
-    /// Exited coins stay in the list with their realized result; that's the
-    /// point of asking "what did each coin actually make me".
+    /// Net earn per coin — earned (transfers at arrival value) + realized +
+    /// bag. Exited coins stay listed; that is the point of the question.
     static func perCoin(
         txs: [CryptoTransaction],
         tags: [String: Bool],
         livePrice: (String) -> Double?
     ) -> [CoinPnl] {
+        let arrivalPrice = nearestPrices(txs)
         var lastPrice: [String: Double] = [:]
         var bags: [String: (amount: Double, cost: Double)] = [:]
         var realized: [String: Double] = [:]
+        var earned: [String: Double] = [:]
         for tx in txs.sorted(by: { $0.date < $1.date }) {
             if let p = tx.priceUsd, p > 0 { lastPrice[tx.token] = p }
             guard !CryptoMath.isCashLike(tx.token, tags: tags) else { continue }
@@ -116,12 +145,20 @@ enum CryptoSplit {
                 bag.cost += tx.totalValueUsd ?? 0
             case "transferIn":
                 bag.amount += tx.amount
+                if let px = arrivalPrice(tx.token, tx.date) {
+                    let value = tx.amount * px
+                    earned[tx.token, default: 0] += value
+                    bag.cost += value
+                }
             case "sell", "transferOut":
                 guard bag.amount > 1e-9 else { break }
                 let take = min(tx.amount, bag.amount)
                 let avg = bag.cost / bag.amount
                 if tx.type == "sell", let value = tx.totalValueUsd {
                     realized[tx.token, default: 0] += value - avg * take
+                } else if tx.type == "transferOut", let px = arrivalPrice(tx.token, tx.date) {
+                    earned[tx.token, default: 0] -= take * px
+                    realized[tx.token, default: 0] += take * px - avg * take
                 }
                 bag.amount -= take
                 bag.cost -= avg * take
@@ -130,16 +167,17 @@ enum CryptoSplit {
             bags[tx.token] = bag
         }
         var out: [CoinPnl] = []
-        for token in Set(bags.keys).union(realized.keys) {
+        for token in Set(bags.keys).union(realized.keys).union(earned.keys) {
             let bag = bags[token] ?? (0, 0)
             let held = bag.amount > 1e-9
             let price = livePrice(token) ?? lastPrice[token]
             let unreal = held ? (price.map { bag.amount * $0 - bag.cost } ?? 0) : 0
             let r = realized[token] ?? 0
-            // Skip pure pass-through tokens that never made or lost anything.
-            if !held, abs(r) < 0.5 { continue }
+            let e = earned[token] ?? 0
+            if !held, abs(r) < 0.5, abs(e) < 0.5 { continue }
             out.append(CoinPnl(
                 token: token,
+                earnedUsd: e,
                 realizedUsd: r,
                 unrealizedUsd: unreal,
                 heldAmount: bag.amount,
@@ -149,18 +187,25 @@ enum CryptoSplit {
         return out.sorted { $0.netUsd > $1.netUsd }
     }
 
-    /// Every stable transfer, newest first — the bot-income ledger.
+    /// Every transfer — USDT payouts AND in-kind coin rewards — valued at
+    /// arrival, newest first. The bot/Earn pay history.
     static func yieldEvents(txs: [CryptoTransaction], tags: [String: Bool]) -> [YieldEvent] {
-        txs.filter {
-            CryptoMath.isCashLike($0.token, tags: tags)
-                && ($0.type == "transferIn" || $0.type == "transferOut")
-        }
-        .map {
-            YieldEvent(
-                date: String($0.date.prefix(10)),
-                token: $0.token,
-                usd: $0.type == "transferIn" ? stableValue($0) : -stableValue($0),
-                notes: $0.notes
+        let arrivalPrice = nearestPrices(txs)
+        return txs.compactMap { tx -> YieldEvent? in
+            guard tx.type == "transferIn" || tx.type == "transferOut" else { return nil }
+            let value: Double
+            if CryptoMath.isCashLike(tx.token, tags: tags) {
+                value = stableValue(tx)
+            } else if let px = arrivalPrice(tx.token, tx.date) {
+                value = tx.amount * px
+            } else {
+                return nil // no price anywhere — cannot state a value honestly
+            }
+            return YieldEvent(
+                date: String(tx.date.prefix(10)),
+                token: tx.token,
+                usd: tx.type == "transferIn" ? value : -value,
+                notes: tx.notes
             )
         }
         .sorted { $0.date > $1.date }
@@ -184,9 +229,9 @@ struct CryptoSplitCard: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Where crypto P&L comes from").labelMono()
 
-            row("Earn & bot income", "net stable transfers in", s.netYieldUsd, emphasize: true)
+            row("Earn & bot income", "USDT payouts + coin rewards @ arrival price", s.netYieldUsd, emphasize: true)
             row("Trading · realized", "locked in by sells", s.realizedUsd)
-            row("Trading · unrealized", "bags at today's prices", s.unrealizedUsd)
+            row("Trading · unrealized", "bags vs cost incl. arrival value", s.unrealizedUsd)
 
             Divider().overlay(Color.white.opacity(0.1))
 
@@ -229,7 +274,7 @@ struct CryptoSplitCard: View {
                     .font(.system(size: 8, design: .monospaced))
                     .foregroundStyle(.tertiary)
             }
-            Text("convention: stable transfers = income (that's how ArenaBot pays), coin transfers carry zero cost · outs subtract, they may be your own redeployments")
+            Text("convention: every transfer in = income at arrival value (ArenaBot pays USDT, Earn pays coins) · outs subtract, they may be your own redeployments")
                 .font(.system(size: 8, design: .monospaced))
                 .foregroundStyle(.tertiary)
         }
@@ -376,13 +421,13 @@ struct CoinPnlView: View {
             Section {
                 let total = rows.reduce(0) { $0 + $1.netUsd }
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Trading net · all coins").labelMono()
+                    Text("Net by coin · trading + in-kind earn").labelMono()
                     MoneyText(
                         amount: store.convert(total, from: "USD"),
                         currency: store.displayCurrency,
                         tint: total >= 0 ? Ledger.income : Ledger.expense
                     )
-                    Text("realized + unrealized, per coin · bot USDT payouts live in the bot income ledger, not here")
+                    Text("earned in kind + realized + unrealized · USDT payouts live in the bot income ledger")
                         .font(.system(size: 8, design: .monospaced))
                         .foregroundStyle(.tertiary)
                 }
@@ -432,7 +477,7 @@ struct CoinPnlView: View {
                             .foregroundStyle(Ledger.seriesCrypto)
                     }
                 }
-                Text("sold \(signed(coin.realizedUsd)) · bag \(signed(coin.unrealizedUsd))")
+                Text("earned \(signed(coin.earnedUsd)) · sold \(signed(coin.realizedUsd)) · bag \(signed(coin.unrealizedUsd))")
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
