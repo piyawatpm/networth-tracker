@@ -198,4 +198,33 @@ enum BuildExpiry {
         let days = daysLeft ?? 0
         return "\(formatter.string(from: date)) · \(days) day\(days == 1 ? "" : "s") left"
     }
+
+    /// Announce a renewal from the PHONE's side.
+    ///
+    /// The Mac's auto-resign job reinstalls silently; without this the only
+    /// confirmation lives on the Mac, which defeats the point when you're
+    /// away from it. Comparing the bundle's expiry against the last one seen
+    /// detects "a fresh signature arrived" on the next foreground (or
+    /// background refresh) and answers it with a notification plus a line in
+    /// the quick-add log — the same two places every other quick-add event
+    /// reports to.
+    static func announceRenewalIfNew() {
+        guard let date else { return }
+        let key = "lastSeenSignatureExpiry"
+        let seen = Settings.defaults.double(forKey: key)
+        let current = date.timeIntervalSince1970
+        // First run ever: baseline silently — the install that delivered
+        // this feature isn't itself a renewal worth announcing.
+        guard seen != 0 else {
+            Settings.defaults.set(current, forKey: key)
+            return
+        }
+        guard current > seen + 60 else { return }
+        Settings.defaults.set(current, forKey: key)
+        IntentLog.write("signature renewed · valid until \(summary)")
+        Notify.post(
+            title: "Vesta re-signed ✓",
+            body: "Auto-renewal worked — signature valid until \(summary)."
+        )
+    }
 }

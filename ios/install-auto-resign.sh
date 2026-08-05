@@ -22,16 +22,22 @@ cat >"$PLIST" <<EOF
         <string>-lc</string>
         <string>"$SCRIPT"</string>
     </array>
-    <!-- 8pm: Mac likely awake, phone likely home on the same Wi-Fi.
-         launchd runs a missed slot on next wake, so a closed lid at 8
-         delays the check rather than skipping it. -->
+    <!-- 11:00 with a 14:00 retry — the Mac is a work machine, so late
+         morning is when it's reliably awake with the phone nearby. The
+         retry covers "away from the desk at 11"; the script exits in a
+         second when 11:00 already renewed. launchd runs a missed slot on
+         next wake, so a closed lid delays the check rather than skipping
+         the day. -->
     <key>StartCalendarInterval</key>
-    <dict><key>Hour</key><integer>20</integer><key>Minute</key><integer>0</integer></dict>
+    <array>
+        <dict><key>Hour</key><integer>11</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Hour</key><integer>14</integer><key>Minute</key><integer>0</integer></dict>
+    </array>
 </dict>
 </plist>
 EOF
 
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$PLIST"
-echo "Scheduled: $LABEL daily at 20:00"
+echo "Scheduled: $LABEL daily at 11:00 (retry 14:00)"
 echo "Log: ~/Library/Logs/vesta-resign.log"

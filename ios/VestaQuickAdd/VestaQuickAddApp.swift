@@ -31,7 +31,9 @@ struct VestaQuickAddApp: App {
             switch phase {
             case .active:
                 // Coming back to the foreground is the most reliable moment to
-                // drain anything the Action Button queued while offline.
+                // drain anything the Action Button queued while offline — and
+                // to notice the auto-resign job delivered a fresh signature.
+                BuildExpiry.announceRenewalIfNew()
                 Task { await PendingQueue.shared.flush() }
             case .background:
                 Self.scheduleBackgroundRefresh()
@@ -44,6 +46,9 @@ struct VestaQuickAddApp: App {
         // the actual cadence; earliestBeginDate keeps it "regularly, not all
         // the time".
         .backgroundTask(.appRefresh(Self.refreshTaskID)) {
+            // Also checks here so the renewal notification can arrive without
+            // the app being opened at all.
+            await MainActor.run { BuildExpiry.announceRenewalIfNew() }
             await BackgroundRefresher.run()
             await Self.scheduleBackgroundRefresh()
         }

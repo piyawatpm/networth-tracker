@@ -1,12 +1,15 @@
 #!/bin/zsh
 # Keep the free 7-day signature alive without thinking about it.
 #
-# Runs from launchd (see install-auto-resign.sh) every evening. Does nothing
-# while the current signature has >4 days left; past that it deletes this
-# app's cached provisioning profiles — which is what forces Xcode to mint a
-# fresh 7-day one instead of reusing the old deadline — rebuilds, and pushes
-# to the phone. Success or failure lands as a Mac notification, and the app
-# itself still warns 2 days out as the final backstop.
+# Runs from launchd (see install-auto-resign.sh) at 11:00 and a 14:00 retry,
+# while the Mac is being used for work anyway. Renews EVERY day the phone is
+# reachable — the point is to always sit at ~7 days of margin, so being away
+# from the Mac for most of a week still can't kill the app. A renewal deletes
+# this app's cached provisioning profiles — which is what forces Xcode to
+# mint a fresh 7-day one instead of reusing the old deadline — rebuilds, and
+# pushes to the phone. The Mac posts a notification; the app itself also
+# notices the new signature and confirms with its own notification + a line
+# in the quick-add log.
 #
 # What it can't automate (Apple's rules, not ours):
 #   * The phone must be reachable — cable, or same Wi-Fi as this Mac.
@@ -37,8 +40,12 @@ days_left() {
 
 LEFT=$(days_left || echo 0)
 echo "signature days left: $LEFT"
-if [ "${1:-}" != "--force" ] && [ "$LEFT" -gt 4 ]; then
-  echo "fresh enough — nothing to do"
+# ≥6 means it was already renewed within the last day (a fresh profile reads
+# as 6 by integer floor) — so this skips only same-day duplicates, and the
+# 14:00 retry slot no-ops when 11:00 already succeeded. Anything older
+# renews: daily when reachable, maximum margin when not.
+if [ "${1:-}" != "--force" ] && [ "$LEFT" -ge 6 ]; then
+  echo "renewed today already — nothing to do"
   exit 0
 fi
 
