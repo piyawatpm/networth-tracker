@@ -40,4 +40,4 @@ EOF
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$PLIST"
 echo "Scheduled: $LABEL daily at 11:00 (retry 14:00)"
-echo "Log: ~/Library/Logs/vesta-resign.log"
+echo "Log: ~/Desktop/vesta-resign.log"

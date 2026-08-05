@@ -18,7 +18,8 @@
 set -u
 cd "$(dirname "$0")"
 
-LOG=~/Library/Logs/vesta-resign.log
+# On the Desktop by request — glanceable without digging into ~/Library.
+LOG=~/Desktop/vesta-resign.log
 exec >>"$LOG" 2>&1
 echo "── $(date '+%F %T') auto-resign run"
 
