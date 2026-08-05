@@ -17,6 +17,7 @@ enum Settings {
         static let baseURL = "baseURL"
         static let defaultCategory = "defaultCategory"
         static let defaultCurrency = "defaultCurrency"
+        static let categories = "cachedCategories"
     }
 
     /// Falls back to standard defaults if the App Group isn't provisioned yet,
@@ -54,6 +55,13 @@ enum Settings {
     static var defaultCurrency: String {
         get { defaults.string(forKey: Key.defaultCurrency) ?? "AUD" }
         set { defaults.set(newValue, forKey: Key.defaultCurrency) }
+    }
+
+    /// Last known category list, so the intent's parameter picker never has to
+    /// wait on the network inside its execution budget.
+    static var cachedCategories: [String]? {
+        get { defaults.stringArray(forKey: Key.categories) }
+        set { defaults.set(newValue, forKey: Key.categories) }
     }
 
     static var isConfigured: Bool {

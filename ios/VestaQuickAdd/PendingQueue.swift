@@ -43,6 +43,12 @@ actor PendingQueue {
 
     var items: [PendingExpense] { load() }
 
+    /// How long the intent may spend uploading before it gives up and lets the
+    /// disk queue do its job. Deliberately far below what URLSession would
+    /// allow: returning "saved, will sync" in six seconds beats being killed at
+    /// thirty with the user staring at a Shortcuts error.
+    private static let uploadBudget: Double = 6
+
     /// Write straight to Supabase (authenticated, idempotent by clientId);
     /// queue on ANY failure. Nothing is ever dropped — a bad network, an
     /// expired session, whatever: the expense sits on disk until a flush
@@ -61,16 +67,23 @@ actor PendingQueue {
         var items = load()
         items.append(expense)
         save(items)
+        IntentLog.write("queued to disk · \(expense.currency) \(expense.amount) · \(expense.type)")
 
         do {
-            try await SupabaseAPI.shared.appendExpense(expense)
+            try await withDeadline(Self.uploadBudget) {
+                try await SupabaseAPI.shared.appendExpense(expense)
+            }
             remove(expense.clientId)
+            IntentLog.write("uploaded ✓")
             await flush() // opportunistically drain anything older
             // The store (same process) reloads instantly — no stale UI.
             NotificationCenter.default.post(name: .vestaDataDidChange, object: nil)
             return true
         } catch {
-            return false // stays queued; clientId keeps the retry idempotent
+            // Still on disk, still idempotent. The next foreground open or
+            // background refresh sends it.
+            IntentLog.write("upload deferred — \(error.localizedDescription)")
+            return false
         }
     }
 
@@ -91,7 +104,11 @@ actor PendingQueue {
                 continue
             }
             do {
-                try await SupabaseAPI.shared.appendExpense(item)
+                // Same deadline as submit: a flush riding inside an intent must
+                // not turn one slow request into a killed process.
+                try await withDeadline(Self.uploadBudget) {
+                    try await SupabaseAPI.shared.appendExpense(item)
+                }
                 synced = true
             } catch {
                 stalled = true

@@ -5,20 +5,35 @@ import Foundation
 /// app (including custom ones) show up here without an app update.
 struct CategoryOptionsProvider: DynamicOptionsProvider {
     func results() async throws -> [String] {
-        // Custom categories straight from the blob; the built-in list keeps
-        // the Action Button usable offline.
-        var ids = CategoryOptionsProvider.fallback
+        // Shortcuts resolves parameters INSIDE the intent's time budget, so a
+        // cold network fetch here is time the actual expense doesn't get. Serve
+        // what we already know instantly and refresh behind it; only a first
+        // run with an empty cache waits, and then only briefly.
+        if let cached = Settings.cachedCategories, !cached.isEmpty {
+            Task.detached { _ = try? await CategoryOptionsProvider.fetch() }
+            return cached
+        }
+        return (try? await withDeadline(3) { try await CategoryOptionsProvider.fetch() })
+            ?? CategoryOptionsProvider.fallback
+    }
+
+    func defaultResult() async -> String? {
+        Settings.defaultCategory
+    }
+
+    /// Custom categories straight from the blob; the built-in list keeps the
+    /// Action Button usable offline.
+    @discardableResult
+    private static func fetch() async throws -> [String] {
+        var ids = fallback
         if let raw = try? await SupabaseAPI.shared.fetchAppDataValue(
             key: "custom_expense_categories"
         ), let data = raw.data(using: .utf8),
            let custom = try? JSONDecoder().decode([CustomCategory].self, from: data) {
             ids.append(contentsOf: custom.map(\.id))
         }
+        Settings.cachedCategories = ids
         return ids
-    }
-
-    func defaultResult() async -> String? {
-        Settings.defaultCategory
     }
 
     static let fallback = [
@@ -28,11 +43,18 @@ struct CategoryOptionsProvider: DynamicOptionsProvider {
     ]
 }
 
-/// The Action Button target.
+/// The Action Button target, and what the Wallet automation runs on a card tap.
 ///
 /// `openAppWhenRun` is false so a tap logs the expense without ever showing the
 /// app — press, type the amount, done. The confirmation comes back as a dialog.
-struct AddExpenseIntent: AppIntent {
+///
+/// Conforms to `LiveActivityIntent`, not plain `AppIntent`: ActivityKit refuses
+/// `Activity.request` from a backgrounded app (`ActivityAuthorizationError
+/// .visibility`), which is exactly the state a Wallet automation runs in. The
+/// conformance is what grants a user-initiated intent the right to start a Live
+/// Activity from the background — without it the Dynamic Island receipt was
+/// being thrown away on every automated tap, silently, behind a `try?`.
+struct AddExpenseIntent: LiveActivityIntent {
     static let title: LocalizedStringResource = "Add Expense"
     static let description = IntentDescription(
         "Log an expense to Vesta without opening the app.",
@@ -66,19 +88,29 @@ struct AddExpenseIntent: AppIntent {
     }
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
+        // The very first statement, before any work that could stall or die.
+        // Its absence after a card tap is the diagnosis: Shortcuts never got
+        // here, so the fault is upstream of the app (its own transaction-record
+        // timeout, an expired signature, a deferred automation) and no amount
+        // of fixing this file will help.
+        IntentLog.write("— intent invoked —")
+
         // No server config needed — writes ride the app's own Supabase
         // session (or the offline queue). The old token setup is legacy.
         // Supplied (Wallet automation) → use it. Missing or zero (Action
         // Button, Siri) → ask, rather than failing on a phantom zero.
         var supplied = amount
         if (supplied.map { ($0.amount as NSDecimalNumber).doubleValue } ?? 0) <= 0 {
+            IntentLog.write("no amount supplied — prompting")
             supplied = try await $amount.requestValue("How much?")
         }
         guard let resolved = supplied else {
+            IntentLog.write("aborted: no amount given")
             throw QuickExpenseError.rejected("No amount given.")
         }
         let value = (resolved.amount as NSDecimalNumber).doubleValue
         guard value > 0 else {
+            IntentLog.write("aborted: amount resolved to zero")
             Notify.post(
                 title: "Quick-add failed",
                 body: "Received a zero amount — open the automation and re-link the Amount pill to the transaction.",
@@ -95,13 +127,17 @@ struct AddExpenseIntent: AppIntent {
             vendor: vendor ?? "",
             currency: code
         )
+        IntentLog.write("resolved \(code) \(value) · \(expense.type) · \(expense.vendor.isEmpty ? "no vendor" : expense.vendor)")
 
         let delivered = try await PendingQueue.shared.submit(expense)
         let formatted = Self.currencyText(value, code: expense.currency)
 
         // The Dynamic Island receipt — this is what makes an Apple-Pay-tap →
         // Shortcuts automation feel native instead of a silent background log.
-        ExpenseIslandPresenter.show(
+        // Awaited, not fire-and-forget: once perform() returns, iOS is free to
+        // suspend the process, and a detached Task that hasn't run yet never
+        // will.
+        await ExpenseIslandPresenter.show(
             amountText: formatted,
             vendor: expense.vendor,
             category: expense.type,
@@ -114,6 +150,7 @@ struct AddExpenseIntent: AppIntent {
             title: delivered ? "Expense logged" : "Expense queued — offline",
             body: "\(formatted) · \(expense.vendor.isEmpty ? "Quick add" : expense.vendor) · \(expense.type)"
         )
+        IntentLog.write("— done: \(delivered ? "logged" : "queued") \(formatted) —")
 
         // A queued expense is a success from the user's point of view — it's
         // recorded and will sync. Saying "failed" would invite a second tap.
@@ -146,6 +183,14 @@ struct VestaShortcuts: AppShortcutsProvider {
             ],
             shortTitle: "Add Expense",
             systemImageName: "creditcard"
+        )
+        AppShortcut(
+            intent: LogTapIntent(),
+            phrases: [
+                "Log a card tap in \(.applicationName)",
+            ],
+            shortTitle: "Log Card Tap",
+            systemImageName: "waveform.path.ecg"
         )
     }
 }

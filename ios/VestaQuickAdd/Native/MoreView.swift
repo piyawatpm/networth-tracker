@@ -34,6 +34,22 @@ struct MoreView: View {
                     } label: {
                         Label("Action Button & server", systemImage: "bolt.circle")
                     }
+                    NavigationLink { QuickAddDiagnosticsView() } label: {
+                        HStack {
+                            Label("Quick-add diagnostics", systemImage: "stethoscope")
+                            if BuildExpiry.isExpiringSoon {
+                                Spacer()
+                                // The one problem that breaks quick-add on a
+                                // timer rather than at random.
+                                Text("expiring")
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(Ledger.expense)
+                            }
+                        }
+                    }
+                    NavigationLink { TapLogView() } label: {
+                        Label("Card tap log", systemImage: "waveform.path.ecg")
+                    }
                     Button(role: .destructive) {
                         Task { await store.signOut() }
                     } label: {
