@@ -49,17 +49,28 @@ actor PendingQueue {
     /// succeeds. Returns whether it reached the server right now.
     @discardableResult
     func submit(_ expense: PendingExpense) async throws -> Bool {
+        // Durably enqueue BEFORE touching the network.
+        //
+        // The upload is heavy for a background intent: sign in, pull the
+        // ~54 KB expense blob, decode ~190 records, append, push it back. On a
+        // slow connection at a checkout that can outlast the intent's time
+        // budget, and iOS kills the process — which does NOT throw, so the old
+        // "send, and only queue if it throws" order silently lost the expense
+        // and surfaced as "couldn't communicate with a helper application".
+        // Queued first, the worst case is a delayed sync instead of a lost one.
+        var items = load()
+        items.append(expense)
+        save(items)
+
         do {
             try await SupabaseAPI.shared.appendExpense(expense)
-            await flush()
+            remove(expense.clientId)
+            await flush() // opportunistically drain anything older
             // The store (same process) reloads instantly — no stale UI.
             NotificationCenter.default.post(name: .vestaDataDidChange, object: nil)
             return true
         } catch {
-            var items = load()
-            items.append(expense)
-            save(items)
-            return false
+            return false // stays queued; clientId keeps the retry idempotent
         }
     }
 
