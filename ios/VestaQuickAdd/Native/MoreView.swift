@@ -12,6 +12,8 @@ enum MoreRoute: Hashable {
     case diagnostics
     case tapLog
     case debtDetail(String)
+    case botIncome
+    case coinPnl
 }
 
 struct MoreView: View {
@@ -25,6 +27,7 @@ struct MoreView: View {
         switch ProcessInfo.processInfo.environment["VESTA_MORE_ROUTE"] {
         case "debts": [.debts]
         case "performance": [.performance]
+        case "coinpnl": [.performance, .coinPnl]
         default: []
         }
 
@@ -96,6 +99,8 @@ struct MoreView: View {
                 case .diagnostics: QuickAddDiagnosticsView()
                 case .tapLog: TapLogView()
                 case .debtDetail(let id): DebtDetailView(debtId: id)
+                case .botIncome: BotIncomeView()
+                case .coinPnl: CoinPnlView()
                 }
             }
             .toolbar {
@@ -621,7 +626,8 @@ struct DebtTxForm: View {
 struct PerformanceLiteView: View {
     @Environment(DataStore.self) private var store
     @State private var series: [SnapshotPoint] = []
-    @State private var kind = "networth"
+    // Screenshot runs can open a specific series tab.
+    @State private var kind = ProcessInfo.processInfo.environment["VESTA_PERF_KIND"] ?? "networth"
     /// Super stays OUT of the net-worth comparison by default: the Hostplus
     /// contributions are only partially logged, so with super in, unlogged
     /// deposits read as growth (the known +contamination). The toggle exists
@@ -750,6 +756,8 @@ struct PerformanceLiteView: View {
                         values: cryptoPot,
                         flows: cryptoFlows
                     )
+                    // The three stories one number was hiding — see CryptoSplit.
+                    CryptoSplitCard()
                 }
 
                 VStack(alignment: .leading, spacing: 10) {
