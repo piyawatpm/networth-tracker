@@ -28,6 +28,7 @@ struct MoreView: View {
         case "debts": [.debts]
         case "performance": [.performance]
         case "coinpnl": [.performance, .coinPnl]
+        case "earn": [.performance, .botIncome]
         default: []
         }
 
@@ -307,7 +308,8 @@ struct DebtsView: View {
         .searchable(text: $search, prompt: "Search people or a date")
         .navigationTitle("Debts")
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                FxChip()
                 Button { addingDebt = true } label: { Image(systemName: "plus") }
             }
         }
@@ -802,6 +804,7 @@ struct PerformanceLiteView: View {
             .padding(.bottom, 110)
         }
         .background(Ledger.background)
+        .toolbar { ToolbarItem(placement: .topBarTrailing) { FxChip() } }
         .navigationTitle("Performance")
         .task(id: kind) {
             series = (try? await SupabaseAPI.shared.fetchSnapshots(type: kind)) ?? []

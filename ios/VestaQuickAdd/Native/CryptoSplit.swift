@@ -119,7 +119,8 @@ enum CryptoSplit {
         let unrealizedUsd: Double
         let heldAmount: Double
         let priced: Bool
-        var netUsd: Double { earnedUsd + realizedUsd + unrealizedUsd }
+        // Trading only — earn lives on the Earn income page.
+        var netUsd: Double { realizedUsd + unrealizedUsd }
         var id: String { token }
     }
 
@@ -174,7 +175,7 @@ enum CryptoSplit {
             let unreal = held ? (price.map { bag.amount * $0 - bag.cost } ?? 0) : 0
             let r = realized[token] ?? 0
             let e = earned[token] ?? 0
-            if !held, abs(r) < 0.5, abs(e) < 0.5 { continue }
+            if abs(r) < 0.5, (!held || abs(unreal) < 0.5) { continue } // no trading story
             out.append(CoinPnl(
                 token: token,
                 earnedUsd: e,
@@ -241,7 +242,7 @@ struct CryptoSplitCard: View {
                 HStack(spacing: 6) {
                     Image(systemName: "bitcoinsign.circle")
                         .font(.system(size: 11))
-                    Text("Net by coin")
+                    Text("Trading by coin")
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
                     Spacer()
                     Image(systemName: "chevron.right")
@@ -257,7 +258,7 @@ struct CryptoSplitCard: View {
                 HStack(spacing: 6) {
                     Image(systemName: "list.bullet.rectangle")
                         .font(.system(size: 11))
-                    Text("Bot income ledger")
+                    Text("Earn income · by token & ledger")
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
                     Spacer()
                     Image(systemName: "chevron.right")
@@ -303,12 +304,28 @@ struct CryptoSplitCard: View {
     }
 }
 
-/// The list: every stable transfer, month by month — ArenaBot's pay history.
+/// Earn income: what the bots and Earn actually PAID you — by token, then
+/// the full transfer ledger. This is the page for "tf in USDT x, ETH y".
 struct BotIncomeView: View {
     @Environment(DataStore.self) private var store
 
     private var events: [CryptoSplit.YieldEvent] {
         CryptoSplit.yieldEvents(txs: store.cryptoTxs, tags: store.stablecoinTags)
+    }
+
+    /// Net earn per token, biggest first — USDT (the bots) beside the
+    /// in-kind payers (ETH, BTC…).
+    private var byToken: [(token: String, net: Double, count: Int)] {
+        var totals: [String: (Double, Int)] = [:]
+        for event in events {
+            var t = totals[event.token] ?? (0, 0)
+            t.0 += event.usd
+            if event.usd > 0 { t.1 += 1 }
+            totals[event.token] = t
+        }
+        return totals.map { ($0.key, $0.value.0, $0.value.1) }
+            .filter { abs($0.1) > 0.5 }
+            .sorted { $0.1 > $1.1 }
     }
 
     private var months: [(key: String, label: String, net: Double, items: [CryptoSplit.YieldEvent])] {
@@ -332,7 +349,7 @@ struct BotIncomeView: View {
         List {
             Section {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Net bot & Earn income").labelMono()
+                    Text("Bots + Earn · everything they paid you").labelMono()
                     MoneyText(
                         amount: store.convert(total, from: "USD"),
                         currency: store.displayCurrency,
@@ -350,6 +367,25 @@ struct BotIncomeView: View {
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
                 .financeCard()
+            }
+
+            Section("By token") {
+                ForEach(byToken, id: \.token) { row in
+                    HStack(spacing: 10) {
+                        LogoCircle(url: store.coinImageURL(row.token), fallback: row.token, size: 26)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(row.token).font(.subheadline.weight(.semibold))
+                            Text("\(row.count) payout\(row.count == 1 ? "" : "s")")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text("\(row.net >= 0 ? "+" : "")\(store.format(store.convert(row.net, from: "USD"), compact: true))")
+                            .font(.system(.footnote, design: .monospaced, weight: .semibold))
+                            .foregroundStyle(row.net >= 0 ? Ledger.income : Ledger.expense)
+                    }
+                    .padding(.vertical, 2)
+                }
             }
 
             ForEach(months, id: \.key) { month in
@@ -395,7 +431,8 @@ struct BotIncomeView: View {
         }
         .scrollContentBackground(.hidden)
         .background(Ledger.background)
-        .navigationTitle("Bot income")
+        .toolbar { ToolbarItem(placement: .topBarTrailing) { FxChip() } }
+        .navigationTitle("Earn income")
         .navigationBarTitleDisplayMode(.inline)
     }
 }
@@ -421,13 +458,13 @@ struct CoinPnlView: View {
             Section {
                 let total = rows.reduce(0) { $0 + $1.netUsd }
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Net by coin · trading + in-kind earn").labelMono()
+                    Text("Trading net · buys & sells only").labelMono()
                     MoneyText(
                         amount: store.convert(total, from: "USD"),
                         currency: store.displayCurrency,
                         tint: total >= 0 ? Ledger.income : Ledger.expense
                     )
-                    Text("earned in kind + realized + unrealized · USDT payouts live in the bot income ledger")
+                    Text("realized + unrealized, after each coin\u{2019}s earn was counted as income at arrival · earn has its own page")
                         .font(.system(size: 8, design: .monospaced))
                         .foregroundStyle(.tertiary)
                 }
@@ -453,7 +490,8 @@ struct CoinPnlView: View {
         }
         .scrollContentBackground(.hidden)
         .background(Ledger.background)
-        .navigationTitle("Net by coin")
+        .toolbar { ToolbarItem(placement: .topBarTrailing) { FxChip() } }
+        .navigationTitle("Trading by coin")
         .navigationBarTitleDisplayMode(.inline)
     }
 
@@ -477,7 +515,7 @@ struct CoinPnlView: View {
                             .foregroundStyle(Ledger.seriesCrypto)
                     }
                 }
-                Text("earned \(signed(coin.earnedUsd)) · sold \(signed(coin.realizedUsd)) · bag \(signed(coin.unrealizedUsd))")
+                Text("sold \(signed(coin.realizedUsd)) · bag \(signed(coin.unrealizedUsd))")
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
