@@ -65,6 +65,11 @@ struct AddExpenseIntent: AppIntent {
         // session (or the offline queue). The old token setup is legacy.
         let value = (amount.amount as NSDecimalNumber).doubleValue
         guard value > 0 else {
+            Notify.post(
+                title: "Quick-add failed",
+                body: "Received a zero amount — open the automation and re-link the Amount pill to the transaction.",
+                sound: .default
+            )
             throw QuickExpenseError.rejected("Amount must be more than zero.")
         }
         let code = amount.currencyCode.isEmpty
@@ -87,6 +92,13 @@ struct AddExpenseIntent: AppIntent {
             vendor: expense.vendor,
             category: expense.type,
             queued: !delivered
+        )
+
+        // Durable record in Notification Center, with the details the island
+        // only shows for a minute.
+        Notify.post(
+            title: delivered ? "Expense logged" : "Expense queued — offline",
+            body: "\(formatted) · \(expense.vendor.isEmpty ? "Quick add" : expense.vendor) · \(expense.type)"
         )
 
         // A queued expense is a success from the user's point of view — it's

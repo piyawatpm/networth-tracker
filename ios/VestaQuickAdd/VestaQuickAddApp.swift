@@ -1,9 +1,16 @@
 import SwiftUI
 import BackgroundTasks
+import UserNotifications
 
 @main
 struct VestaQuickAddApp: App {
     @Environment(\.scenePhase) private var scenePhase
+
+    init() {
+        // Foreground banners + permission ask for the quick-add notifications.
+        UNUserNotificationCenter.current().delegate = NotificationDelegate.shared
+        Notify.requestPermission()
+    }
 
     private static let refreshTaskID = "com.piyawatpm.vesta.refresh"
 

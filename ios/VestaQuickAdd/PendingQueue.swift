@@ -92,6 +92,13 @@ actor PendingQueue {
         save(items)
         if synced {
             NotificationCenter.default.post(name: .vestaDataDidChange, object: nil)
+            let count = load().count
+            Notify.post(
+                title: "Queued expenses synced",
+                body: count == 0
+                    ? "Everything is up to date."
+                    : "\(count) still waiting for a connection."
+            )
         }
     }
 
