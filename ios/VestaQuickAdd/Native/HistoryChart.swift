@@ -81,7 +81,10 @@ struct HistoryChartCard: View {
     /// Component lines, toggled from the legend.
     var overlays: [ChartOverlay] = []
 
-    @State private var period: ChartPeriod = .d1
+    // Screenshot runs can open on a given window.
+    @State private var period: ChartPeriod = ChartPeriod(
+        rawValue: ProcessInfo.processInfo.environment["VESTA_PERIOD"] ?? ""
+    ) ?? .d1
     @State private var scrubDate: Date?
     @State private var render = RenderState()
     @State private var hiddenOverlays: Set<String> = []
@@ -176,7 +179,7 @@ struct HistoryChartCard: View {
 
             if !overlays.isEmpty { legend.padding(.top, 8) }
 
-            Picker("Period", selection: $period.animation(.spring(duration: 0.5))) {
+            Picker("Period", selection: $period) {
                 ForEach(ChartPeriod.allCases, id: \.self) { Text($0.rawValue).tag($0) }
             }
             .pickerStyle(.segmented)
@@ -520,6 +523,8 @@ struct HistoryChartCard: View {
             }
             .chartYScale(domain: yBase...(high + span * 0.10))
             .frame(height: 210)
+            .id(render.period)
+            .transaction { $0.animation = nil }
         }
     }
 
@@ -555,7 +560,12 @@ struct HistoryChartCard: View {
         for overlay in overlays {
             built[overlay.name] = bucketed(overlay.points, now: now)
         }
-        // One assignment — the chart never sees a half-updated window.
-        render = RenderState(period: period, hero: hero, overlays: built)
+        // One assignment, animations explicitly off — a tween between two
+        // different time windows morphs marks and superimposes both axes.
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            render = RenderState(period: period, hero: hero, overlays: built)
+        }
     }
 }
