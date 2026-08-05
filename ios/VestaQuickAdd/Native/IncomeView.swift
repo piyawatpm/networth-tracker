@@ -38,6 +38,11 @@ struct IncomeView: View {
         return nil
     }
 
+    /// Dates + display-currency values, shared by the trend and pace math.
+    private var convertedRows: [(date: String, value: Double)] {
+        store.allIncome.map { ($0.date, store.convert($0.amount, from: $0.currency)) }
+    }
+
     private var listEntries: [IncomeEntry] {
         let sorted = store.allIncome.sorted {
             $0.date != $1.date ? $0.date > $1.date : $0.createdAt > $1.createdAt
@@ -59,6 +64,23 @@ struct IncomeView: View {
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
+                }
+
+                // Trend earns its card only once there's a month to compare
+                // against — a single lonely bar answers nothing.
+                let flows = FlowMath.flows(convertedRows, months: 6)
+                if flows.filter({ $0.total > 0.01 }).count >= 2 {
+                    Section {
+                        MonthTrendCard(
+                            title: "Income · 6 months",
+                            flows: flows,
+                            tint: Ledger.income,
+                            format: { store.format($0, compact: true) }
+                        )
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                    }
                 }
 
                 Section("Records") {
@@ -83,6 +105,7 @@ struct IncomeView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .listSectionSpacing(14)
             .scrollContentBackground(.hidden)
             .background(Ledger.background)
             .searchable(text: $search, prompt: "Search income")
@@ -103,13 +126,22 @@ struct IncomeView: View {
 
     private var summaryHeader: some View {
         VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text("This Month").labelMono()
                 MoneyText(
                     amount: store.monthTotal(store.allIncome, month: month),
                     currency: store.displayCurrency,
                     tint: Ledger.income
                 )
+                // Partial-vs-partial: this month so far against last month
+                // through the same day, so the number means something on the 5th.
+                if let pace = FlowMath.pace(convertedRows) {
+                    PaceBadge(
+                        current: pace.current,
+                        previousSameDay: pace.previousSameDay,
+                        upIsGood: true
+                    )
+                }
             }
 
             if !slices.isEmpty {
