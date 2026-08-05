@@ -93,6 +93,8 @@ final class DataStore {
     var isLoading = false
     var loadError: String?
     var needsManualSignIn = false
+    /// Drives the Invest toolbar spinner while Hostplus prices are fetched.
+    var isRefreshingHostplus = false
     /// Unix seconds of the last successful network refresh (0 = never).
     var lastRefreshed: Double = 0
 
@@ -500,6 +502,51 @@ final class DataStore {
             loadError = error.localizedDescription
         }
         isLoading = false
+    }
+
+    /// Manually pull the latest Hostplus super unit price and reprice the
+    /// holding as units × price (calibrating units once — see HostplusAPI). iOS
+    /// reads holdings from the `portfolio_holdings` blob, so we reprice locally
+    /// and write the blob back to Supabase, keeping web / cron / mobile in sync.
+    /// The daily cron does this automatically; this is the on-demand button.
+    func refreshHostplus() async {
+        guard isSignedIn, !isRefreshingHostplus else { return }
+        let targets = holdings.enumerated().filter {
+            HostplusAPI.optionNameByTicker[$0.element.ticker.uppercased()] != nil
+                && $0.element.units > 0
+        }
+        guard !targets.isEmpty else { return }
+
+        isRefreshingHostplus = true
+        defer { isRefreshingHostplus = false }
+        do {
+            let prices = try await HostplusAPI.latestPrices()
+            var changed = false
+            for (idx, holding) in targets {
+                guard let name = HostplusAPI.optionNameByTicker[holding.ticker.uppercased()],
+                      let price = prices[name], price > 0 else { continue }
+                let r = HostplusAPI.reprice(
+                    units: holding.units,
+                    currentValue: holding.currentValue,
+                    price: price
+                )
+                if abs(r.currentValue - holding.currentValue) > 0.01
+                    || abs(r.units - holding.units) > 1e-6 {
+                    holdings[idx].units = r.units
+                    holdings[idx].currentValue = r.currentValue
+                    holdings[idx].currency = "AUD"
+                    changed = true
+                }
+            }
+            guard changed else { return }
+            let encoded = try JSONEncoder().encode(holdings)
+            let value = String(decoding: encoded, as: UTF8.self)
+            try await api.writeAppData(key: "portfolio_holdings", value: value)
+            rawBlobs["portfolio_holdings"] = value
+            recomputeDerived()
+        } catch {
+            loadError = error.localizedDescription
+        }
     }
 
     /// Alias kept for call sites that predate the cache split.

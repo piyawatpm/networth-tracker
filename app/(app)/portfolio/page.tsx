@@ -17,6 +17,7 @@ import {
   type PriceCache,
   type PriceUpdateLog,
 } from "@/lib/utils/prices";
+import { HOSTPLUS_OPTION_BY_TICKER, repriceHostplusHolding } from "@/lib/utils/hostplus";
 import { cn } from "@/lib/utils";
 import { BlurFade } from "@/components/ui/blur-fade";
 import { Button } from "@/components/ui/button";
@@ -127,12 +128,21 @@ export default function PortfolioPage() {
     };
   }, [holdings, stockLogos, setStockLogos]);
 
+  // `includeHostplus` is false on the frequent intraday poll — Hostplus only
+  // publishes a daily unit price, so it's fetched on manual refresh / mount,
+  // not every poll tick.
   const fetchPrices = useCallback(
-    async (force = false) => {
+    async (force = false, includeHostplus = true) => {
       const autoHoldings = holdings.filter(
         (h) => h.ticker && canAutoUpdate(h.ticker)
       );
       if (autoHoldings.length === 0) return;
+
+      const isHostplus = (t: string) => !!HOSTPLUS_OPTION_BY_TICKER[t.toUpperCase()];
+      const stockHoldings = autoHoldings.filter((h) => !isHostplus(h.ticker));
+      const hostplusHoldings = includeHostplus
+        ? autoHoldings.filter((h) => isHostplus(h.ticker))
+        : [];
 
       const tickers = autoHoldings.map((h) => h.ticker.toUpperCase());
       if (!force && !anyCacheStale(tickers)) return;
@@ -140,81 +150,112 @@ export default function PortfolioPage() {
       setIsFetching(true);
       setLastFetchStatus(null);
 
+      const cache = getPriceCache();
+      const updatedHoldings = [...holdings];
+      let attempted = 0;
+      let updatedCount = 0;
+      let errors = 0;
+
       try {
-        const res = await fetch("/api/prices", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            holdings: autoHoldings.map((h) => ({
-              ticker: h.ticker,
-              country: h.country,
-            })),
-          }),
-        });
-
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-        const data = await res.json();
-        const cache = getPriceCache();
-        let updatedCount = 0;
-
-        const updatedHoldings = [...holdings];
-
-        for (const result of data.prices ?? []) {
-          if (result.price !== null) {
-            cache[result.ticker.toUpperCase()] = {
-              price: result.price,
-              currency: result.currency,
-              updatedAt: Date.now(),
-            };
-
-            const holdingIdx = updatedHoldings.findIndex(
-              (h) => h.ticker.toUpperCase() === result.ticker.toUpperCase()
-            );
-            if (holdingIdx >= 0) {
-              const h = updatedHoldings[holdingIdx];
-              // Store currentValue in the PRICE's currency (e.g., USD for US stocks)
-              // The display layer handles conversion to the user's preferred currency
-              const newValue = h.units * result.price;
-              const oldValue = h.currentValue;
-              // Update the holding's currency to match the price source
-              const newCurrency = result.currency || h.currency;
-
-              if (Math.abs(newValue - oldValue) > 0.01) {
-                addUpdateLog({
-                  holdingId: h.id,
-                  holdingName: h.name,
-                  oldValue,
-                  newValue,
-                  source: "auto",
-                  timestamp: Date.now(),
-                });
-
-                updatedHoldings[holdingIdx] = { ...h, currentValue: newValue, currency: newCurrency };
-                updatedCount++;
+        // ── Stocks / ETFs (Yahoo → Finnhub → Alpaca) ──
+        if (stockHoldings.length > 0) {
+          attempted += stockHoldings.length;
+          try {
+            const res = await fetch("/api/prices", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                holdings: stockHoldings.map((h) => ({ ticker: h.ticker, country: h.country })),
+              }),
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            for (const result of data.prices ?? []) {
+              if (result.price == null) {
+                errors++;
+                continue;
+              }
+              cache[result.ticker.toUpperCase()] = {
+                price: result.price,
+                currency: result.currency,
+                updatedAt: Date.now(),
+              };
+              const idx = updatedHoldings.findIndex(
+                (h) => h.ticker.toUpperCase() === result.ticker.toUpperCase()
+              );
+              if (idx >= 0) {
+                const h = updatedHoldings[idx];
+                // Store currentValue in the PRICE's currency; the display layer
+                // converts to the user's preferred currency.
+                const newValue = h.units * result.price;
+                const newCurrency = result.currency || h.currency;
+                if (Math.abs(newValue - h.currentValue) > 0.01) {
+                  addUpdateLog({
+                    holdingId: h.id,
+                    holdingName: h.name,
+                    oldValue: h.currentValue,
+                    newValue,
+                    source: "auto",
+                    timestamp: Date.now(),
+                  });
+                  updatedHoldings[idx] = { ...h, currentValue: newValue, currency: newCurrency };
+                  updatedCount++;
+                }
               }
             }
+          } catch {
+            errors += stockHoldings.length;
+          }
+        }
+
+        // ── Hostplus super (daily unit price; units × price, calibrated once) ──
+        if (hostplusHoldings.length > 0) {
+          attempted += hostplusHoldings.length;
+          try {
+            const res = await fetch("/api/hostplus");
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            const priceByCode = new Map<string, number>(
+              (data.options ?? []).map((o: { code: string; price: number }) => [o.code, o.price])
+            );
+            for (const target of hostplusHoldings) {
+              const code = HOSTPLUS_OPTION_BY_TICKER[target.ticker.toUpperCase()];
+              const price = priceByCode.get(code);
+              if (typeof price !== "number" || price <= 0) {
+                errors++;
+                continue;
+              }
+              cache[target.ticker.toUpperCase()] = { price, currency: "AUD", updatedAt: Date.now() };
+              const idx = updatedHoldings.findIndex((h) => h.id === target.id);
+              if (idx >= 0) {
+                const h = updatedHoldings[idx];
+                const r = repriceHostplusHolding(h, price);
+                if (Math.abs(r.currentValue - h.currentValue) > 0.01 || Math.abs(r.units - h.units) > 1e-6) {
+                  addUpdateLog({
+                    holdingId: h.id,
+                    holdingName: h.name,
+                    oldValue: h.currentValue,
+                    newValue: r.currentValue,
+                    source: "auto",
+                    timestamp: Date.now(),
+                  });
+                  updatedHoldings[idx] = { ...h, units: r.units, currentValue: r.currentValue, currency: "AUD" };
+                  updatedCount++;
+                }
+              }
+            }
+          } catch {
+            errors += hostplusHoldings.length;
           }
         }
 
         setPriceCache(cache);
         setPriceCacheState({ ...cache });
-
-        if (updatedCount > 0) {
-          setHoldings(updatedHoldings);
-        }
-
+        if (updatedCount > 0) setHoldings(updatedHoldings);
         setUpdateLog(getUpdateLog());
-        const errors = (data.prices ?? []).filter(
-          (r: { price: number | null }) => r.price === null
-        ).length;
         setLastFetchStatus(
-          `Updated ${updatedCount} of ${autoHoldings.length} holdings` +
+          `Updated ${updatedCount} of ${attempted} holdings` +
             (errors > 0 ? ` (${errors} failed)` : "")
-        );
-      } catch (e) {
-        setLastFetchStatus(
-          `Fetch failed: ${e instanceof Error ? e.message : "Unknown error"}`
         );
       } finally {
         setIsFetching(false);
@@ -245,7 +286,7 @@ export default function PortfolioPage() {
 
     const tick = () => {
       if (document.visibilityState !== "hidden") {
-        fetchPricesRef.current(true);
+        fetchPricesRef.current(true, false); // intraday poll: stocks only
       }
       const next = pollIntervalForSession(getUsMarketSession());
       timer = setTimeout(tick, next);

@@ -133,6 +133,32 @@ export function parseHostplusPrices(
   };
 }
 
+/**
+ * Reprice a Hostplus holding to `units × price`, calibrating the unit count on
+ * first use. Shared by the daily cron and the manual refresh so both agree.
+ *
+ * The web app historically hand-edited the *total* value, leaving `units` on a
+ * wrong scale. When `units × price` diverges from the stored value by more than
+ * 20% we treat the units as untrustworthy and back-solve them from the value
+ * (`units = currentValue / price`), keeping the displayed balance. Normal daily
+ * moves (<5%) never trip the guard, so calibration effectively runs once; a
+ * large manual value correction re-anchors units to the new truth.
+ */
+export function repriceHostplusHolding(
+  holding: { units: number; currentValue: number },
+  price: number,
+): { units: number; currentValue: number } {
+  let units = holding.units;
+  const implied = units * price;
+  if (
+    holding.currentValue > 0 &&
+    Math.abs(implied - holding.currentValue) / holding.currentValue > 0.2
+  ) {
+    units = holding.currentValue / price;
+  }
+  return { units, currentValue: units * price };
+}
+
 async function getJson<T>(url: string, token?: string): Promise<T> {
   const res = await fetch(url, {
     headers: token

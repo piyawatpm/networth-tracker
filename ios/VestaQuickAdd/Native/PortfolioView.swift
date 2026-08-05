@@ -8,6 +8,12 @@ struct InvestView: View {
     @State private var pot = 0
     @Namespace private var zoom
 
+    private var hasHostplus: Bool {
+        store.holdings.contains {
+            HostplusAPI.optionNameByTicker[$0.ticker.uppercased()] != nil
+        }
+    }
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
@@ -26,7 +32,10 @@ struct InvestView: View {
                             .padding(.horizontal, 16)
                             .padding(.bottom, 110)
                     }
-                    .refreshable { await store.refresh() }
+                    .refreshable {
+                        await store.refresh()
+                        await store.refreshHostplus()
+                    }
                     .tag(0)
 
                     ScrollView {
@@ -43,6 +52,21 @@ struct InvestView: View {
             .navigationTitle("Invest")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { FxChip() }
+                if hasHostplus {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button {
+                            Task { await store.refreshHostplus() }
+                        } label: {
+                            if store.isRefreshingHostplus {
+                                ProgressView()
+                            } else {
+                                Image(systemName: "arrow.clockwise")
+                            }
+                        }
+                        .disabled(store.isRefreshingHostplus)
+                        .accessibilityLabel("Update Hostplus super price")
+                    }
+                }
             }
         }
     }

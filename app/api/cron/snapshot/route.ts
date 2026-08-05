@@ -3,6 +3,11 @@ import { createClient } from "@supabase/supabase-js";
 import { computeOccurrences } from "@/lib/utils/timezone";
 import { fetchExtendedStockQuote } from "@/lib/utils/stock-prices";
 import { computeDebtTotals } from "@/lib/utils/debts";
+import {
+  fetchHostplusUnitPrices,
+  repriceHostplusHolding,
+  HOSTPLUS_OPTION_BY_TICKER,
+} from "@/lib/utils/hostplus";
 
 // Use secret key for server-side cron (bypasses RLS)
 const supabase = createClient(
@@ -174,7 +179,11 @@ export async function GET(request: Request) {
     const now = new Date().toISOString();
 
     // ── 0. Update stock prices (Yahoo primary — includes pre/post, Finnhub fallback) ──
-    const stockHoldings = holdings.filter((h) => h.ticker && h.units > 0 && h.type !== "savings");
+    // Hostplus super options don't quote on Yahoo — priced separately in 0b.
+    const hostplusTickers = new Set(Object.keys(HOSTPLUS_OPTION_BY_TICKER));
+    const stockHoldings = holdings.filter(
+      (h) => h.ticker && h.units > 0 && h.type !== "savings" && !hostplusTickers.has(h.ticker),
+    );
     if (stockHoldings.length > 0) {
       let updatedCount = 0;
       let extendedCount = 0;
@@ -196,6 +205,48 @@ export async function GET(request: Request) {
         log.push(`Stock prices: ${updatedCount}/${stockHoldings.length} updated (${extendedCount} from pre/post; ${stateSummary})`);
       } else {
         log.push(`Stock prices: no updates (yahoo+finnhub both failed)`);
+      }
+    }
+
+    // ── 0b. Hostplus super unit prices ──
+    // Hostplus publishes a daily unit price per option; reprice the super
+    // holding as units × price, exactly like a stock — so the *balance* moves
+    // with the market instead of being hand-edited as a total (which is what
+    // left the stored `units` on a stale, wrong scale). On first sight the
+    // units and price disagree wildly (units × price is >20% off the stored
+    // value); we calibrate units = currentValue / price once. That keeps
+    // today's balance, makes units × price correct forever after, and lets
+    // future contributions logged as buys grow the balance at the right scale.
+    // The 20% guard means normal daily moves (<5%) never re-trigger it, but a
+    // large manual value correction still re-anchors units to the new truth.
+    const hostplusHoldings = holdings.filter(
+      (h) => h.ticker && HOSTPLUS_OPTION_BY_TICKER[h.ticker] && h.units > 0,
+    );
+    if (hostplusHoldings.length > 0) {
+      try {
+        const hp = await fetchHostplusUnitPrices();
+        const priceByCode = new Map(hp.options.map((o) => [o.code, o.price]));
+        let repriced = 0;
+        for (const h of hostplusHoldings) {
+          const price = priceByCode.get(HOSTPLUS_OPTION_BY_TICKER[h.ticker]);
+          if (!price || price <= 0) continue;
+          const r = repriceHostplusHolding(h, price);
+          h.units = r.units;
+          h.currentValue = r.currentValue;
+          h.currency = "AUD";
+          repriced++;
+        }
+        if (repriced > 0) {
+          const idx = updates.findIndex((u) => u.key === "portfolio_holdings");
+          if (idx >= 0) updates[idx].value = JSON.stringify(holdings);
+          else updates.push({ key: "portfolio_holdings", value: JSON.stringify(holdings), updated_at: now });
+          const sample = HOSTPLUS_OPTION_BY_TICKER[hostplusHoldings[0].ticker];
+          log.push(`Hostplus: ${repriced} super holding(s) repriced (${sample}=$${(priceByCode.get(sample) ?? 0).toFixed(4)})`);
+        } else {
+          log.push(`Hostplus: matched ${hostplusHoldings.length} holding(s) but no price returned`);
+        }
+      } catch (e) {
+        log.push(`Hostplus prices error: ${String(e)}`);
       }
     }
 
@@ -451,8 +502,8 @@ export async function GET(request: Request) {
         await supabase.from("snapshots").insert(snapshotInserts);
       }
 
-      // Update portfolio holdings that had prices refreshed
-      for (const h of stockHoldings) {
+      // Update portfolio holdings that had prices refreshed (stocks + Hostplus)
+      for (const h of [...stockHoldings, ...hostplusHoldings]) {
         await supabase.from("portfolio_holdings")
           .update({ current_value: h.currentValue, currency: h.currency })
           .eq("id", h.id);
