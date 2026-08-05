@@ -709,9 +709,23 @@ struct PerformanceLiteView: View {
                     PerfCompareCard(
                         start: "2026-05-01",
                         benchmarks: [.sp500],
-                        values: stockValues,
-                        flows: stockCompareFlows
+                        values: includeSuper
+                            ? DcaCompare.dailyValues(store.portfolioParsedWithSuper)
+                            : stockValues,
+                        flows: stockFlows(includeSuper: includeSuper),
+                        footnote: includeSuper
+                            ? "super in — unlogged super contributions read as growth, trust the OFF number"
+                            : nil
                     )
+
+                    Toggle(isOn: $includeSuper.animation(.snappy(duration: 0.25))) {
+                        Text("Include super")
+                            .font(.subheadline)
+                    }
+                    .tint(Ledger.income)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .financeCard()
                 }
                 if kind == "crypto" {
                     PerfCompareCard(

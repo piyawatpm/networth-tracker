@@ -18,8 +18,10 @@ enum DcaCompare {
 
     struct Series {
         let dates: [Date]
-        let minePct: [Double]  // cumulative % growth of a dollar in YOUR basket
-        let indexPct: [Double] // cumulative % growth of a dollar in the index
+        let minePct: [Double]  // your P&L, % of capital deployed to date
+        let indexPct: [Double] // same flows into the benchmark, same base
+        let mineUsd: [Double]  // the baht question, USD at source
+        let indexUsd: [Double]
     }
 
     /// Latest value at or before `day` (forward-fill over weekends/holidays).
@@ -78,21 +80,24 @@ enum DcaCompare {
             .sorted { $0.date < $1.date }
     }
 
-    /// Growth of the same money: your basket per-dollar vs the index per-dollar.
+    /// Same money, same days: your pot's P&L vs the same flows into the
+    /// benchmark, both as a percent of capital deployed to date.
     ///
-    /// "If all my money sat in my stocks vs all in SPY, what would happen?"
-    /// is a per-unit question, so deposits must not move the answer — your
-    /// side chains segment returns with the segment's net flows removed
-    /// (r = (V_t − ΣF) / V_prev, time-weighted, flows at end), and the index
-    /// side is its price path rebased to the window start; per dollar, any
-    /// flow schedule into an index grows at its price return.
+    /// P&L, not time-weighted, ON PURPOSE. Holding values here are marked by
+    /// hand and lag the logged buys by days, and TWR multiplies each lag pair
+    /// into a permanent fake loss (measured: −39% on a pot whose actual P&L
+    /// was −4%). P&L only trusts level differences — a lagged mark wobbles
+    /// the path for a few days and then self-corrects, and the endpoints are
+    /// real readings. The benchmark side deploys identical capital on
+    /// identical days, so the two lines stay directly comparable.
     ///
-    /// Chained between REAL readings only, never forward-fill. The snapshot
-    /// cron was down 19 May–24 Jun, and a day-walker that forward-filled the
-    /// stale value divided every mid-gap buy against a frozen denominator —
-    /// each one manufacturing a permanent fake loss (the "−20%" that
-    /// contradicted every P&L surface). A gap is one segment: its true
-    /// multi-week return, flows netted, chains in as a unit.
+    ///   invested(t) = opening + netFlows(start, t]
+    ///   yours(t)    = value(t) − invested(t)        (as % of invested)
+    ///   bench(t)    = units(t)·price(t) − invested(t)
+    ///
+    /// where the opening balance buys benchmark units at the start price and
+    /// each flow buys/sells at its day's close (clamped at zero — short is
+    /// not a scenario the comparison can represent).
     static func build(
         values: [(date: String, value: Double)],
         flows: [(date: String, value: Double)],
@@ -102,49 +107,49 @@ enum DcaCompare {
         let priceRows = prices.map { (date: $0.date, value: $0.close) }
         let today = SydneyTime.today()
         let readings = values.filter { $0.date >= start && $0.date <= today }
-        guard let startPrice = asOf(priceRows, start), startPrice > 0,
-              var previous = asOf(values, start), previous > 1,
+        guard let opening = asOf(values, start),
+              let startPrice = asOf(priceRows, start), startPrice > 0,
               readings.count >= 2
         else { return nil }
 
+        var invested = opening
+        var units = opening / startPrice
         let inWindow = flows.filter { $0.date > start && $0.date <= today }
             .sorted { $0.date < $1.date }
         var flowIndex = 0
-        var previousDay = start
 
         var dates: [Date] = []
         var minePct: [Double] = []
         var indexPct: [Double] = []
-        var growth = 1.0
+        var mineUsd: [Double] = []
+        var indexUsd: [Double] = []
 
         for reading in readings {
-            // Net flows that landed since the last real reading.
-            var segmentFlows = 0.0
             while flowIndex < inWindow.count, inWindow[flowIndex].date <= reading.date {
-                segmentFlows += inWindow[flowIndex].value
+                let flow = inWindow[flowIndex]
+                invested += flow.value
+                if let px = asOf(priceRows, flow.date), px > 0 {
+                    units = max(0, units + flow.value / px)
+                }
                 flowIndex += 1
             }
-            if reading.date > previousDay, previous > 1 {
-                let r = (reading.value - segmentFlows) / previous
-                // One-day ratios outside 0.5–2 are snapshot artifacts — a real
-                // day never halves or doubles these pots. Multi-day segments
-                // (tracking gaps) pass through: a 5-week move can be anything.
-                let days = (SnapshotDate.parse(reading.date).flatMap { end in
-                    SnapshotDate.parse(previousDay).map { end.timeIntervalSince($0) / 86400 }
-                }) ?? 1
-                if r > 0, days > 2 || (r > 0.5 && r < 2.0) { growth *= r }
-            }
-            previous = reading.value
-            previousDay = reading.date
-            if let date = SnapshotDate.parse(reading.date),
-               let price = asOf(priceRows, reading.date) {
-                dates.append(date)
-                minePct.append((growth - 1) * 100)
-                indexPct.append((price / startPrice - 1) * 100)
-            }
+            guard let date = SnapshotDate.parse(reading.date),
+                  let price = asOf(priceRows, reading.date),
+                  abs(invested) > 1e-9
+            else { continue }
+            let mine = reading.value - invested
+            let bench = units * price - invested
+            dates.append(date)
+            mineUsd.append(mine)
+            indexUsd.append(bench)
+            minePct.append(mine / abs(invested) * 100)
+            indexPct.append(bench / abs(invested) * 100)
         }
         guard dates.count >= 2 else { return nil }
-        return Series(dates: dates, minePct: minePct, indexPct: indexPct)
+        return Series(
+            dates: dates, minePct: minePct, indexPct: indexPct,
+            mineUsd: mineUsd, indexUsd: indexUsd
+        )
     }
 }
 
@@ -429,13 +434,15 @@ struct PerfCompareCard: View {
         }
         .frame(height: 170)
 
+        let mineMoney = store.convert(at.map { series.mineUsd[$0] } ?? (series.mineUsd.last ?? 0), from: "USD")
+        let indexMoney = store.convert(at.map { series.indexUsd[$0] } ?? (series.indexUsd.last ?? 0), from: "USD")
         HStack(spacing: 8) {
-            chip("You", minePct, Ledger.income)
-            chip(selected.label, indexPct, selected.color)
+            chip("You", minePct, mineMoney, Ledger.income)
+            chip(selected.label, indexPct, indexMoney, selected.color)
             Spacer(minLength: 0)
         }
 
-        Text("growth of the same dollar · deposits neutralized (time-weighted) · dividends in S&P 500")
+        Text("P&L as % of capital deployed · same money, same days into the benchmark · dividends in S&P 500")
             .font(.system(size: 8, design: .monospaced))
             .foregroundStyle(.tertiary)
         if let footnote {
@@ -445,7 +452,7 @@ struct PerfCompareCard: View {
         }
     }
 
-    private func chip(_ name: String, _ pctValue: Double, _ color: Color) -> some View {
+    private func chip(_ name: String, _ pctValue: Double, _ money: Double, _ color: Color) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 5) {
                 Circle().fill(color).frame(width: 7, height: 7)
@@ -456,6 +463,10 @@ struct PerfCompareCard: View {
             Text("\(pctValue >= 0 ? "+" : "")\(String(format: "%.1f", pctValue))%")
                 .font(.system(size: 13, weight: .bold, design: .monospaced))
                 .foregroundStyle(pctValue >= 0 ? Ledger.income : Ledger.expense)
+            // The baht question, answered next to the percent one.
+            Text("\(money >= 0 ? "+" : "")\(store.format(money, compact: true))")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 9)
         .padding(.vertical, 6)
