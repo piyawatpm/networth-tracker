@@ -41,12 +41,17 @@ struct AddExpenseIntent: AppIntent {
     static let openAppWhenRun = false
 
     // IntentCurrencyAmount, NOT Double: the Wallet Transaction automation
-    // passes a transaction object, and Shortcuts can coerce it into a currency
+    // passes a transaction object, and Shortcuts coerces it into a currency
     // amount losslessly — a plain Number slot coerced it to 0 and every
     // auto-logged payment failed with "must be more than zero". This also
     // carries the card's real currency instead of assuming the default.
+    //
+    // OPTIONAL on purpose. Non-optional, AppIntents treats a default-
+    // constructed zero as "already resolved" and never prompts, so pressing
+    // the Action Button failed instantly instead of asking for an amount.
+    // Optional makes "missing" representable; perform() then asks explicitly.
     @Parameter(title: "Amount", requestValueDialog: "How much?")
-    var amount: IntentCurrencyAmount
+    var amount: IntentCurrencyAmount?
 
     @Parameter(title: "Category", optionsProvider: CategoryOptionsProvider())
     var category: String?
@@ -63,7 +68,16 @@ struct AddExpenseIntent: AppIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         // No server config needed — writes ride the app's own Supabase
         // session (or the offline queue). The old token setup is legacy.
-        let value = (amount.amount as NSDecimalNumber).doubleValue
+        // Supplied (Wallet automation) → use it. Missing or zero (Action
+        // Button, Siri) → ask, rather than failing on a phantom zero.
+        var supplied = amount
+        if (supplied.map { ($0.amount as NSDecimalNumber).doubleValue } ?? 0) <= 0 {
+            supplied = try await $amount.requestValue("How much?")
+        }
+        guard let resolved = supplied else {
+            throw QuickExpenseError.rejected("No amount given.")
+        }
+        let value = (resolved.amount as NSDecimalNumber).doubleValue
         guard value > 0 else {
             Notify.post(
                 title: "Quick-add failed",
@@ -72,8 +86,8 @@ struct AddExpenseIntent: AppIntent {
             )
             throw QuickExpenseError.rejected("Amount must be more than zero.")
         }
-        let code = amount.currencyCode.isEmpty
-            ? Settings.defaultCurrency : amount.currencyCode
+        let code = resolved.currencyCode.isEmpty
+            ? Settings.defaultCurrency : resolved.currencyCode
 
         let expense = PendingExpense(
             amount: value,
