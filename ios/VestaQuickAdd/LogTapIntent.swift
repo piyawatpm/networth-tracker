@@ -46,7 +46,7 @@ struct LogTapIntent: AppIntent {
         }
     }
 
-    func perform() async throws -> some IntentResult & ProvidesDialog {
+    func perform() async throws -> some IntentResult {
         var parts: [String] = []
 
         if let amount {
@@ -69,6 +69,10 @@ struct LogTapIntent: AppIntent {
 
         BreadcrumbLog.tap.write(parts.joined(separator: " · "))
 
-        return .result(dialog: IntentDialog("Tap logged"))
+        // No dialog, ON PURPOSE: a background Wallet automation may have no
+        // surface to present one on, and a failed presentation kills the
+        // helper process — which Shortcuts reports as "couldn't communicate
+        // with a helper application". The receipt IS the log entry.
+        return .result()
     }
 }

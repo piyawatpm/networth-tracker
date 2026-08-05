@@ -88,6 +88,12 @@ struct AddExpenseIntent: LiveActivityIntent {
     }
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
+        // Whether the amount arrived pre-filled decides the finish: a Wallet
+        // automation supplies it and runs in the background, where presenting
+        // a dialog can kill the helper process; the Action Button prompts,
+        // which is inherently foreground and safe to answer with one.
+        let ranInBackground = (amount.map { ($0.amount as NSDecimalNumber).doubleValue } ?? 0) > 0
+
         // The very first statement, before any work that could stall or die.
         // Its absence after a card tap is the diagnosis: Shortcuts never got
         // here, so the fault is upstream of the app (its own transaction-record
@@ -154,6 +160,11 @@ struct AddExpenseIntent: LiveActivityIntent {
 
         // A queued expense is a success from the user's point of view — it's
         // recorded and will sync. Saying "failed" would invite a second tap.
+        // Background runs finish silently (the island + notification already
+        // told the story); only the foreground prompt path speaks.
+        if ranInBackground {
+            return .result(dialog: IntentDialog(""))
+        }
         return .result(
             dialog: delivered
                 ? IntentDialog("Logged \(formatted)")
