@@ -54,7 +54,10 @@ struct RootView: View {
 
 struct MainTabView: View {
     @Environment(DataStore.self) private var store
-    @State private var selection = 0
+    // Screenshot/UI runs can land on a specific tab.
+    @State private var selection = Int(
+        ProcessInfo.processInfo.environment["VESTA_INITIAL_TAB"] ?? ""
+    ) ?? 0
 
     private static let tabs = [
         VestaTab(id: 0, title: "Home", icon: "square.grid.2x2"),

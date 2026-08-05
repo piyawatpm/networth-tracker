@@ -83,8 +83,7 @@ struct HistoryChartCard: View {
 
     @State private var period: ChartPeriod = .d1
     @State private var scrubDate: Date?
-    @State private var heroPoints: [Point] = []
-    @State private var overlayPoints: [String: [Point]] = [:]
+    @State private var render = RenderState()
     @State private var hiddenOverlays: Set<String> = []
     @State private var modeOverride: ChartMode?
 
@@ -94,10 +93,23 @@ struct HistoryChartCard: View {
         var id: Date { date }
     }
 
+    /// The period AND the points computed for it, swapped as one value.
+    ///
+    /// Held together on purpose: when these were separate @State, changing the
+    /// period re-rendered the chart a frame BEFORE rebuild() replaced the
+    /// points, so Charts drew the previous window's data against the new
+    /// window's axis — and the spring animation tweened across that mismatch,
+    /// which is what painted those filled blobs for ~1s.
+    struct RenderState {
+        var period: ChartPeriod = .d1
+        var hero: [Point] = []
+        var overlays: [String: [Point]] = [:]
+    }
+
     // MARK: Derived state
 
     private var visibleOverlays: [ChartOverlay] {
-        overlays.filter { !hiddenOverlays.contains($0.name) && !(overlayPoints[$0.name] ?? []).isEmpty }
+        overlays.filter { !hiddenOverlays.contains($0.name) && !(render.overlays[$0.name] ?? []).isEmpty }
     }
 
     /// Absolute values are only readable with a single series on the plot;
@@ -110,8 +122,8 @@ struct HistoryChartCard: View {
     /// rebuilds are async, so between them the number moves with sockets and
     /// FX switches. Pinning at render keeps line and headline glued together.
     private var syncedHero: [Point] {
-        guard let last = heroPoints.last, last.value != liveValue else { return heroPoints }
-        var copy = heroPoints
+        guard let last = render.hero.last, last.value != liveValue else { return render.hero }
+        var copy = render.hero
         copy[copy.count - 1] = Point(date: last.date, value: liveValue)
         return copy
     }
@@ -197,7 +209,7 @@ struct HistoryChartCard: View {
         HStack(spacing: 6) {
             if let point = scrubbedPoint {
                 Text(
-                    period == .d1 || period == .w1
+                    render.period == .d1 || render.period == .w1
                         ? point.date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated).hour().minute())
                         : point.date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated).year())
                 )
@@ -218,15 +230,18 @@ struct HistoryChartCard: View {
     private var legend: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
+                // Short, STABLE name: the full title carries the "· ex-super"
+                // qualifier, which wrapped the chip to two lines and shoved
+                // the whole card down whenever super was toggled.
                 legendChip(
-                    name: title, color: Ledger.income, hidden: false,
+                    name: legendTitle, color: Ledger.income, hidden: false,
                     value: scrubValue(rendered(syncedHero)), isHero: true
                 )
                 ForEach(overlays) { overlay in
                     legendChip(
                         name: overlay.name, color: overlay.color,
                         hidden: hiddenOverlays.contains(overlay.name),
-                        value: scrubValue(rendered(overlayPoints[overlay.name] ?? [])),
+                        value: scrubValue(rendered(render.overlays[overlay.name] ?? [])),
                         isHero: false
                     )
                 }
@@ -272,6 +287,8 @@ struct HistoryChartCard: View {
                     Text(name)
                         .font(.system(size: 10, weight: .semibold, design: .rounded))
                         .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .fixedSize()
                 }
                 if let value, !hidden {
                     Text(
@@ -283,12 +300,18 @@ struct HistoryChartCard: View {
                     .foregroundStyle(.secondary)
                 }
             }
+            .frame(height: 30, alignment: .leading)
             .padding(.horizontal, 9)
             .padding(.vertical, 6)
             .background(Color.white.opacity(hidden ? 0.03 : 0.08), in: .rect(cornerRadius: 10))
             .opacity(hidden ? 0.45 : 1)
         }
         .buttonStyle(.plain)
+    }
+
+    /// Title without any "· qualifier" suffix, so the chip width is stable.
+    private var legendTitle: String {
+        title.components(separatedBy: " · ").first ?? title
     }
 
     private var updatedStamp: String? {
@@ -369,7 +392,7 @@ struct HistoryChartCard: View {
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, minHeight: 160)
         } else {
-            let series = visibleOverlays.map { ($0, rendered(overlayPoints[$0.name] ?? [])) }
+            let series = visibleOverlays.map { ($0, rendered(render.overlays[$0.name] ?? [])) }
             let heroValues = hero.map(\.value)
             let allValues = heroValues + series.flatMap { $0.1.map(\.value) }
             let low = allValues.min() ?? 0
@@ -423,8 +446,12 @@ struct HistoryChartCard: View {
                     }
                 }
 
-                // Peak / trough of the HERO series only.
-                if mode == .value, let heroHigh {
+                // Peak / trough of the HERO series only — and only when the
+                // two are far enough apart that compact formatting doesn't
+                // print the same string twice ("฿1.3M" above and below).
+                let extremesDistinct = (heroValues.max() ?? 0) - (heroValues.min() ?? 0)
+                    > abs(heroValues.max() ?? 1) * 0.02
+                if mode == .value, extremesDistinct, let heroHigh {
                     PointMark(x: .value("Date", heroHigh.date), y: .value("Value", heroHigh.value))
                         .symbolSize(22)
                         .foregroundStyle(tint)
@@ -434,7 +461,7 @@ struct HistoryChartCard: View {
                                 .foregroundStyle(.secondary)
                         }
                 }
-                if mode == .value, let heroLow, heroLow.date != heroHigh?.date {
+                if mode == .value, extremesDistinct, let heroLow, heroLow.date != heroHigh?.date {
                     PointMark(x: .value("Date", heroLow.date), y: .value("Value", heroLow.value))
                         .symbolSize(22)
                         .foregroundStyle(Ledger.expense.opacity(0.75))
@@ -460,11 +487,11 @@ struct HistoryChartCard: View {
             .chartXSelection(value: $scrubDate)
             .chartXAxis {
                 AxisMarks(values: .automatic(desiredCount: 4)) { _ in
-                    if period == .d1 {
+                    if render.period == .d1 {
                         AxisValueLabel(format: .dateTime.hour().minute())
                             .font(.system(size: 9, design: .monospaced))
                             .foregroundStyle(.tertiary)
-                    } else if period == .m6 || period == .y1 || period == .all {
+                    } else if render.period == .m6 || render.period == .y1 || render.period == .all {
                         AxisValueLabel(format: .dateTime.month(.abbreviated).year(.twoDigits))
                             .font(.system(size: 9, design: .monospaced))
                             .foregroundStyle(.tertiary)
@@ -493,7 +520,6 @@ struct HistoryChartCard: View {
             }
             .chartYScale(domain: yBase...(high + span * 0.10))
             .frame(height: 210)
-            .animation(.spring(duration: 0.5), value: period)
         }
     }
 
@@ -525,12 +551,11 @@ struct HistoryChartCard: View {
         } else if !hero.isEmpty {
             hero[hero.count - 1] = Point(date: hero[hero.count - 1].date, value: liveValue)
         }
-        heroPoints = hero
-
         var built: [String: [Point]] = [:]
         for overlay in overlays {
             built[overlay.name] = bucketed(overlay.points, now: now)
         }
-        overlayPoints = built
+        // One assignment — the chart never sees a half-updated window.
+        render = RenderState(period: period, hero: hero, overlays: built)
     }
 }

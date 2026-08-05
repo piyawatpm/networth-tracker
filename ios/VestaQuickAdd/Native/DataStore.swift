@@ -766,6 +766,91 @@ final class DataStore {
     /// Honors the app-wide super toggle — dashboard, goal and chart all agree.
     var netWorth: Double { stocksValueVisible + cryptoValue + debtNet }
 
+    /// Month-over-month net-worth CHANGE, USD, oldest first. The last entry
+    /// is the current (partial) month, flagged so the UI can say so.
+    var monthlyGrowth: [(label: String, deltaUsd: Double, partial: Bool)] {
+        var firstPerMonth: [String: SnapshotPoint] = [:]
+        for row in networthHistory {
+            let month = String(row.date.prefix(7))
+            if firstPerMonth[month] == nil { firstPerMonth[month] = row }
+        }
+        let months = firstPerMonth.keys.sorted().suffix(13)
+        guard months.count >= 2 else { return [] }
+
+        func value(_ row: SnapshotPoint) -> Double {
+            includeSuperStocks ? row.value : (row.valueNoSuper ?? row.value)
+        }
+        let labeler = DateFormatter()
+        labeler.locale = Locale(identifier: "en_US_POSIX")
+        labeler.dateFormat = "MMM"
+
+        var out: [(String, Double, Bool)] = []
+        let list = Array(months)
+        for index in 1..<list.count {
+            guard let prev = firstPerMonth[list[index - 1]],
+                  let curr = firstPerMonth[list[index]] else { continue }
+            // The delta BELONGS to the month that produced it (prev month).
+            let parts = list[index - 1].split(separator: "-")
+            var label = list[index - 1]
+            if parts.count == 2, let m = Int(parts[1]),
+               let date = DateComponents(calendar: .current, year: Int(parts[0]), month: m).date {
+                label = labeler.string(from: date)
+            }
+            out.append((label, value(curr) - value(prev), false))
+        }
+        // Current month so far: its opening reading vs live net worth.
+        if let lastMonth = list.last, let opening = firstPerMonth[lastMonth] {
+            let parts = lastMonth.split(separator: "-")
+            var label = lastMonth
+            if parts.count == 2, let m = Int(parts[1]),
+               let date = DateComponents(calendar: .current, year: Int(parts[0]), month: m).date {
+                label = labeler.string(from: date)
+            }
+            let live = Money.convert(netWorth, from: displayCurrency, to: "USD")
+            out.append((label, live - value(opening), true))
+        }
+        return out
+    }
+
+    /// Average daily net-worth change (USD) over the trailing window — the
+    /// pace behind the goal projection. Nil when history is too short.
+    func dailyGrowthUsd(days: Int = 90) -> Double? {
+        let series = includeSuperStocks ? networthParsed : networthParsedNoSuper
+        guard let last = series.last else { return nil }
+        let cutoff = last.date.addingTimeInterval(-Double(days) * 86400)
+        guard let first = series.first(where: { $0.date >= cutoff }) else { return nil }
+        let span = last.date.timeIntervalSince(first.date) / 86400
+        guard span >= 7 else { return nil } // a week is the floor for a trend
+        let live = Money.convert(netWorth, from: displayCurrency, to: "USD")
+        return (live - first.valueUsd) / span
+    }
+
+    /// Passive income vs expenses over the trailing 30 days, in display
+    /// currency — "how much of my burn is already covered without working".
+    var freedom: (passive: Double, expenses: Double, coverage: Double) {
+        let cutoff = Calendar.current.date(byAdding: .day, value: -30, to: Date())
+            .map { date -> String in
+                let f = DateFormatter()
+                f.locale = Locale(identifier: "en_US_POSIX")
+                f.timeZone = SydneyTime.zone
+                f.dateFormat = "yyyy-MM-dd"
+                return f.string(from: date)
+            } ?? ""
+
+        let passiveTypes: Set<String> = [
+            "dividend", "crypto_yield", "interest", "rental",
+            "realized_stocks", "realized_crypto",
+        ]
+        let passive = allIncome
+            .filter { $0.date >= cutoff }
+            .filter { $0.isPassive == true || passiveTypes.contains($0.type) }
+            .reduce(0.0) { $0 + convert($1.amount, from: $1.currency) }
+        let spend = expenses
+            .filter { $0.date >= cutoff }
+            .reduce(0.0) { $0 + convert($1.amount, from: $1.currency) }
+        return (passive, spend, spend > 0 ? passive / spend : 0)
+    }
+
     /// Net worth at the START of each month (first snapshot reading), USD,
     /// plus a live "now" sample — the month-over-month trend card.
     var monthStartNetWorth: [(label: String, valueUsd: Double, isNow: Bool)] {
