@@ -29,6 +29,18 @@ enum CryptoSplit {
         tx.totalValueUsd ?? (tx.priceUsd ?? 1) * tx.amount
     }
 
+    /// Is this transfer explicitly marked as earn income?
+    ///
+    /// BY DECISION, earn is never inferred: past transfers mixed bot payouts
+    /// with the user's own money moving between venues, and guessing painted
+    /// capital as income. From now the Notes column says so — "E" or
+    /// anything containing "earn" — and only those rows count. Everything
+    /// unmarked is the user's own money: cost basis at arrival, no income.
+    static func isEarnMarked(_ tx: CryptoTransaction) -> Bool {
+        let note = tx.notes.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return note == "e" || note.contains("earn")
+    }
+
     /// The token's logged price nearest in time to `date` — how a coin
     /// transfer (Earn interest paid in ETH, bot rewards in kind) gets valued
     /// at ARRIVAL, since the CSV leaves transfers priceless.
@@ -66,6 +78,7 @@ enum CryptoSplit {
         for tx in txs.sorted(by: { $0.date < $1.date }) {
             if let p = tx.priceUsd, p > 0 { lastPrice[tx.token] = p }
             if CryptoMath.isCashLike(tx.token, tags: tags) {
+                guard isEarnMarked(tx) else { continue } // unmarked = cash management
                 if tx.type == "transferIn" { split.yieldInUsd += stableValue(tx) }
                 if tx.type == "transferOut" { split.yieldOutUsd += stableValue(tx) }
                 continue
@@ -79,8 +92,8 @@ enum CryptoSplit {
                 bag.amount += tx.amount
                 if let px = arrivalPrice(tx.token, tx.date) {
                     let value = tx.amount * px
-                    split.yieldInUsd += value
-                    bag.cost += value // arrival basis, not zero
+                    bag.cost += value // arrival basis either way
+                    if isEarnMarked(tx) { split.yieldInUsd += value }
                 }
             case "sell", "transferOut":
                 guard bag.amount > 1e-9 else { break }
@@ -88,13 +101,9 @@ enum CryptoSplit {
                 let avg = bag.cost / bag.amount
                 if tx.type == "sell", let value = tx.totalValueUsd {
                     split.realizedUsd += value - avg * take
-                } else if tx.type == "transferOut" {
-                    // Leaving at market value: income reversed at today's
-                    // worth of what left, basis released quietly.
-                    if let px = arrivalPrice(tx.token, tx.date) {
-                        split.yieldOutUsd += take * px
-                        split.realizedUsd += take * px - avg * take
-                    }
+                } else if tx.type == "transferOut", isEarnMarked(tx),
+                          let px = arrivalPrice(tx.token, tx.date) {
+                    split.yieldOutUsd += take * px
                 }
                 bag.amount -= take
                 bag.cost -= avg * take
@@ -148,8 +157,8 @@ enum CryptoSplit {
                 bag.amount += tx.amount
                 if let px = arrivalPrice(tx.token, tx.date) {
                     let value = tx.amount * px
-                    earned[tx.token, default: 0] += value
                     bag.cost += value
+                    if isEarnMarked(tx) { earned[tx.token, default: 0] += value }
                 }
             case "sell", "transferOut":
                 guard bag.amount > 1e-9 else { break }
@@ -157,9 +166,9 @@ enum CryptoSplit {
                 let avg = bag.cost / bag.amount
                 if tx.type == "sell", let value = tx.totalValueUsd {
                     realized[tx.token, default: 0] += value - avg * take
-                } else if tx.type == "transferOut", let px = arrivalPrice(tx.token, tx.date) {
+                } else if tx.type == "transferOut", isEarnMarked(tx),
+                          let px = arrivalPrice(tx.token, tx.date) {
                     earned[tx.token, default: 0] -= take * px
-                    realized[tx.token, default: 0] += take * px - avg * take
                 }
                 bag.amount -= take
                 bag.cost -= avg * take
@@ -193,7 +202,8 @@ enum CryptoSplit {
     static func yieldEvents(txs: [CryptoTransaction], tags: [String: Bool]) -> [YieldEvent] {
         let arrivalPrice = nearestPrices(txs)
         return txs.compactMap { tx -> YieldEvent? in
-            guard tx.type == "transferIn" || tx.type == "transferOut" else { return nil }
+            guard tx.type == "transferIn" || tx.type == "transferOut",
+                  isEarnMarked(tx) else { return nil }
             let value: Double
             if CryptoMath.isCashLike(tx.token, tags: tags) {
                 value = stableValue(tx)
@@ -230,7 +240,7 @@ struct CryptoSplitCard: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Where crypto P&L comes from").labelMono()
 
-            row("Earn & bot income", "USDT payouts + coin rewards @ arrival price", s.netYieldUsd, emphasize: true)
+            row("Earn & bot income", "transfers you marked E / Earn in notes", s.netYieldUsd, emphasize: true)
             row("Trading · realized", "locked in by sells", s.realizedUsd)
             row("Trading · unrealized", "bags vs cost incl. arrival value", s.unrealizedUsd)
 
@@ -275,7 +285,7 @@ struct CryptoSplitCard: View {
                     .font(.system(size: 8, design: .monospaced))
                     .foregroundStyle(.tertiary)
             }
-            Text("convention: every transfer in = income at arrival value (ArenaBot pays USDT, Earn pays coins) · outs subtract, they may be your own redeployments")
+            Text("earn is never guessed: mark a transfer with E (or Earn) in its note and it counts from then on — everything unmarked is your own money moving · outs subtract, they may be your own redeployments")
                 .font(.system(size: 8, design: .monospaced))
                 .foregroundStyle(.tertiary)
         }
@@ -367,6 +377,18 @@ struct BotIncomeView: View {
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
                 .financeCard()
+            }
+
+            if events.isEmpty {
+                Section {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Starting fresh").font(.headline)
+                        Text("From now on, put E (or Earn) in a transfer's note when you record it — bot payouts, Earn interest, rewards. Marked rows appear here; nothing is ever guessed from history.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 4)
+                }
             }
 
             Section("By token") {
@@ -464,7 +486,7 @@ struct CoinPnlView: View {
                         currency: store.displayCurrency,
                         tint: total >= 0 ? Ledger.income : Ledger.expense
                     )
-                    Text("realized + unrealized, after each coin\u{2019}s earn was counted as income at arrival · earn has its own page")
+                    Text("realized + unrealized · transfers carry arrival-price basis · only notes marked E count as earn")
                         .font(.system(size: 8, design: .monospaced))
                         .foregroundStyle(.tertiary)
                 }
