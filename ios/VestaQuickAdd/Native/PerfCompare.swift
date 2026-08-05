@@ -82,14 +82,17 @@ enum DcaCompare {
     ///
     /// "If all my money sat in my stocks vs all in SPY, what would happen?"
     /// is a per-unit question, so deposits must not move the answer — your
-    /// side chains daily returns with the day's net flow removed
-    /// (r_t = (V_t − F_t) / V_{t−1}, i.e. time-weighted), and the index side
-    /// is simply its price path rebased to the window start; per dollar, any
+    /// side chains segment returns with the segment's net flows removed
+    /// (r = (V_t − ΣF) / V_prev, time-weighted, flows at end), and the index
+    /// side is its price path rebased to the window start; per dollar, any
     /// flow schedule into an index grows at its price return.
     ///
-    /// A pleasant side effect: the one-day snapshot glitch that poisoned the
-    /// P&L view cancels here — a fake ×1.9 day followed by its ÷1.9 reversal
-    /// chains back to exactly where it started.
+    /// Chained between REAL readings only, never forward-fill. The snapshot
+    /// cron was down 19 May–24 Jun, and a day-walker that forward-filled the
+    /// stale value divided every mid-gap buy against a frozen denominator —
+    /// each one manufacturing a permanent fake loss (the "−20%" that
+    /// contradicted every P&L surface). A gap is one segment: its true
+    /// multi-week return, flows netted, chains in as a unit.
     static func build(
         values: [(date: String, value: Double)],
         flows: [(date: String, value: Double)],
@@ -97,42 +100,48 @@ enum DcaCompare {
         start: String
     ) -> Series? {
         let priceRows = prices.map { (date: $0.date, value: $0.close) }
+        let today = SydneyTime.today()
+        let readings = values.filter { $0.date >= start && $0.date <= today }
         guard let startPrice = asOf(priceRows, start), startPrice > 0,
-              var previousValue = asOf(values, start), previousValue > 1
+              var previous = asOf(values, start), previous > 1,
+              readings.count >= 2
         else { return nil }
 
-        var flowByDay: [String: Double] = [:]
-        for flow in flows where flow.date > start { flowByDay[flow.date] = flow.value }
+        let inWindow = flows.filter { $0.date > start && $0.date <= today }
+            .sorted { $0.date < $1.date }
+        var flowIndex = 0
+        var previousDay = start
 
         var dates: [Date] = []
         var minePct: [Double] = []
         var indexPct: [Double] = []
         var growth = 1.0
 
-        guard var cursor = SnapshotDate.parse(start) else { return nil }
-        let today = SydneyTime.today()
-        while true {
-            let day = SydneyTime.dayString(cursor)
-            if day > today { break }
-            if let value = asOf(values, day), let price = asOf(priceRows, day) {
-                if day > start {
-                    let flow = flowByDay[day] ?? 0
-                    // Day's return with the deposit/withdrawal taken out.
-                    if previousValue > 1 {
-                        let r = (value - flow) / previousValue
-                        // A flow mis-dated against its snapshot can fabricate
-                        // an extreme ratio; a real day never halves or
-                        // doubles this pot. Skip the day rather than let one
-                        // artifact bend the whole curve.
-                        if r > 0.5, r < 2.0 { growth *= r }
-                    }
-                    previousValue = value
-                }
-                dates.append(cursor)
+        for reading in readings {
+            // Net flows that landed since the last real reading.
+            var segmentFlows = 0.0
+            while flowIndex < inWindow.count, inWindow[flowIndex].date <= reading.date {
+                segmentFlows += inWindow[flowIndex].value
+                flowIndex += 1
+            }
+            if reading.date > previousDay, previous > 1 {
+                let r = (reading.value - segmentFlows) / previous
+                // One-day ratios outside 0.5–2 are snapshot artifacts — a real
+                // day never halves or doubles these pots. Multi-day segments
+                // (tracking gaps) pass through: a 5-week move can be anything.
+                let days = (SnapshotDate.parse(reading.date).flatMap { end in
+                    SnapshotDate.parse(previousDay).map { end.timeIntervalSince($0) / 86400 }
+                }) ?? 1
+                if r > 0, days > 2 || (r > 0.5 && r < 2.0) { growth *= r }
+            }
+            previous = reading.value
+            previousDay = reading.date
+            if let date = SnapshotDate.parse(reading.date),
+               let price = asOf(priceRows, reading.date) {
+                dates.append(date)
                 minePct.append((growth - 1) * 100)
                 indexPct.append((price / startPrice - 1) * 100)
             }
-            cursor = cursor.addingTimeInterval(86400)
         }
         guard dates.count >= 2 else { return nil }
         return Series(dates: dates, minePct: minePct, indexPct: indexPct)
@@ -242,6 +251,7 @@ struct PerfCompareCard: View {
     @State private var selected: Benchmark
     @State private var prices: [DcaCompare.PricePoint]?
     @State private var failed = false
+    @State private var scrubDate: Date?
 
     init(
         start: String, benchmarks: [Benchmark],
@@ -299,10 +309,21 @@ struct PerfCompareCard: View {
         .task(id: selected.symbol) { await load() }
     }
 
+    /// Index of the reading nearest the scrub position.
+    private func scrubIndex(_ series: DcaCompare.Series) -> Int? {
+        guard let scrubDate, !series.dates.isEmpty else { return nil }
+        return series.dates.indices.min {
+            abs(series.dates[$0].timeIntervalSince(scrubDate))
+                < abs(series.dates[$1].timeIntervalSince(scrubDate))
+        }
+    }
+
     @ViewBuilder
     private func content(_ series: DcaCompare.Series) -> some View {
-        let minePct = series.minePct.last ?? 0
-        let indexPct = series.indexPct.last ?? 0
+        // Hold on the chart → every number on the card reads at that day.
+        let at = scrubIndex(series)
+        let minePct = at.map { series.minePct[$0] } ?? (series.minePct.last ?? 0)
+        let indexPct = at.map { series.indexPct[$0] } ?? (series.indexPct.last ?? 0)
         let lead = minePct - indexPct
         let ahead = lead >= 0
 
@@ -313,6 +334,11 @@ struct PerfCompareCard: View {
                 .font(.caption2.bold())
             Text("\(ahead ? "ahead of" : "behind") \(selected.label) by \(String(format: "%.1f", abs(lead))) pts")
                 .font(.system(.caption, design: .monospaced, weight: .semibold))
+            if let at {
+                Text("· \(series.dates[at].formatted(.dateTime.day().month(.abbreviated)))")
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
         }
         .foregroundStyle(ahead ? Ledger.income : Ledger.expense)
 
@@ -347,8 +373,24 @@ struct PerfCompareCard: View {
                 .lineStyle(StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round))
                 .foregroundStyle(selected.color)
             }
+
+            if let at {
+                RuleMark(x: .value("Date", series.dates[at]))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                    .foregroundStyle(.secondary.opacity(0.7))
+                PointMark(x: .value("Date", series.dates[at]), y: .value("Growth", series.minePct[at]))
+                    .symbolSize(70).foregroundStyle(.white)
+                PointMark(x: .value("Date", series.dates[at]), y: .value("Growth", series.minePct[at]))
+                    .symbolSize(26).foregroundStyle(Ledger.income)
+                PointMark(x: .value("Date", series.dates[at]), y: .value("Growth", series.indexPct[at]))
+                    .symbolSize(70).foregroundStyle(.white)
+                PointMark(x: .value("Date", series.dates[at]), y: .value("Growth", series.indexPct[at]))
+                    .symbolSize(26).foregroundStyle(selected.color)
+            }
         }
+        .sensoryFeedback(.selection, trigger: at)
         .chartYScale(domain: yLow...yHigh)
+        .chartXSelection(value: $scrubDate)
         // Charts does NOT clip marks to the plot area by default.
         .chartPlotStyle { $0.clipped() }
         .chartYAxis {
