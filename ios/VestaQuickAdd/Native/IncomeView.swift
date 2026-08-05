@@ -12,8 +12,28 @@ struct IncomeView: View {
 
     private var month: String { SydneyTime.currentMonthKey() }
 
+    /// Everything the summary/insight cards describe — the month chosen with
+    /// the chips, not always the calendar month. "All" means all of it.
     private var monthEntries: [IncomeEntry] {
-        store.allIncome.filter { SydneyTime.monthKey($0.date) == month }
+        guard let scope else { return store.allIncome }
+        return store.allIncome.filter { SydneyTime.monthKey($0.date) == scope }
+    }
+
+    private var isCurrentMonth: Bool { scope == month }
+
+    private var scopeTitle: String {
+        guard let scope else { return "All time" }
+        return isCurrentMonth ? "This month" : FlowMath.label(scope)
+    }
+
+    private var scopedTotal: Double {
+        monthEntries.reduce(0) { $0 + store.convert($1.amount, from: $1.currency) }
+    }
+
+    private var categoryRows: [(date: String, category: String, value: Double)] {
+        store.allIncome.map {
+            ($0.date, store.incomeLabel($0.type), store.convert($0.amount, from: $0.currency))
+        }
     }
 
     /// Donut slices for this month, positive categories only (a pie can't
@@ -73,7 +93,7 @@ struct IncomeView: View {
     /// Findings tuned to the actual goal here: replacing wage income.
     private var insights: [Insight] {
         var out: [Insight] = []
-        let total = store.monthTotal(store.allIncome, month: month)
+        let total = scopedTotal
 
         // Passive coverage — the single number the whole plan turns on.
         let freedom = store.freedom
@@ -134,13 +154,17 @@ struct IncomeView: View {
                 // Trend earns its card only once there's a month to compare
                 // against — a single lonely bar answers nothing.
                 let flows = FlowMath.flows(convertedRows, months: 6)
+                let categoryFlows = FlowMath.categoryFlows(categoryRows, months: 6)
                 if !vestaListOnly, flows.filter({ $0.total > 0.01 }).count >= 2 {
                     Section {
                         MonthTrendCard(
                             title: "Income · 6 months",
                             flows: flows,
                             tint: Ledger.income,
-                            format: { store.format($0, compact: true) }
+                            format: { store.format($0, compact: true) },
+                            slices: categoryFlows.slices,
+                            order: categoryFlows.order,
+                            color: { store.incomeColorForLabel($0) }
                         )
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
@@ -230,15 +254,15 @@ struct IncomeView: View {
     private var summaryHeader: some View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("This Month").labelMono()
+                Text(scopeTitle).labelMono()
                 MoneyText(
-                    amount: store.monthTotal(store.allIncome, month: month),
+                    amount: scopedTotal,
                     currency: store.displayCurrency,
                     tint: Ledger.income
                 )
                 // Partial-vs-partial: this month so far against last month
                 // through the same day, so the number means something on the 5th.
-                if let pace = FlowMath.pace(convertedRows) {
+                if isCurrentMonth, let pace = FlowMath.pace(convertedRows) {
                     PaceBadge(
                         current: pace.current,
                         previousSameDay: pace.previousSameDay,

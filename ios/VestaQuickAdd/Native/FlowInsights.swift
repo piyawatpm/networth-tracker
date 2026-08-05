@@ -98,6 +98,82 @@ enum FlowMath {
 /// list itself — same family as VESTA_INITIAL_TAB and VESTA_PERIOD.
 let vestaListOnly = ProcessInfo.processInfo.environment["VESTA_LIST_ONLY"] != nil
 
+// MARK: - Category composition per month
+
+/// One category's slice of one month's bar.
+struct CategorySlice: Identifiable {
+    let monthKey: String
+    let monthLabel: String
+    let category: String
+    let total: Double
+    let isCurrent: Bool
+    /// Topmost segment in its month — it carries the month's total label, so
+    /// the number isn't repeated once per segment.
+    let isTop: Bool
+    var id: String { monthKey + "|" + category }
+}
+
+extension FlowMath {
+    /// Monthly totals split by category, ready to stack.
+    ///
+    /// Ranks categories over the WHOLE window and keeps the top `maxCategories`,
+    /// folding the tail into "Other" — a stack with fifteen segments is a
+    /// texture, not a chart, and inventing a hue per extra category is exactly
+    /// what a fixed categorical order exists to prevent. Because the order is
+    /// computed across the window rather than per month, a category keeps its
+    /// colour and stacking position as months change.
+    static func categoryFlows(
+        _ rows: [(date: String, category: String, value: Double)],
+        months: Int,
+        maxCategories: Int = 5
+    ) -> (slices: [CategorySlice], order: [String]) {
+        let keys = monthKeys(back: months)
+        let window = Set(keys)
+        var byMonthCategory: [String: [String: Double]] = [:]
+        var overall: [String: Double] = [:]
+
+        for row in rows {
+            let month = String(row.date.prefix(7))
+            guard window.contains(month) else { continue }
+            byMonthCategory[month, default: [:]][row.category, default: 0] += row.value
+            overall[row.category, default: 0] += row.value
+        }
+
+        let ranked = overall.filter { $0.value > 0.005 }
+            .sorted { $0.value > $1.value }
+            .map(\.key)
+        let kept = Array(ranked.prefix(maxCategories))
+        let keptSet = Set(kept)
+        let hasOther = ranked.count > kept.count
+        let order = kept + (hasOther ? [otherCategory] : [])
+
+        let current = SydneyTime.currentMonthKey()
+        var slices: [CategorySlice] = []
+        for key in keys {
+            var totals: [String: Double] = [:]
+            for (category, value) in byMonthCategory[key] ?? [:] {
+                let bucket = keptSet.contains(category) ? category : otherCategory
+                totals[bucket, default: 0] += value
+            }
+            // Topmost = last non-empty category in stacking order.
+            let present = order.filter { (totals[$0] ?? 0) > 0.005 }
+            for category in present {
+                slices.append(CategorySlice(
+                    monthKey: key,
+                    monthLabel: label(key),
+                    category: category,
+                    total: totals[category] ?? 0,
+                    isCurrent: key == current,
+                    isTop: category == present.last
+                ))
+            }
+        }
+        return (slices, order)
+    }
+
+    static let otherCategory = "Other"
+}
+
 // MARK: - Day grouping
 
 /// A day's worth of records, with its own subtotal.
@@ -351,6 +427,14 @@ struct MonthTrendCard: View {
     let flows: [MonthFlow]
     let tint: Color
     let format: (Double) -> String
+    /// Category composition for the same window. Empty = no toggle offered.
+    var slices: [CategorySlice] = []
+    var order: [String] = []
+    var color: (String) -> Color = { _ in .gray }
+
+    // Screenshot runs can open straight into the stacked view.
+    @State private var showCategories =
+        ProcessInfo.processInfo.environment["VESTA_TREND_CATEGORY"] != nil
 
     private var maxFlow: MonthFlow? {
         flows.filter { !$0.isCurrent }.max { $0.total < $1.total }
@@ -358,9 +442,87 @@ struct MonthTrendCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(title).labelMono()
+            HStack {
+                Text(title).labelMono()
+                Spacer()
+                if !slices.isEmpty {
+                    // Same bars, same totals — the toggle only decides whether
+                    // each bar is split into what made it up.
+                    Picker("", selection: $showCategories) {
+                        Text("Total").tag(false)
+                        Text("Category").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 150)
+                }
+            }
 
-            Chart(flows) { flow in
+            if showCategories {
+                categoryChart
+            } else {
+                totalChart
+            }
+        }
+        .padding(16)
+        .financeCard()
+    }
+
+    /// Stacked composition: bar height is still the month's total, and each
+    /// band is a category. Colours come from the same map the rest of the app
+    /// uses, so a category is the same hue everywhere.
+    private var categoryChart: some View {
+        Chart(slices) { slice in
+            BarMark(
+                x: .value("Month", slice.monthLabel),
+                y: .value("Total", slice.total),
+                width: .ratio(0.55)
+            )
+            .foregroundStyle(by: .value("Category", slice.category))
+            // The live month is real but unfinished — dimmed, same as the
+            // total view, rather than posing as a complete bar.
+            .opacity(slice.isCurrent ? 0.45 : 1)
+            .cornerRadius(2)
+            .annotation(position: .top, spacing: 3) {
+                if slice.isTop {
+                    monthTotalLabel(for: slice)
+                }
+            }
+        }
+        .chartForegroundStyleScale(
+            domain: order,
+            range: order.map { $0 == FlowMath.otherCategory ? Color.gray.opacity(0.55) : color($0) }
+        )
+        .chartLegend(position: .bottom, spacing: 8)
+        .chartXScale(domain: flows.map(\.label))
+        .chartYAxis(.hidden)
+        .chartXAxis {
+            AxisMarks { _ in
+                AxisValueLabel()
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .frame(height: 150)
+    }
+
+    @ViewBuilder
+    private func monthTotalLabel(for slice: CategorySlice) -> some View {
+        let total = slices.filter { $0.monthKey == slice.monthKey }
+            .reduce(0) { $0 + $1.total }
+        VStack(spacing: 0) {
+            Text(format(total))
+                .font(.system(size: 8, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.secondary)
+            if slice.isCurrent {
+                Text("so far")
+                    .font(.system(size: 7, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    private var totalChart: some View {
+        Chart(flows) { flow in
                 BarMark(
                     x: .value("Month", flow.label),
                     y: .value("Total", flow.total),
@@ -390,18 +552,15 @@ struct MonthTrendCard: View {
                     }
                 }
             }
-            .chartXScale(domain: flows.map(\.label))
-            .chartYAxis(.hidden)
-            .chartXAxis {
-                AxisMarks { _ in
-                    AxisValueLabel()
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundStyle(.tertiary)
-                }
+        .chartXScale(domain: flows.map(\.label))
+        .chartYAxis(.hidden)
+        .chartXAxis {
+            AxisMarks { _ in
+                AxisValueLabel()
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.tertiary)
             }
-            .frame(height: 110)
         }
-        .padding(16)
-        .financeCard()
+        .frame(height: 110)
     }
 }

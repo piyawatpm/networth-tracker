@@ -672,6 +672,30 @@ final class DataStore {
         return Ledger.hashedColor(type)
     }
 
+    // The stacked category charts key on the human LABEL (that's what the
+    // legend shows), so they need the reverse lookup to land on the same hue
+    // the donut and the ranked bars already use — one entity, one colour.
+
+    func incomeColorForLabel(_ label: String) -> Color {
+        guard let type = incomeTypeForLabel(label) else { return Ledger.hashedColor(label) }
+        return incomeColor(type)
+    }
+
+    func expenseColorForLabel(_ label: String) -> Color {
+        guard let type = expenseTypeForLabel(label) else { return Ledger.hashedColor(label) }
+        return expenseColor(type)
+    }
+
+    private func incomeTypeForLabel(_ label: String) -> String? {
+        Categories.incomeLabels.first { $0.label == label }?.id
+            ?? customIncomeCategories.first { $0.label == label }?.id
+    }
+
+    private func expenseTypeForLabel(_ label: String) -> String? {
+        Categories.expenseLabels.first { $0.label == label }?.id
+            ?? customExpenseCategories.first { $0.label == label }?.id
+    }
+
     // MARK: Derived — realized income (parity with the web income page)
 
     private func computeDerivedRealizedIncome() -> [IncomeEntry] {

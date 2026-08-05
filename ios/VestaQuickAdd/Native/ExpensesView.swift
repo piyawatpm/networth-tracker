@@ -11,8 +11,30 @@ struct ExpensesView: View {
 
     private var month: String { SydneyTime.currentMonthKey() }
 
+    /// Everything the summary/insight cards describe — the month chosen with
+    /// the chips, not always the calendar month. "All" means all of it.
     private var monthExpenses: [ExpenseEntry] {
-        store.expenses.filter { SydneyTime.monthKey($0.date) == month }
+        guard let scope else { return store.expenses }
+        return store.expenses.filter { SydneyTime.monthKey($0.date) == scope }
+    }
+
+    private var isCurrentMonth: Bool { scope == month }
+
+    /// Heading for the scoped total.
+    private var scopeTitle: String {
+        guard let scope else { return "All time" }
+        return isCurrentMonth ? "Spent this month" : "Spent in \(FlowMath.label(scope))"
+    }
+
+    private var scopedTotal: Double {
+        monthExpenses.reduce(0) { $0 + store.convert($1.amount, from: $1.currency) }
+    }
+
+    /// Category totals for the scoped window, for the stacked trend.
+    private var categoryRows: [(date: String, category: String, value: Double)] {
+        store.expenses.map {
+            ($0.date, store.expenseLabel($0.type), store.convert($0.amount, from: $0.currency))
+        }
     }
 
     private var byCategory: [(type: String, label: String, value: Double, color: Color)] {
@@ -119,7 +141,7 @@ struct ExpensesView: View {
                 : biggest.vendor
             out.append(Insight(
                 icon: "flame",
-                text: "Biggest this month · \(name)",
+                text: "Biggest · \(name)",
                 value: store.format(store.convert(biggest.amount, from: biggest.currency), compact: true),
                 tint: Ledger.expense
             ))
@@ -127,7 +149,7 @@ struct ExpensesView: View {
 
         // Volume, so the totals above have a denominator.
         if !monthExpenses.isEmpty {
-            let total = store.monthTotalExpenses(month: month)
+            let total = scopedTotal
             out.append(Insight(
                 icon: "number",
                 text: "\(monthExpenses.count) purchases · average",
@@ -161,13 +183,17 @@ struct ExpensesView: View {
                 }
 
                 let flows = FlowMath.flows(convertedRows, months: 6)
+                let categoryFlows = FlowMath.categoryFlows(categoryRows, months: 6)
                 if !vestaListOnly, flows.filter({ $0.total > 0.01 }).count >= 2 {
                     Section {
                         MonthTrendCard(
                             title: "Spend · 6 months",
                             flows: flows,
                             tint: Ledger.expense,
-                            format: { store.format($0, compact: true) }
+                            format: { store.format($0, compact: true) },
+                            slices: categoryFlows.slices,
+                            order: categoryFlows.order,
+                            color: { store.expenseColorForLabel($0) }
                         )
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
@@ -268,20 +294,22 @@ struct ExpensesView: View {
     }
 
     private var summaryHeader: some View {
-        let total = store.monthTotalExpenses(month: month)
+        let total = scopedTotal
         let daysGone = FlowMath.dayOfMonth()
         let daysInMonth = FlowMath.daysInCurrentMonth()
         let dailyAverage = total / Double(max(1, daysGone))
 
         return VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Spent This Month").labelMono()
+                Text(scopeTitle).labelMono()
                 MoneyText(
                     amount: total,
                     currency: store.displayCurrency,
                     tint: Ledger.expense
                 )
-                if let pace = FlowMath.pace(convertedRows) {
+                // Pace compares two partial months, so it only means
+                // anything while this month is still running.
+                if isCurrentMonth, let pace = FlowMath.pace(convertedRows) {
                     PaceBadge(
                         current: pace.current,
                         previousSameDay: pace.previousSameDay,
@@ -293,7 +321,7 @@ struct ExpensesView: View {
             // Burn rate, and where it lands if the month keeps this pace.
             // Projection waits for three days of data — day-one extrapolation
             // is numerology.
-            if total > 0 {
+            if total > 0, isCurrentMonth {
                 HStack(spacing: 8) {
                     StatChip(label: "Per day", value: store.format(dailyAverage, compact: true))
                     if daysGone >= 3, daysGone < daysInMonth {
