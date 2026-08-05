@@ -6,6 +6,10 @@ import UserNotifications
 /// breaks — a Shortcuts "Automation failed" banner says nothing useful.
 enum Notify {
     static func requestPermission() {
+        // Screenshot/UI runs set this so the system permission alert doesn't
+        // sit on top of the thing being captured.
+        guard ProcessInfo.processInfo.environment["VESTA_SKIP_PERMISSION_PROMPT"] == nil
+        else { return }
         UNUserNotificationCenter.current().requestAuthorization(
             options: [.alert, .sound, .badge]
         ) { _, _ in }

@@ -10,6 +10,14 @@ enum Ledger {
     static let expense = Color(hex: "#FB3D7B") // hot pink
     static let subtle = Color.white.opacity(0.55)
 
+    // Chart series identity — categorical slots 1-3 of the reference palette,
+    // validated all-pairs for CVD against this dark surface. Deliberately NOT
+    // volt/pink: those carry polarity (gain/loss) and reusing them for series
+    // identity both collides in meaning and failed CVD separation.
+    static let seriesStocks = Color(hex: "#3987e5") // blue
+    static let seriesCrypto = Color(hex: "#d95926") // orange
+    static let seriesDebt = Color(hex: "#199e70")   // aqua
+
     /// CHART_COLORS from lib/utils/constants.ts, same order — category colors
     /// must match the web app or the same donut tells two different stories.
     static let chartHex: [String] = [

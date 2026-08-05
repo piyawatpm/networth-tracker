@@ -50,13 +50,14 @@ struct DashboardView: View {
             guard !superOn, let delta = store.overlaySuperDelta[point.date] else { return point }
             return (point.date, max(0, point.valueUsd - delta))
         }
+        // Categorical slots 1-3, validated all-pairs for CVD on the dark
+        // surface (scripts/validate_palette.js). NOT the volt/pink pair —
+        // those are reserved for polarity (gain/loss) everywhere else, and
+        // the old pink debt line was ΔE 2.1 from crypto under protanopia.
         return [
-            ChartOverlay(name: "Stocks", color: Ledger.chartColor(0), points: stocks),
-            ChartOverlay(name: "Crypto", color: Ledger.chartColor(12), points: store.overlayCrypto),
-            ChartOverlay(
-                name: "Debt", color: Ledger.expense.opacity(0.9),
-                points: store.overlayDebt, startsHidden: true
-            ),
+            ChartOverlay(name: "Stocks", color: Ledger.seriesStocks, points: stocks),
+            ChartOverlay(name: "Crypto", color: Ledger.seriesCrypto, points: store.overlayCrypto),
+            ChartOverlay(name: "Debt", color: Ledger.seriesDebt, points: store.overlayDebt),
         ]
     }
 

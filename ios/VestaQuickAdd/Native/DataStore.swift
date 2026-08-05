@@ -175,31 +175,41 @@ final class DataStore {
         }
     }
 
-    /// Daily (last-of-day) component series for the dashboard overlays. Debt
-    /// is replayed from records + transactions at each day, the same
-    /// sign-classified math the Debts page uses.
+    /// Component series at the SAME INTRADAY resolution as the net-worth
+    /// series, so every line shares timestamps and buckets identically — a
+    /// daily-only overlay had nothing to draw on the 1D view, which is why
+    /// the legend used to vanish there. Debt only moves on logged
+    /// transactions, so its daily replay is forward-filled onto each row.
     private func rebuildOverlays() {
-        var lastPerDay: [String: SnapshotPoint] = [:]
-        for row in networthHistory { lastPerDay[String(row.date.prefix(10))] = row }
-        let days = lastPerDay.keys.sorted()
-
-        var portfolio: [(Date, Double)] = []
-        var crypto: [(Date, Double)] = []
-        var debt: [(Date, Double)] = []
-        var superDelta: [Date: Double] = [:]
-
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = SydneyTime.zone
         formatter.dateFormat = "yyyy-MM-dd"
 
-        for day in days {
-            guard let row = lastPerDay[day], let date = formatter.date(from: day) else { continue }
+        // Replay debt once per distinct day, not once per intraday row.
+        var debtByDay: [String: Double] = [:]
+        for row in networthHistory {
+            let day = String(row.date.prefix(10))
+            if debtByDay[day] == nil { debtByDay[day] = debtNetUsdAt(day: day) }
+        }
+
+        var portfolio: [(date: Date, valueUsd: Double)] = []
+        var crypto: [(date: Date, valueUsd: Double)] = []
+        var debt: [(date: Date, valueUsd: Double)] = []
+        var superDelta: [Date: Double] = [:]
+
+        for row in networthHistory {
+            var parsedDate: Date?
+            for candidate in Self.snapshotFormats {
+                if let d = candidate.date(from: row.date) { parsedDate = d; break }
+            }
+            guard let date = parsedDate else { continue }
             if let p = row.portfolio { portfolio.append((date, p)) }
             if let c = row.crypto { crypto.append((date, c)) }
             if let noSuper = row.valueNoSuper { superDelta[date] = row.value - noSuper }
-            debt.append((date, debtNetUsdAt(day: day)))
+            if let d = debtByDay[String(row.date.prefix(10))] { debt.append((date, d)) }
         }
+
         overlayPortfolio = portfolio
         overlayCrypto = crypto
         overlayDebt = debt
@@ -267,11 +277,13 @@ final class DataStore {
                 fxLoaded = true
             }
             livePrices = cache.livePrices
+            lastRefreshed = cache.savedAt
+            // decode FIRST: setHistory rebuilds the debt overlay, which needs
+            // `debts`/`debtTxs` to already be populated.
+            decode(cache.blobs)
             setHistory("networth", cache.networthHistory)
             setHistory("portfolio", cache.portfolioHistory)
             setHistory("crypto", cache.cryptoHistory)
-            lastRefreshed = cache.savedAt
-            decode(cache.blobs)
         }
 
         // 2. Session: keychain restore, else silent owner sign-in. The login
