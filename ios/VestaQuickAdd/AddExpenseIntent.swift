@@ -62,18 +62,20 @@ struct AddExpenseIntent: LiveActivityIntent {
     )
     static let openAppWhenRun = false
 
-    // IntentCurrencyAmount, NOT Double: the Wallet Transaction automation
-    // passes a transaction object, and Shortcuts coerces it into a currency
-    // amount losslessly — a plain Number slot coerced it to 0 and every
-    // auto-logged payment failed with "must be more than zero". This also
-    // carries the card's real currency instead of assuming the default.
+    // STRING — the third life of this parameter, each for a real corpse:
+    //   Double: Shortcuts coerced the Wallet amount to 0 → "must be more
+    //     than zero" on every tap.
+    //   IntentCurrencyAmount: the 26.6 beta dies CONVERTING the Wallet
+    //     amount to it — before perform() runs, killing the helper process.
+    //   String accepts whatever arrives ("AUD 6.12", "A$17.10", "17,10");
+    //     DeepLink's lenient parser reads it, and the currency rides along.
     //
-    // OPTIONAL on purpose. Non-optional, AppIntents treats a default-
-    // constructed zero as "already resolved" and never prompts, so pressing
-    // the Action Button failed instantly instead of asking for an amount.
-    // Optional makes "missing" representable; perform() then asks explicitly.
+    // OPTIONAL on purpose. Non-optional, AppIntents treats a default value
+    // as "already resolved" and never prompts, so the Action Button failed
+    // instead of asking. Optional makes "missing" representable; perform()
+    // then asks explicitly.
     @Parameter(title: "Amount", requestValueDialog: "How much?")
-    var amount: IntentCurrencyAmount?
+    var amount: String?
 
     @Parameter(title: "Category", optionsProvider: CategoryOptionsProvider())
     var category: String?
@@ -92,7 +94,7 @@ struct AddExpenseIntent: LiveActivityIntent {
         // automation supplies it and runs in the background, where presenting
         // a dialog can kill the helper process; the Action Button prompts,
         // which is inherently foreground and safe to answer with one.
-        let ranInBackground = (amount.map { ($0.amount as NSDecimalNumber).doubleValue } ?? 0) > 0
+        let ranInBackground = amount.flatMap { DeepLink.firstNumber(in: $0) } != nil
 
         // The very first statement, before any work that could stall or die.
         // Its absence after a card tap is the diagnosis: Shortcuts never got
@@ -105,27 +107,23 @@ struct AddExpenseIntent: LiveActivityIntent {
         // session (or the offline queue). The old token setup is legacy.
         // Supplied (Wallet automation) → use it. Missing or zero (Action
         // Button, Siri) → ask, rather than failing on a phantom zero.
-        var supplied = amount
-        if (supplied.map { ($0.amount as NSDecimalNumber).doubleValue } ?? 0) <= 0 {
-            IntentLog.write("no amount supplied — prompting")
-            supplied = try await $amount.requestValue("How much?")
+        var suppliedText = amount ?? ""
+        IntentLog.write("amount-raw='\(suppliedText)'")
+        if DeepLink.firstNumber(in: suppliedText) == nil {
+            IntentLog.write("no parsable amount — prompting")
+            suppliedText = try await $amount.requestValue("How much?") ?? ""
         }
-        guard let resolved = supplied else {
-            IntentLog.write("aborted: no amount given")
-            throw QuickExpenseError.rejected("No amount given.")
-        }
-        let value = (resolved.amount as NSDecimalNumber).doubleValue
-        guard value > 0 else {
-            IntentLog.write("aborted: amount resolved to zero")
+        guard let value = DeepLink.firstNumber(in: suppliedText) else {
+            IntentLog.write("aborted: no amount in '\(suppliedText)'")
             Notify.post(
                 title: "Quick-add failed",
-                body: "Received a zero amount — open the automation and re-link the Amount pill to the transaction.",
+                body: "Couldn't read an amount from “\(suppliedText)” — re-link the Amount pill in the automation.",
                 sound: .default
             )
-            throw QuickExpenseError.rejected("Amount must be more than zero.")
+            throw QuickExpenseError.rejected("No amount given.")
         }
-        let code = resolved.currencyCode.isEmpty
-            ? Settings.defaultCurrency : resolved.currencyCode
+        let code = DeepLink.currencyCode(in: suppliedText, explicit: nil)
+            ?? Settings.defaultCurrency
 
         let expense = PendingExpense(
             amount: value,

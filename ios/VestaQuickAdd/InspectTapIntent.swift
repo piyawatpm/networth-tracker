@@ -17,8 +17,10 @@ struct InspectTapIntent: AppIntent {
     /// Foreground on purpose — the whole point is to LOOK at the values.
     static let openAppWhenRun = true
 
+    // String for the same reason as LogTapIntent: the beta dies converting
+    // Wallet amounts to IntentCurrencyAmount before perform() ever runs.
     @Parameter(title: "Amount")
-    var amount: IntentCurrencyAmount?
+    var amount: String?
 
     @Parameter(title: "Merchant")
     var merchant: String?
@@ -42,9 +44,11 @@ struct InspectTapIntent: AppIntent {
 
     func perform() async throws -> some IntentResult {
         var lines: [String] = []
-        if let amount {
-            let value = (amount.amount as NSDecimalNumber).doubleValue
-            lines.append("Amount: \(value) \(amount.currencyCode.isEmpty ? "(no currency)" : amount.currencyCode)")
+        if let amount, !amount.isEmpty {
+            let parsed = DeepLink.firstNumber(in: amount)
+            let code = DeepLink.currencyCode(in: amount, explicit: nil)
+            lines.append("Amount raw: '\(amount)'")
+            lines.append("Parsed: \(parsed.map { String($0) } ?? "could not parse") \(code ?? "")")
         } else {
             lines.append("Amount: — nothing arrived")
         }

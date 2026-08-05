@@ -31,8 +31,14 @@ struct LogTapIntent: AppIntent {
     // Every parameter optional, none with a requestValueDialog: a probe that
     // stops to ask a question is a probe that fails in the background, which
     // is precisely the failure being investigated.
+    //
+    // STRING, not IntentCurrencyAmount: parameter conversion runs BEFORE
+    // perform(), and the 26.6 beta appears to choke converting the Wallet
+    // transaction's amount ("AUD 6.12") into a currency amount — killing the
+    // helper process before a single line here could log. Text accepts
+    // anything; DeepLink's lenient parser does the reading.
     @Parameter(title: "Amount")
-    var amount: IntentCurrencyAmount?
+    var amount: String?
 
     @Parameter(title: "Merchant")
     var merchant: String?
@@ -49,10 +55,12 @@ struct LogTapIntent: AppIntent {
     func perform() async throws -> some IntentResult {
         var parts: [String] = []
 
-        if let amount {
-            let value = (amount.amount as NSDecimalNumber).doubleValue
-            let code = amount.currencyCode.isEmpty ? "?" : amount.currencyCode
-            parts.append("amount=\(value) \(code)")
+        if let amount, !amount.isEmpty {
+            // Raw AND parsed — the raw text is the evidence, the parse is
+            // the verdict on whether AddExpense would have understood it.
+            let value = DeepLink.firstNumber(in: amount)
+            let code = DeepLink.currencyCode(in: amount, explicit: nil)
+            parts.append("amount-raw='\(amount)' parsed=\(value.map { String($0) } ?? "✗") \(code ?? "")")
         } else {
             // Worth distinguishing from a zero: "no pill linked" and "pill
             // linked but Shortcuts sent nothing" are different fixes.
