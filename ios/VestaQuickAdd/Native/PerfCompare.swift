@@ -18,9 +18,8 @@ enum DcaCompare {
 
     struct Series {
         let dates: [Date]
-        let mine: [Double]     // USD P&L per day
-        let index: [Double]    // USD P&L per day, same flows into the index
-        let invested: [Double] // capital deployed by that day — the % base
+        let minePct: [Double]  // cumulative % growth of a dollar in YOUR basket
+        let indexPct: [Double] // cumulative % growth of a dollar in the index
     }
 
     /// Latest value at or before `day` (forward-fill over weekends/holidays).
@@ -48,23 +47,49 @@ enum DcaCompare {
             .sorted { $0.date < $1.date }
     }
 
-    /// Daily closes of the portfolio's own (ex-super) history: last snapshot
-    /// reading per day. Ex-super on purpose — the Hostplus contributions are
-    /// not in the tx log, so with super in, deposits would read as profit.
+    /// Daily closes of a snapshot series: last reading per day, USD.
     static func dailyValues(_ parsed: [(date: Date, valueUsd: Double)]) -> [(date: String, value: Double)] {
         var byDay: [String: Double] = [:]
         for row in parsed { byDay[SydneyTime.dayString(row.date)] = row.valueUsd } // ascending → last wins
         return byDay.map { (date: $0.key, value: $0.value) }.sorted { $0.date < $1.date }
     }
 
-    /// P&L(t) for every day in [start, today], yours vs the index shadow.
+    /// Two pots as one: union of days, each side forward-filled. The combined
+    /// series only starts once BOTH pots have a reading — summing one pot
+    /// with the other's zero would draw a fake cliff at the join.
+    static func combinedDaily(
+        _ a: [(date: String, value: Double)], _ b: [(date: String, value: Double)]
+    ) -> [(date: String, value: Double)] {
+        let days = Set(a.map(\.date)).union(b.map(\.date)).sorted()
+        return days.compactMap { day in
+            guard let va = asOf(a, day), let vb = asOf(b, day) else { return nil }
+            return (day, va + vb)
+        }
+    }
+
+    /// Flow schedules merged by day.
+    static func mergedFlows(
+        _ a: [(date: String, value: Double)], _ b: [(date: String, value: Double)]
+    ) -> [(date: String, value: Double)] {
+        var byDay: [String: Double] = [:]
+        for flow in a + b { byDay[flow.date, default: 0] += flow.value }
+        return byDay.filter { abs($0.value) > 0.005 }
+            .map { (date: $0.key, value: $0.value) }
+            .sorted { $0.date < $1.date }
+    }
+
+    /// Growth of the same money: your basket per-dollar vs the index per-dollar.
     ///
-    /// Yours:  value(t) − (opening + netFlows(start, t])
-    /// Index:  units(t)·price(t) − (opening + netFlows(start, t]), where the
-    /// opening balance buys index units at the start price (it was already
-    /// deployed on day one) and each later flow buys/sells at that day's
-    /// close. A sell larger than the position clamps at zero — going short is
-    /// not a scenario the comparison can represent.
+    /// "If all my money sat in my stocks vs all in SPY, what would happen?"
+    /// is a per-unit question, so deposits must not move the answer — your
+    /// side chains daily returns with the day's net flow removed
+    /// (r_t = (V_t − F_t) / V_{t−1}, i.e. time-weighted), and the index side
+    /// is simply its price path rebased to the window start; per dollar, any
+    /// flow schedule into an index grows at its price return.
+    ///
+    /// A pleasant side effect: the one-day snapshot glitch that poisoned the
+    /// P&L view cancels here — a fake ×1.9 day followed by its ÷1.9 reversal
+    /// chains back to exactly where it started.
     static func build(
         values: [(date: String, value: Double)],
         flows: [(date: String, value: Double)],
@@ -72,43 +97,99 @@ enum DcaCompare {
         start: String
     ) -> Series? {
         let priceRows = prices.map { (date: $0.date, value: $0.close) }
-        guard let opening = asOf(values, start),
-              let startPrice = asOf(priceRows, start), startPrice > 0
+        guard let startPrice = asOf(priceRows, start), startPrice > 0,
+              var previousValue = asOf(values, start), previousValue > 1
         else { return nil }
 
-        var units = opening / startPrice
-        var invested = opening
-        var flowIndex = flows.firstIndex { $0.date > start } ?? flows.count
+        var flowByDay: [String: Double] = [:]
+        for flow in flows where flow.date > start { flowByDay[flow.date] = flow.value }
 
         var dates: [Date] = []
-        var mine: [Double] = []
-        var index: [Double] = []
-        var deployed: [Double] = []
+        var minePct: [Double] = []
+        var indexPct: [Double] = []
+        var growth = 1.0
 
         guard var cursor = SnapshotDate.parse(start) else { return nil }
         let today = SydneyTime.today()
         while true {
             let day = SydneyTime.dayString(cursor)
             if day > today { break }
-            // Apply every flow dated ≤ this day.
-            while flowIndex < flows.count, flows[flowIndex].date <= day {
-                let flow = flows[flowIndex]
-                invested += flow.value
-                if let px = asOf(priceRows, flow.date), px > 0 {
-                    units = max(0, units + flow.value / px)
+            if let value = asOf(values, day), let price = asOf(priceRows, day) {
+                if day > start {
+                    let flow = flowByDay[day] ?? 0
+                    // Day's return with the deposit/withdrawal taken out.
+                    if previousValue > 1 {
+                        let r = (value - flow) / previousValue
+                        // A flow mis-dated against its snapshot can fabricate
+                        // an extreme ratio; a real day never halves or
+                        // doubles this pot. Skip the day rather than let one
+                        // artifact bend the whole curve.
+                        if r > 0.5, r < 2.0 { growth *= r }
+                    }
+                    previousValue = value
                 }
-                flowIndex += 1
-            }
-            if let mineValue = asOf(values, day), let px = asOf(priceRows, day) {
                 dates.append(cursor)
-                mine.append(mineValue - invested)
-                index.append(units * px - invested)
-                deployed.append(invested)
+                minePct.append((growth - 1) * 100)
+                indexPct.append((price / startPrice - 1) * 100)
             }
             cursor = cursor.addingTimeInterval(86400)
         }
         guard dates.count >= 2 else { return nil }
-        return Series(dates: dates, mine: mine, index: index, invested: deployed)
+        return Series(dates: dates, minePct: minePct, indexPct: indexPct)
+    }
+}
+
+// MARK: Crypto scope (port of crypto-performance.ts)
+//
+// The crypto investment pot is the NON-cash tokens: stablecoins are the cash
+// layer, so buys of investment tokens are deposits from cash, sells are
+// withdrawals to cash, and transfers (bot profits / yield) are zero-flow —
+// their value surfaces in the pot's growth, i.e. as return.
+extension DcaCompare {
+    /// Net non-cash buys − sells per day, USD.
+    static func cryptoFlowsByDay(
+        _ txs: [CryptoTransaction], isCash: (String) -> Bool
+    ) -> [(date: String, value: Double)] {
+        var byDay: [String: Double] = [:]
+        for tx in txs {
+            guard tx.type == "buy" || tx.type == "sell", !isCash(tx.token),
+                  let usd = tx.totalValueUsd, usd.isFinite else { continue }
+            byDay[String(tx.date.prefix(10)), default: 0] += tx.type == "buy" ? usd : -usd
+        }
+        return byDay.filter { abs($0.value) > 0.005 }
+            .map { (date: $0.key, value: $0.value) }
+            .sorted { $0.date < $1.date }
+    }
+
+    /// Snapshot value minus the forward-filled stable balance ($1/unit,
+    /// floored at 0) — the pot the flows above deposit into.
+    static func cryptoPotValues(
+        _ snapshots: [(date: String, value: Double)],
+        txs: [CryptoTransaction], isCash: (String) -> Bool
+    ) -> [(date: String, value: Double)] {
+        var deltaByDay: [String: Double] = [:]
+        for tx in txs where isCash(tx.token) {
+            let sign: Double = (tx.type == "buy" || tx.type == "transferIn") ? 1 : -1
+            deltaByDay[String(tx.date.prefix(10)), default: 0] += sign * tx.amount
+        }
+        var balance = 0.0
+        let stableDays: [(date: String, balance: Double)] = deltaByDay.keys.sorted().map { day in
+            balance = max(0, balance + (deltaByDay[day] ?? 0))
+            return (day, balance)
+        }
+
+        var si = -1
+        var level = 0.0
+        var out: [(date: String, value: Double)] = []
+        for snap in snapshots {
+            while si + 1 < stableDays.count, stableDays[si + 1].date <= snap.date {
+                si += 1
+                level = stableDays[si].balance
+            }
+            let v = snap.value - level
+            if v > 0 { out.append((snap.date, v)) }
+        }
+        return out
     }
 }
 
@@ -138,51 +219,67 @@ enum BenchmarkAPI {
     }
 }
 
-/// The comparison chart: your stock P&L vs the same flows into SPY.
+/// Growth of the same money: a dollar in this pot vs a dollar in the
+/// benchmark, both rebased to 0% at the window start.
+struct Benchmark: Identifiable, Hashable {
+    let symbol: String  // /api/benchmark symbol
+    let label: String   // legend name
+    let color: Color
+    var id: String { symbol }
+
+    static let sp500 = Benchmark(symbol: "SPY", label: "S&P 500", color: Ledger.seriesStocks)
+    static let btc = Benchmark(symbol: "BTC", label: "BTC", color: Ledger.seriesCrypto)
+}
+
 struct PerfCompareCard: View {
     @Environment(DataStore.self) private var store
     let start: String
+    /// One = fixed comparison; several = a picker chooses, first is default.
+    let benchmarks: [Benchmark]
+    let values: [(date: String, value: Double)]
+    let flows: [(date: String, value: Double)]
 
+    @State private var selected: Benchmark
     @State private var prices: [DcaCompare.PricePoint]?
     @State private var failed = false
 
-    /// Flows scoped to what the value series actually tracks. Two exclusions,
-    /// both mirroring the web page:
-    ///   * super holdings — their contributions aren't in the ex-super value
-    ///     series, so a super buy reads as pure loss (the 25 Jun A$4,300
-    ///     Hostplus buy cratered the chart by exactly its own size);
-    ///   * orphans of deleted holdings — the log carries ghost buys whose
-    ///     holdings no longer exist (three duplicate A$4,300 Hostplus entries
-    ///     under abandoned names), inflating "invested" forever.
-    private var scopedFlows: [(date: String, value: Double)] {
-        let superIds = Set(store.holdings.filter { $0.accountType == "super" }.map(\.id))
-        let knownIds = Set(store.holdings.map(\.id))
-        return DcaCompare.flowsByDay(
-            store.portfolioTxs.filter {
-                knownIds.contains($0.holdingId) && !superIds.contains($0.holdingId)
-            }
-        )
+    init(
+        start: String, benchmarks: [Benchmark],
+        values: [(date: String, value: Double)], flows: [(date: String, value: Double)]
+    ) {
+        self.start = start
+        self.benchmarks = benchmarks
+        self.values = values
+        self.flows = flows
+        _selected = State(initialValue: benchmarks[0])
     }
 
     private var series: DcaCompare.Series? {
         guard let prices else { return nil }
-        return DcaCompare.build(
-            values: DcaCompare.dailyValues(store.portfolioParsed),
-            flows: scopedFlows,
-            prices: prices,
-            start: start
-        )
+        return DcaCompare.build(values: values, flows: flows, prices: prices, start: start)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("You vs S&P 500 · since \(FlowMath.dayLabel(start))").labelMono()
+            HStack {
+                Text("You vs \(selected.label) · since \(FlowMath.dayLabel(start))").labelMono()
+                Spacer()
+                if benchmarks.count > 1 {
+                    Picker("", selection: $selected) {
+                        ForEach(benchmarks) { bench in
+                            Text(bench.label).tag(bench)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 140)
+                }
+            }
 
             if let series {
                 content(series)
             } else if failed {
                 VStack(spacing: 8) {
-                    Text("Couldn't load S&P 500 prices.")
+                    Text("Couldn't load \(selected.label) prices.")
                         .font(.footnote).foregroundStyle(.secondary)
                     Button("Retry") { Task { await load() } }
                         .font(.footnote.weight(.semibold))
@@ -190,7 +287,7 @@ struct PerfCompareCard: View {
                 }
                 .frame(maxWidth: .infinity, minHeight: 120)
             } else if prices != nil {
-                Text("Tracked history starts after \(FlowMath.dayLabel(start)) — no opening value to compare from.")
+                Text("Tracked history starts after \(FlowMath.dayLabel(start)) — nothing to compare from.")
                     .font(.footnote).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 80)
             } else {
@@ -199,45 +296,34 @@ struct PerfCompareCard: View {
         }
         .padding(16)
         .financeCard()
-        .task { await load() }
-    }
-
-    /// P&L as a percent of the capital deployed by that day.
-    private func pct(_ pnl: Double, _ invested: Double) -> Double {
-        abs(invested) > 1e-9 ? pnl / abs(invested) * 100 : 0
+        .task(id: selected.symbol) { await load() }
     }
 
     @ViewBuilder
     private func content(_ series: DcaCompare.Series) -> some View {
-        let lastInvested = series.invested.last ?? 0
-        let minePct = pct(series.mine.last ?? 0, lastInvested)
-        let indexPct = pct(series.index.last ?? 0, lastInvested)
+        let minePct = series.minePct.last ?? 0
+        let indexPct = series.indexPct.last ?? 0
         let lead = minePct - indexPct
         let ahead = lead >= 0
 
-        // Y-domain from the BULK of the data, not its extremes: a one-day
-        // snapshot glitch (value recorded mid-restructure) can spike to +90%
-        // and flatten the real ±10% story into a line at zero. The 2nd–98th
-        // percentile keeps the axis honest for the other ~95 days; the spike
-        // still shows, clipped at the plot edge instead of owning the scale.
-        let allPct = (0..<series.dates.count).flatMap {
-            [pct(series.mine[$0], series.invested[$0]), pct(series.index[$0], series.invested[$0])]
-        }.sorted()
+        // Verdict first, in words. Points, not %: the difference of two
+        // percentages is percentage points.
+        HStack(spacing: 6) {
+            Image(systemName: ahead ? "arrow.up.right" : "arrow.down.right")
+                .font(.caption2.bold())
+            Text("\(ahead ? "ahead of" : "behind") \(selected.label) by \(String(format: "%.1f", abs(lead))) pts")
+                .font(.system(.caption, design: .monospaced, weight: .semibold))
+        }
+        .foregroundStyle(ahead ? Ledger.income : Ledger.expense)
+
+        // Y-domain from the bulk of the data (2nd–98th pct): one artifact day
+        // must not flatten the story the other ~95 days are telling.
+        let allPct = (series.minePct + series.indexPct).sorted()
         let lo = allPct[Int(Double(allPct.count - 1) * 0.02)]
         let hi = allPct[Int(Double(allPct.count - 1) * 0.98)]
         let span = max(hi - lo, 1)
         let yLow = min(lo - span * 0.25, -1)
         let yHigh = max(hi + span * 0.25, 1)
-
-        // The verdict, in words, before any chart-reading is needed. Points,
-        // not %: the difference of two percentages is percentage points.
-        HStack(spacing: 6) {
-            Image(systemName: ahead ? "arrow.up.right" : "arrow.down.right")
-                .font(.caption2.bold())
-            Text("\(ahead ? "ahead of" : "behind") the index by \(String(format: "%.1f", abs(lead))) pts")
-                .font(.system(.caption, design: .monospaced, weight: .semibold))
-        }
-        .foregroundStyle(ahead ? Ledger.income : Ledger.expense)
 
         Chart {
             RuleMark(y: .value("Flat", 0))
@@ -247,7 +333,7 @@ struct PerfCompareCard: View {
             ForEach(Array(series.dates.enumerated()), id: \.offset) { i, date in
                 LineMark(
                     x: .value("Date", date),
-                    y: .value("P&L %", pct(series.mine[i], series.invested[i])),
+                    y: .value("Growth", series.minePct[i]),
                     series: .value("s", "mine")
                 )
                 .lineStyle(StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round))
@@ -255,13 +341,16 @@ struct PerfCompareCard: View {
 
                 LineMark(
                     x: .value("Date", date),
-                    y: .value("P&L %", pct(series.index[i], series.invested[i])),
-                    series: .value("s", "spy")
+                    y: .value("Growth", series.indexPct[i]),
+                    series: .value("s", "bench")
                 )
                 .lineStyle(StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round))
-                .foregroundStyle(Ledger.seriesStocks)
+                .foregroundStyle(selected.color)
             }
         }
+        .chartYScale(domain: yLow...yHigh)
+        // Charts does NOT clip marks to the plot area by default.
+        .chartPlotStyle { $0.clipped() }
         .chartYAxis {
             AxisMarks(position: .trailing, values: .automatic(desiredCount: 3)) { value in
                 AxisGridLine().foregroundStyle(.white.opacity(0.05))
@@ -273,13 +362,8 @@ struct PerfCompareCard: View {
                 }
             }
         }
-        .chartYScale(domain: yLow...yHigh)
-        // Charts does NOT clip marks to the plot — without this the glitch
-        // day draws a line up across the whole page.
-        .chartPlotStyle { $0.clipped() }
-        // Hand-placed ticks: .automatic puts one on the domain's last instant,
-        // where the label renders clipped to an ellipsis (same fix as the
-        // dashboard chart). fixedSize so Charts can't truncate the text.
+        // Hand-placed ticks: .automatic labels the domain edge, where the
+        // text clips to an ellipsis. fixedSize so Charts can't truncate.
         .chartXAxis {
             let ticks: [Date] = {
                 guard let first = series.dates.first, let last = series.dates.last else { return [] }
@@ -300,17 +384,17 @@ struct PerfCompareCard: View {
         .frame(height: 170)
 
         HStack(spacing: 8) {
-            chip("You", minePct, store.convert(series.mine.last ?? 0, from: "USD"), Ledger.income)
-            chip("S&P 500 · same flows", indexPct, store.convert(series.index.last ?? 0, from: "USD"), Ledger.seriesStocks)
+            chip("You", minePct, Ledger.income)
+            chip(selected.label, indexPct, selected.color)
             Spacer(minLength: 0)
         }
 
-        Text("P&L only — deposits subtracted from both sides · ex-super (flows too) · deleted-holding flows excluded · dividends in SPY")
+        Text("growth of the same dollar · deposits neutralized (time-weighted) · dividends in S&P 500")
             .font(.system(size: 8, design: .monospaced))
             .foregroundStyle(.tertiary)
     }
 
-    private func chip(_ name: String, _ pctValue: Double, _ money: Double, _ color: Color) -> some View {
+    private func chip(_ name: String, _ pctValue: Double, _ color: Color) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 5) {
                 Circle().fill(color).frame(width: 7, height: 7)
@@ -319,11 +403,8 @@ struct PerfCompareCard: View {
                     .lineLimit(1)
             }
             Text("\(pctValue >= 0 ? "+" : "")\(String(format: "%.1f", pctValue))%")
-                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .font(.system(size: 13, weight: .bold, design: .monospaced))
                 .foregroundStyle(pctValue >= 0 ? Ledger.income : Ledger.expense)
-            Text("\(money >= 0 ? "+" : "")\(store.format(money, compact: true))")
-                .font(.system(size: 9, design: .monospaced))
-                .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 9)
         .padding(.vertical, 6)
@@ -332,8 +413,9 @@ struct PerfCompareCard: View {
 
     private func load() async {
         failed = false
+        prices = nil
         do {
-            prices = try await BenchmarkAPI.prices(symbol: "SPY", from: start)
+            prices = try await BenchmarkAPI.prices(symbol: selected.symbol, from: start)
         } catch {
             failed = true
         }

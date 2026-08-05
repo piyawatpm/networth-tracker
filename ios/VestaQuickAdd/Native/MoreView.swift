@@ -621,21 +621,75 @@ struct DebtTxForm: View {
 struct PerformanceLiteView: View {
     @Environment(DataStore.self) private var store
     @State private var series: [SnapshotPoint] = []
-    @State private var kind = "portfolio"
+    @State private var kind = "networth"
+
+    private var stockValues: [(date: String, value: Double)] {
+        DcaCompare.dailyValues(store.portfolioParsed)
+    }
+
+    private var cryptoPot: [(date: String, value: Double)] {
+        DcaCompare.cryptoPotValues(
+            DcaCompare.dailyValues(store.cryptoParsed),
+            txs: store.cryptoTxs,
+            isCash: { CryptoMath.isCashLike($0, tags: store.stablecoinTags) }
+        )
+    }
+
+    private var cryptoFlows: [(date: String, value: Double)] {
+        DcaCompare.cryptoFlowsByDay(
+            store.cryptoTxs,
+            isCash: { CryptoMath.isCashLike($0, tags: store.stablecoinTags) }
+        )
+    }
+
+    /// Stock flows scoped to what the ex-super value series tracks: super
+    /// holdings' contributions and ghost flows of deleted holdings excluded
+    /// (three duplicate A$4,300 Hostplus entries live in the log).
+    private var stockCompareFlows: [(date: String, value: Double)] {
+        let superIds = Set(store.holdings.filter { $0.accountType == "super" }.map(\.id))
+        let knownIds = Set(store.holdings.map(\.id))
+        return DcaCompare.flowsByDay(
+            store.portfolioTxs.filter {
+                knownIds.contains($0.holdingId) && !superIds.contains($0.holdingId)
+            }
+        )
+    }
 
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
                 Picker("Series", selection: $kind) {
+                    Text("Net Worth").tag("networth")
                     Text("Stocks").tag("portfolio")
                     Text("Crypto").tag("crypto")
-                    Text("Net Worth").tag("networth")
                 }
                 .pickerStyle(.segmented)
 
+                // Growth of the same dollar vs a benchmark — see PerfCompare.
+                // Net Worth = both investment pots as one, benchmark toggleable.
+                if kind == "networth" {
+                    PerfCompareCard(
+                        start: "2026-05-01",
+                        benchmarks: [.sp500, .btc],
+                        values: DcaCompare.combinedDaily(stockValues, cryptoPot),
+                        flows: DcaCompare.mergedFlows(stockCompareFlows, cryptoFlows)
+                    )
+                }
                 if kind == "portfolio" {
-                    // Same money, same days, into SPY instead — see PerfCompare.
-                    PerfCompareCard(start: "2026-05-01")
+                    PerfCompareCard(
+                        start: "2026-05-01",
+                        benchmarks: [.sp500],
+                        values: stockValues,
+                        flows: stockCompareFlows
+                    )
+                }
+                if kind == "crypto" {
+                    PerfCompareCard(
+                        start: "2026-05-01",
+                        benchmarks: [.btc],
+                        values: cryptoPot,
+                        flows: cryptoFlows
+                    )
                 }
 
                 VStack(alignment: .leading, spacing: 10) {
