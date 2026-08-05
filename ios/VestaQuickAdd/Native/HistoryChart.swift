@@ -51,6 +51,9 @@ struct ChartOverlay: Identifiable {
     let color: Color
     /// USD, daily resolution, ascending.
     let points: [(date: Date, valueUsd: Double)]
+    /// Off until its legend chip is tapped — for series far outside the hero
+    /// line's range (debt sits below zero and would crush the y-scale).
+    var startsHidden: Bool = false
     var id: String { name }
 }
 
@@ -79,6 +82,7 @@ struct HistoryChartCard: View {
     @State private var scrubDate: Date?
     @State private var points: [Point] = []
     @State private var hiddenOverlays: Set<String> = []
+    @State private var seededOverlayDefaults = false
 
     struct Point: Identifiable {
         let date: Date
@@ -191,7 +195,13 @@ struct HistoryChartCard: View {
         .padding(18)
         .financeCard()
         .sensoryFeedback(.selection, trigger: scrubbedPoint?.date)
-        .task { rebuildPoints() }
+        .task {
+            if !seededOverlayDefaults {
+                seededOverlayDefaults = true
+                hiddenOverlays = Set(overlays.filter(\.startsHidden).map(\.name))
+            }
+            rebuildPoints()
+        }
         .onChange(of: period) { rebuildPoints() }
         .onChange(of: store.lastRefreshed) { rebuildPoints() }
         .onChange(of: store.displayCurrency) { rebuildPoints() }
@@ -323,13 +333,15 @@ struct HistoryChartCard: View {
                     }
                     .filter { !$0.1.isEmpty }
             let overlayValues = visibleOverlays.flatMap { $0.1.map(\.value) }
-            // Domain covers the hero series AND any visible overlays — a debt
-            // line below zero must not get clipped out of the plot.
+            // Scale logic, deliberate: the dot-matrix fill stays banded to the
+            // HERO series (yBase from mainLow), while the plot DOMAIN widens
+            // to fit whatever overlays are visible — so showing the debt line
+            // extends the axis below zero without smearing dots down to it.
             let mainLow = values.min() ?? 0
             let mainHigh = values.max() ?? 0
-            let low = min(mainLow, overlayValues.min() ?? mainLow)
+            let yBase = mainLow - (mainHigh - mainLow) * 0.06
+            let domainLow = min(yBase, overlayValues.min() ?? yBase)
             let high = max(mainHigh, overlayValues.max() ?? mainHigh)
-            let yBase = low - (high - low) * 0.06
             let rising = (values.last ?? 0) >= (values.first ?? 0)
             let tint = rising ? Ledger.income : Ledger.expense
 
@@ -420,7 +432,7 @@ struct HistoryChartCard: View {
             // OKX keeps the plot clean: no y labels, no gridlines — the big
             // rolling number IS the y-axis.
             .chartYAxis(.hidden)
-            .chartYScale(domain: yBase...(high + (high - low) * 0.14))
+            .chartYScale(domain: domainLow...(high + (high - domainLow) * 0.06))
             .frame(height: 200)
             .animation(.spring(duration: 0.5), value: period)
             .overlay(alignment: .top) {

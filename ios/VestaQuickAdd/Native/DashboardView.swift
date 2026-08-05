@@ -53,7 +53,10 @@ struct DashboardView: View {
         return [
             ChartOverlay(name: "Stocks", color: Ledger.chartColor(0), points: stocks),
             ChartOverlay(name: "Crypto", color: Ledger.chartColor(12), points: store.overlayCrypto),
-            ChartOverlay(name: "Debt", color: Ledger.expense.opacity(0.9), points: store.overlayDebt),
+            ChartOverlay(
+                name: "Debt", color: Ledger.expense.opacity(0.9),
+                points: store.overlayDebt, startsHidden: true
+            ),
         ]
     }
 
