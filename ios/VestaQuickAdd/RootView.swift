@@ -141,6 +141,43 @@ struct MainTabView: View {
             Settings.defaults.removeObject(forKey: "pendingTapInspection")
             tapInspection = report
         }
+        // vesta:// deep links — the beta-proof automation path. Both kinds
+        // surface the same alert; /add also records the expense for real.
+        .onOpenURL { url in
+            guard let kind = DeepLink.parse(url) else { return }
+            switch kind {
+            case .inspect(let data):
+                let report = """
+                Amount: \(data.amount.map { String($0) } ?? "— nothing arrived") \(data.currency ?? "")
+                Merchant: \(data.merchant.isEmpty ? "— nothing arrived" : data.merchant)
+                URL: \(data.raw)
+                """
+                BreadcrumbLog.tap.write("URL INSPECT · " + report.replacingOccurrences(of: "\n", with: " · "))
+                tapInspection = report
+            case .add(let data):
+                guard let amount = data.amount else {
+                    BreadcrumbLog.tap.write("URL ADD · no amount · \(data.raw)")
+                    tapInspection = "Add failed — no amount in:\n\(data.raw)"
+                    return
+                }
+                let expense = PendingExpense(
+                    amount: amount,
+                    type: Settings.defaultCategory,
+                    vendor: data.merchant,
+                    currency: data.currency ?? Settings.defaultCurrency
+                )
+                BreadcrumbLog.tap.write("URL ADD · \(expense.currency) \(amount) · \(data.merchant)")
+                Task {
+                    let delivered = (try? await PendingQueue.shared.submit(expense)) ?? false
+                    await MainActor.run {
+                        tapInspection = """
+                        \(delivered ? "Logged" : "Saved — will sync"):
+                        \(expense.currency) \(amount)\(data.merchant.isEmpty ? "" : " at " + data.merchant)
+                        """
+                    }
+                }
+            }
+        }
         .alert(
             "Wallet handed Vesta:",
             isPresented: Binding(

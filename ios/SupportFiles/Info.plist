@@ -6,6 +6,22 @@
 	     Only the keys that have no INFOPLIST_KEY_ build setting live here. -->
 	<key>NSSupportsLiveActivities</key>
 	<true/>
+	<!-- vesta:// deep links — the beta-proof quick-add path. iOS 26.6 beta
+	     broke third-party App Intents in automations ("couldn't communicate
+	     with a helper application" on every invocation), so the Wallet
+	     automation drives Apple's own Open-URLs action into this scheme
+	     instead. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.piyawatpm.vesta.quickadd</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>vesta</string>
+			</array>
+		</dict>
+	</array>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>com.piyawatpm.vesta.refresh</string>
