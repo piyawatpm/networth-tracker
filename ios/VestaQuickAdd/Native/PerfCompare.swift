@@ -24,6 +24,20 @@ enum DcaCompare {
         let indexUsd: [Double]
     }
 
+    /// The honest "all time" opening: no earlier than the first LOGGED flow.
+    /// The portfolio history begins with hand-seeded monthly estimates
+    /// (2025-10-01: 7200, 7800, 8200…) months before any transaction was
+    /// logged — start there and estimated contributions read as market
+    /// profit. Same clamp the web's bootstrap guard applies.
+    static func clampedStart(
+        values: [(date: String, value: Double)],
+        flows: [(date: String, value: Double)]
+    ) -> String? {
+        guard let firstValue = values.first?.date else { return nil }
+        guard let firstFlow = flows.first?.date else { return firstValue }
+        return max(firstValue, firstFlow)
+    }
+
     /// Latest value at or before `day` (forward-fill over weekends/holidays).
     /// `rows` ascending by date string.
     static func asOf(_ rows: [(date: String, value: Double)], _ day: String) -> Double? {
@@ -245,9 +259,27 @@ struct Benchmark: Identifiable, Hashable {
     static let btc = Benchmark(symbol: "BTC", label: "BTC", color: Ledger.seriesCrypto)
 }
 
+/// Comparison windows, mirroring the dashboard chart's picker. Daily
+/// readings are the finest grain the data has, so 1D would be two points —
+/// the set starts at a week.
+enum CompareWindow: String, CaseIterable {
+    case w1 = "1W", m1 = "1M", m6 = "6M", y1 = "1Y", all = "All"
+
+    var days: Int? {
+        switch self {
+        case .w1: 7
+        case .m1: 30
+        case .m6: 180
+        case .y1: 365
+        case .all: nil
+        }
+    }
+}
+
 struct PerfCompareCard: View {
     @Environment(DataStore.self) private var store
-    let start: String
+    /// Earliest honest opening (first reading AND first logged flow).
+    let allStart: String
     /// One = fixed comparison; several = a picker chooses, first is default.
     let benchmarks: [Benchmark]
     let values: [(date: String, value: Double)]
@@ -256,21 +288,30 @@ struct PerfCompareCard: View {
     var footnote: String?
 
     @State private var selected: Benchmark
+    @State private var window: CompareWindow = .all
     @State private var prices: [DcaCompare.PricePoint]?
     @State private var failed = false
     @State private var scrubDate: Date?
 
     init(
-        start: String, benchmarks: [Benchmark],
+        allStart: String, benchmarks: [Benchmark],
         values: [(date: String, value: Double)], flows: [(date: String, value: Double)],
         footnote: String? = nil
     ) {
-        self.start = start
+        self.allStart = allStart
         self.benchmarks = benchmarks
         self.values = values
         self.flows = flows
         self.footnote = footnote
         _selected = State(initialValue: benchmarks[0])
+    }
+
+    /// The window's opening day — never earlier than the honest clamp.
+    private var start: String {
+        guard let days = window.days,
+              let today = SnapshotDate.parse(SydneyTime.today()) else { return allStart }
+        let from = SydneyTime.dayString(today.addingTimeInterval(-Double(days) * 86400))
+        return max(allStart, from)
     }
 
     private var series: DcaCompare.Series? {
@@ -436,6 +477,11 @@ struct PerfCompareCard: View {
 
         let mineMoney = store.convert(at.map { series.mineUsd[$0] } ?? (series.mineUsd.last ?? 0), from: "USD")
         let indexMoney = store.convert(at.map { series.indexUsd[$0] } ?? (series.indexUsd.last ?? 0), from: "USD")
+        Picker("", selection: $window.animation(nil)) {
+            ForEach(CompareWindow.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+        }
+        .pickerStyle(.segmented)
+
         HStack(spacing: 8) {
             chip("You", minePct, mineMoney, Ledger.income)
             chip(selected.label, indexPct, indexMoney, selected.color)
@@ -477,7 +523,7 @@ struct PerfCompareCard: View {
         failed = false
         prices = nil
         do {
-            prices = try await BenchmarkAPI.prices(symbol: selected.symbol, from: start)
+            prices = try await BenchmarkAPI.prices(symbol: selected.symbol, from: allStart)
         } catch {
             failed = true
         }

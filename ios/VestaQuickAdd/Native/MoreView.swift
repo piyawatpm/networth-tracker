@@ -666,6 +666,21 @@ struct PerformanceLiteView: View {
         stockFlows(includeSuper: false)
     }
 
+    /// Earliest honest opening per scope; net worth needs both pots past
+    /// their own clamp.
+    private func stocksStart(includeSuper: Bool) -> String? {
+        DcaCompare.clampedStart(
+            values: includeSuper
+                ? DcaCompare.dailyValues(store.portfolioParsedWithSuper)
+                : stockValues,
+            flows: stockFlows(includeSuper: includeSuper)
+        )
+    }
+
+    private var cryptoStart: String? {
+        DcaCompare.clampedStart(values: cryptoPot, flows: cryptoFlows)
+    }
+
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
@@ -678,9 +693,10 @@ struct PerformanceLiteView: View {
 
                 // Growth of the same dollar vs a benchmark — see PerfCompare.
                 // Net Worth = both investment pots as one, benchmark toggleable.
-                if kind == "networth" {
+                if kind == "networth", let stockStart = stocksStart(includeSuper: includeSuper),
+                   let cryptoStart {
                     PerfCompareCard(
-                        start: "2026-05-01",
+                        allStart: max(stockStart, cryptoStart),
                         benchmarks: [.sp500, .btc],
                         values: DcaCompare.combinedDaily(
                             includeSuper
@@ -705,9 +721,9 @@ struct PerformanceLiteView: View {
                     .padding(.vertical, 12)
                     .financeCard()
                 }
-                if kind == "portfolio" {
+                if kind == "portfolio", let stockStart = stocksStart(includeSuper: includeSuper) {
                     PerfCompareCard(
-                        start: "2026-05-01",
+                        allStart: stockStart,
                         benchmarks: [.sp500],
                         values: includeSuper
                             ? DcaCompare.dailyValues(store.portfolioParsedWithSuper)
@@ -727,9 +743,9 @@ struct PerformanceLiteView: View {
                     .padding(.vertical, 12)
                     .financeCard()
                 }
-                if kind == "crypto" {
+                if kind == "crypto", let cryptoStart {
                     PerfCompareCard(
-                        start: "2026-05-01",
+                        allStart: cryptoStart,
                         benchmarks: [.btc],
                         values: cryptoPot,
                         flows: cryptoFlows
