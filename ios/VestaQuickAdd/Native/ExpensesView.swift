@@ -6,6 +6,8 @@ struct ExpensesView: View {
     @State private var showAdd = false
     @State private var editing: ExpenseEntry?
     @State private var search = ""
+    /// Which month the record list shows; nil = every record.
+    @State private var scope: String? = SydneyTime.currentMonthKey()
 
     private var month: String { SydneyTime.currentMonthKey() }
 
@@ -43,8 +45,16 @@ struct ExpensesView: View {
         return byVendor.values.sorted { $0.total > $1.total }.prefix(3).map { $0 }
     }
 
+    /// Records for the list: scoped to the chosen month, newest first.
+    ///
+    /// Searching deliberately ignores the scope — "where did I buy that" is
+    /// an all-time question, and silently hiding matches in other months
+    /// would make the search look broken.
     private var listEntries: [ExpenseEntry] {
-        let sorted = store.expenses.sorted {
+        let base = search.isEmpty
+            ? store.expenses.filter { scope == nil || SydneyTime.monthKey($0.date) == scope }
+            : store.expenses
+        let sorted = base.sorted {
             $0.date != $1.date ? $0.date > $1.date : $0.createdAt > $1.createdAt
         }
         guard !search.isEmpty else { return sorted }
@@ -56,18 +66,102 @@ struct ExpensesView: View {
         }
     }
 
+    private var dayGroups: [DayGroup<ExpenseEntry>] {
+        FlowMath.groupByDay(
+            listEntries,
+            date: { $0.date },
+            value: { store.convert($0.amount, from: $0.currency) }
+        )
+    }
+
+    /// Spend per weekday this month, index 0 = Sunday.
+    private var weekdayTotals: [Double] {
+        var totals = [Double](repeating: 0, count: 7)
+        for entry in monthExpenses {
+            guard let index = SnapshotDate.weekdayIndex(entry.date) else { continue }
+            totals[index] += store.convert(entry.amount, from: entry.currency)
+        }
+        return totals
+    }
+
+    /// Plain-language findings. Each one is suppressed unless the data
+    /// actually supports it — a made-up insight is worse than none.
+    private var insights: [Insight] {
+        var out: [Insight] = []
+        let rows = convertedRows
+
+        // Which category moved most against its own 3-month baseline.
+        let baseline = FlowMath.monthKeys(back: 4).dropLast() // 3 complete months
+        var priorByType: [String: Double] = [:]
+        for entry in store.expenses where baseline.contains(SydneyTime.monthKey(entry.date)) {
+            priorByType[entry.type, default: 0] += store.convert(entry.amount, from: entry.currency)
+        }
+        let movers = byCategory.compactMap { row -> (String, Double)? in
+            let average = (priorByType[row.type] ?? 0) / 3
+            guard average > 1 else { return nil }
+            return (row.label, (row.value - average) / average * 100)
+        }
+        if let top = movers.max(by: { abs($0.1) < abs($1.1) }), abs(top.1) >= 10 {
+            out.append(Insight(
+                icon: top.1 > 0 ? "arrow.up.right.circle" : "arrow.down.right.circle",
+                text: "\(top.0) vs your 3-month average",
+                value: "\(top.1 > 0 ? "+" : "")\(String(format: "%.0f", top.1))%",
+                tint: top.1 > 0 ? Ledger.expense : Ledger.income
+            ))
+        }
+
+        // The single biggest line — usually the thing worth remembering.
+        if let biggest = monthExpenses.max(by: {
+            store.convert($0.amount, from: $0.currency) < store.convert($1.amount, from: $1.currency)
+        }) {
+            let name = biggest.vendor.isEmpty
+                ? (biggest.description.isEmpty ? store.expenseLabel(biggest.type) : biggest.description)
+                : biggest.vendor
+            out.append(Insight(
+                icon: "flame",
+                text: "Biggest this month · \(name)",
+                value: store.format(store.convert(biggest.amount, from: biggest.currency), compact: true),
+                tint: Ledger.expense
+            ))
+        }
+
+        // Volume, so the totals above have a denominator.
+        if !monthExpenses.isEmpty {
+            let total = store.monthTotalExpenses(month: month)
+            out.append(Insight(
+                icon: "number",
+                text: "\(monthExpenses.count) purchases · average",
+                value: store.format(total / Double(monthExpenses.count), compact: true)
+            ))
+        }
+
+        // Six-month baseline for the month total itself.
+        let complete = FlowMath.flows(rows, months: 7).dropLast().filter { $0.total > 0.01 }
+        if complete.count >= 2 {
+            let average = complete.reduce(0) { $0 + $1.total } / Double(complete.count)
+            out.append(Insight(
+                icon: "chart.bar",
+                text: "Typical month (last \(complete.count))",
+                value: store.format(average, compact: true)
+            ))
+        }
+        return out
+    }
+
     var body: some View {
         NavigationStack {
             List {
-                Section {
-                    summaryHeader
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
+                if !vestaListOnly {
+                    Section {
+                        summaryHeader
+                            .listRowInsets(EdgeInsets())
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
                 }
 
                 let flows = FlowMath.flows(convertedRows, months: 6)
-                if flows.filter({ $0.total > 0.01 }).count >= 2 {
+                if !vestaListOnly, flows.filter({ $0.total > 0.01 }).count >= 2 {
                     Section {
                         MonthTrendCard(
                             title: "Spend · 6 months",
@@ -81,16 +175,69 @@ struct ExpensesView: View {
                     }
                 }
 
-                Section("Records") {
-                    ForEach(listEntries) { entry in
-                        ExpenseRow(entry: entry)
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                Button("Delete", systemImage: "trash", role: .destructive) {
-                                    Task { try? await store.deleteExpense(entry.id) }
+                if !vestaListOnly, !insights.isEmpty {
+                    Section {
+                        InsightsCard(title: "Insights", insights: insights)
+                            .listRowInsets(EdgeInsets())
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
+                }
+
+                if !vestaListOnly, weekdayTotals.contains(where: { $0 > 0 }) {
+                    Section {
+                        WeekdayPatternCard(
+                            totals: weekdayTotals,
+                            tint: Ledger.expense,
+                            format: { store.format($0, compact: true) }
+                        )
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                    }
+                }
+
+                if search.isEmpty {
+                    Section {
+                        MonthScopeStrip(months: flows, selection: $scope, tint: Ledger.expense)
+                            .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
+                }
+
+                // One section per day, each carrying its own subtotal — the
+                // anchor that makes a ledger scannable instead of a wall.
+                ForEach(dayGroups) { group in
+                    Section {
+                        ForEach(group.items) { entry in
+                            ExpenseRow(entry: entry, showsDate: !search.isEmpty)
+                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                    Button("Delete", systemImage: "trash", role: .destructive) {
+                                        Task { try? await store.deleteExpense(entry.id) }
+                                    }
+                                    Button("Edit", systemImage: "pencil") { editing = entry }
+                                        .tint(.blue)
                                 }
-                                Button("Edit", systemImage: "pencil") { editing = entry }
-                                    .tint(.blue)
-                            }
+                        }
+                    } header: {
+                        HStack {
+                            Text(group.label)
+                            Spacer()
+                            Text(store.format(group.total, compact: true))
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(Ledger.expense.opacity(0.8))
+                        }
+                    }
+                }
+
+                if dayGroups.isEmpty {
+                    Section {
+                        Text(search.isEmpty
+                             ? "Nothing recorded in this month."
+                             : "No expenses match “\(search)”.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
                 }
 
@@ -101,7 +248,7 @@ struct ExpensesView: View {
                 }
             }
             .listStyle(.insetGrouped)
-            .listSectionSpacing(14)
+            .listSectionSpacing(8)
             .scrollContentBackground(.hidden)
             .background(Ledger.background)
             .searchable(text: $search, prompt: "Search expenses")
@@ -209,6 +356,25 @@ struct ExpensesView: View {
 struct ExpenseRow: View {
     @Environment(DataStore.self) private var store
     let entry: ExpenseEntry
+    /// Day-grouped lists carry the date in the section header, so repeating
+    /// it on every row is pure noise.
+    var showsDate = false
+
+    private var title: String {
+        if !entry.description.isEmpty { return entry.description }
+        if !entry.vendor.isEmpty { return entry.vendor }
+        return store.expenseLabel(entry.type)
+    }
+
+    /// Whatever the title didn't already say.
+    private var subtitle: String? {
+        var parts: [String] = []
+        if showsDate { parts.append(SydneyTime.shortLabel(entry.date)) }
+        let label = store.expenseLabel(entry.type)
+        if label != title { parts.append(label) }
+        if !entry.vendor.isEmpty, entry.vendor != title { parts.append(entry.vendor) }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
 
     var body: some View {
         HStack(spacing: 10) {
@@ -217,7 +383,7 @@ struct ExpenseRow: View {
                 .frame(width: 8, height: 8)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 4) {
-                    Text(entry.description.isEmpty ? store.expenseLabel(entry.type) : entry.description)
+                    Text(title)
                         .font(.subheadline)
                         .lineLimit(1)
                     if entry.source == "ios" {
@@ -227,9 +393,12 @@ struct ExpenseRow: View {
                             .foregroundStyle(Ledger.income.opacity(0.7))
                     }
                 }
-                Text("\(SydneyTime.shortLabel(entry.date)) · \(entry.vendor.isEmpty ? store.expenseLabel(entry.type) : entry.vendor)")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
             Spacer()
             Text(Money.format(entry.amount, currency: entry.currency))

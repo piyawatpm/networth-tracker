@@ -7,6 +7,8 @@ struct IncomeView: View {
     @State private var editing: IncomeEntry?
     @State private var search = ""
     @State private var selectedAngle: Double?
+    /// Which month the record list shows; nil = every record.
+    @State private var scope: String? = SydneyTime.currentMonthKey()
 
     private var month: String { SydneyTime.currentMonthKey() }
 
@@ -43,8 +45,12 @@ struct IncomeView: View {
         store.allIncome.map { ($0.date, store.convert($0.amount, from: $0.currency)) }
     }
 
+    /// Scoped to the chosen month; search sweeps everything (see Expenses).
     private var listEntries: [IncomeEntry] {
-        let sorted = store.allIncome.sorted {
+        let base = search.isEmpty
+            ? store.allIncome.filter { scope == nil || SydneyTime.monthKey($0.date) == scope }
+            : store.allIncome
+        let sorted = base.sorted {
             $0.date != $1.date ? $0.date > $1.date : $0.createdAt > $1.createdAt
         }
         guard !search.isEmpty else { return sorted }
@@ -56,20 +62,79 @@ struct IncomeView: View {
         }
     }
 
+    private var dayGroups: [DayGroup<IncomeEntry>] {
+        FlowMath.groupByDay(
+            listEntries,
+            date: { $0.date },
+            value: { store.convert($0.amount, from: $0.currency) }
+        )
+    }
+
+    /// Findings tuned to the actual goal here: replacing wage income.
+    private var insights: [Insight] {
+        var out: [Insight] = []
+        let total = store.monthTotal(store.allIncome, month: month)
+
+        // Passive coverage — the single number the whole plan turns on.
+        let freedom = store.freedom
+        if freedom.expenses > 1 {
+            let pct = freedom.coverage * 100
+            out.append(Insight(
+                icon: "shield.lefthalf.filled",
+                text: "Passive income covers your spending",
+                value: "\(String(format: "%.0f", pct))%",
+                tint: pct >= 100 ? Ledger.income : (pct >= 50 ? Ledger.seriesDebt : Ledger.expense)
+            ))
+        }
+
+        // Concentration: one source carrying everything is a risk worth
+        // seeing, not a milestone.
+        if let top = slices.first, total > 1 {
+            let share = top.value / total * 100
+            out.append(Insight(
+                icon: "chart.pie",
+                text: "\(top.label) is your largest source",
+                value: "\(String(format: "%.0f", share))%",
+                tint: share >= 70 ? Ledger.seriesCrypto : .primary
+            ))
+        }
+
+        if !monthEntries.isEmpty {
+            out.append(Insight(
+                icon: "number",
+                text: "\(monthEntries.count) payments · average",
+                value: store.format(total / Double(monthEntries.count), compact: true)
+            ))
+        }
+
+        let complete = FlowMath.flows(convertedRows, months: 7).dropLast().filter { $0.total > 0.01 }
+        if complete.count >= 2 {
+            let average = complete.reduce(0) { $0 + $1.total } / Double(complete.count)
+            out.append(Insight(
+                icon: "chart.bar",
+                text: "Typical month (last \(complete.count))",
+                value: store.format(average, compact: true)
+            ))
+        }
+        return out
+    }
+
     var body: some View {
         NavigationStack {
             List {
-                Section {
-                    summaryHeader
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
+                if !vestaListOnly {
+                    Section {
+                        summaryHeader
+                            .listRowInsets(EdgeInsets())
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
                 }
 
                 // Trend earns its card only once there's a month to compare
                 // against — a single lonely bar answers nothing.
                 let flows = FlowMath.flows(convertedRows, months: 6)
-                if flows.filter({ $0.total > 0.01 }).count >= 2 {
+                if !vestaListOnly, flows.filter({ $0.total > 0.01 }).count >= 2 {
                     Section {
                         MonthTrendCard(
                             title: "Income · 6 months",
@@ -83,18 +148,56 @@ struct IncomeView: View {
                     }
                 }
 
-                Section("Records") {
-                    ForEach(listEntries) { entry in
-                        IncomeRow(entry: entry)
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                if entry.derived != true {
-                                    Button("Delete", systemImage: "trash", role: .destructive) {
-                                        Task { try? await store.deleteIncome(entry.id) }
+                if !vestaListOnly, !insights.isEmpty {
+                    Section {
+                        InsightsCard(title: "Insights", insights: insights)
+                            .listRowInsets(EdgeInsets())
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
+                }
+
+                if search.isEmpty {
+                    Section {
+                        MonthScopeStrip(months: flows, selection: $scope, tint: Ledger.income)
+                            .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
+                }
+
+                ForEach(dayGroups) { group in
+                    Section {
+                        ForEach(group.items) { entry in
+                            IncomeRow(entry: entry, showsDate: !search.isEmpty)
+                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                    if entry.derived != true {
+                                        Button("Delete", systemImage: "trash", role: .destructive) {
+                                            Task { try? await store.deleteIncome(entry.id) }
+                                        }
+                                        Button("Edit", systemImage: "pencil") { editing = entry }
+                                            .tint(.blue)
                                     }
-                                    Button("Edit", systemImage: "pencil") { editing = entry }
-                                        .tint(.blue)
                                 }
-                            }
+                        }
+                    } header: {
+                        HStack {
+                            Text(group.label)
+                            Spacer()
+                            Text(store.format(group.total, compact: true))
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(Ledger.income.opacity(0.8))
+                        }
+                    }
+                }
+
+                if dayGroups.isEmpty {
+                    Section {
+                        Text(search.isEmpty
+                             ? "Nothing recorded in this month."
+                             : "No income matches “\(search)”.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
                 }
 
@@ -105,7 +208,7 @@ struct IncomeView: View {
                 }
             }
             .listStyle(.insetGrouped)
-            .listSectionSpacing(14)
+            .listSectionSpacing(8)
             .scrollContentBackground(.hidden)
             .background(Ledger.background)
             .searchable(text: $search, prompt: "Search income")
@@ -201,6 +304,20 @@ struct IncomeView: View {
 struct IncomeRow: View {
     @Environment(DataStore.self) private var store
     let entry: IncomeEntry
+    /// See ExpenseRow — the day header already carries the date.
+    var showsDate = false
+
+    private var title: String {
+        entry.description.isEmpty ? store.incomeLabel(entry.type) : entry.description
+    }
+
+    private var subtitle: String? {
+        var parts: [String] = []
+        if showsDate { parts.append(SydneyTime.shortLabel(entry.date)) }
+        let label = store.incomeLabel(entry.type)
+        if label != title { parts.append(label) }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
 
     var body: some View {
         HStack(spacing: 10) {
@@ -209,7 +326,7 @@ struct IncomeRow: View {
                 .frame(width: 8, height: 8)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 4) {
-                    Text(entry.description.isEmpty ? store.incomeLabel(entry.type) : entry.description)
+                    Text(title)
                         .font(.subheadline)
                         .lineLimit(1)
                     if entry.derived == true {
@@ -219,9 +336,12 @@ struct IncomeRow: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-                Text("\(SydneyTime.shortLabel(entry.date)) · \(store.incomeLabel(entry.type))")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
             Spacer()
             Text(Money.format(entry.amount, currency: entry.currency))

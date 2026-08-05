@@ -62,6 +62,17 @@ enum SnapshotDate {
         return Date(timeIntervalSince1970: epoch)
     }
 
+    /// Day of week for a "yyyy-MM-dd…" string: 0 = Sunday … 6 = Saturday.
+    /// Integer math, so it's safe to call per row on a whole ledger.
+    static func weekdayIndex(_ ymd: String) -> Int? {
+        let parts = ymd.prefix(10).split(separator: "-")
+        guard parts.count == 3,
+              let y = Int(parts[0]), let m = Int(parts[1]), let d = Int(parts[2])
+        else { return nil }
+        // 1970-01-01 was a Thursday (index 4).
+        return ((daysFromCivil(y: y, m: m, d: d) % 7) + 7 + 4) % 7
+    }
+
     /// Days between 1970-01-01 and the given civil date (Howard Hinnant's
     /// branchless algorithm — proleptic Gregorian, exact for all our years).
     private static func daysFromCivil(y: Int, m: Int, d: Int) -> Int {
