@@ -78,6 +78,9 @@ extension EnvironmentValues {
 
 struct MainTabView: View {
     @Environment(DataStore.self) private var store
+    @Environment(\.scenePhase) private var scenePhase
+    /// Set by InspectTapIntent; shown the moment the app is frontmost.
+    @State private var tapInspection: String?
     // Screenshot/UI runs can land on a specific tab.
     @State private var selection = Int(
         ProcessInfo.processInfo.environment["VESTA_INITIAL_TAB"] ?? ""
@@ -129,6 +132,26 @@ struct MainTabView: View {
         }
         .animation(.spring(duration: 0.3), value: store.loadError)
         .environment(\.tabReselect, reselect)
+        // The Wallet-data inspector: the intent stores what it received and
+        // foregrounds the app; this shows it as a plain readable alert.
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active,
+                  let report = Settings.defaults.string(forKey: "pendingTapInspection")
+            else { return }
+            Settings.defaults.removeObject(forKey: "pendingTapInspection")
+            tapInspection = report
+        }
+        .alert(
+            "Wallet handed Vesta:",
+            isPresented: Binding(
+                get: { tapInspection != nil },
+                set: { if !$0 { tapInspection = nil } }
+            )
+        ) {
+            Button("OK") { tapInspection = nil }
+        } message: {
+            Text(tapInspection ?? "")
+        }
     }
 
 }

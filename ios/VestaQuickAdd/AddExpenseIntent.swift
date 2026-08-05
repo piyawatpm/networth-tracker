@@ -196,6 +196,14 @@ struct VestaShortcuts: AppShortcutsProvider {
             systemImageName: "creditcard"
         )
         AppShortcut(
+            intent: InspectTapIntent(),
+            phrases: [
+                "Inspect wallet data in \(.applicationName)",
+            ],
+            shortTitle: "Inspect Wallet Data",
+            systemImageName: "doc.text.magnifyingglass"
+        )
+        AppShortcut(
             intent: LogTapIntent(),
             phrases: [
                 "Log a card tap in \(.applicationName)",
