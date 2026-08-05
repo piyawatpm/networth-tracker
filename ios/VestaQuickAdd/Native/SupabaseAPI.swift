@@ -243,17 +243,34 @@ actor SupabaseAPI {
         )
     }
 
-    /// All KV blobs in one round trip — the same shape the web app boots from.
-    func fetchAppData() async throws -> [String: String] {
-        let data = try await restRequest(
-            "GET", path: "app_data",
-            query: [URLQueryItem(name: "select", value: "key,value")]
-        )
-        struct Row: Codable { let key: String; let value: String? }
+    /// KV blobs — ALL of them when `since` is nil, otherwise only rows whose
+    /// updated_at moved past it. The delta path makes a quiet app-open cost a
+    /// few KB instead of re-downloading the multi-hundred-KB CSV blobs.
+    /// Returns the newest updated_at seen, to thread into the next call.
+    func fetchAppData(since: String? = nil) async throws
+        -> (blobs: [String: String], maxUpdatedAt: String?) {
+        var query = [URLQueryItem(name: "select", value: "key,value,updated_at")]
+        if let since {
+            query.append(URLQueryItem(name: "updated_at", value: "gt.\(since)"))
+        }
+        let data = try await restRequest("GET", path: "app_data", query: query)
+        struct Row: Codable {
+            let key: String
+            let value: String?
+            let updatedAt: String?
+            enum CodingKeys: String, CodingKey {
+                case key, value
+                case updatedAt = "updated_at"
+            }
+        }
         let rows = try JSONDecoder().decode([Row].self, from: data)
         var result: [String: String] = [:]
-        for row in rows { result[row.key] = row.value ?? "" }
-        return result
+        var maxStamp: String? = since
+        for row in rows {
+            result[row.key] = row.value ?? ""
+            if let stamp = row.updatedAt, stamp > (maxStamp ?? "") { maxStamp = stamp }
+        }
+        return (result, maxStamp)
     }
 
     /// Read-modify-write of one blob. Same last-write-wins semantics the web

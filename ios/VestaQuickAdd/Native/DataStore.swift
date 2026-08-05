@@ -34,6 +34,9 @@ struct DiskCache: Codable {
     var fxRates: [String: Double]
     var livePrices: [String: Double]
     var savedAt: Double
+    /// updated_at watermark for delta blob fetches. Optional so v5
+    /// caches written before it existed still decode (nil → full fetch).
+    var blobsSyncedAt: String?
 
     static var fileURL: URL {
         let dir = FileManager.default.urls(
@@ -247,6 +250,7 @@ final class DataStore {
     private let api = SupabaseAPI.shared
     /// Raw blobs from the last load — kept so cache saves exactly what came in.
     private var rawBlobs: [String: String] = [:]
+    private var blobsSyncedAt: String?
     /// Coalesces overlapping refresh triggers (foreground + timer + intent
     /// signal can all fire together) into one network pass.
     private var refreshInFlight = false
@@ -257,6 +261,7 @@ final class DataStore {
         // 1. Paint instantly from the disk cache — no spinner, no network.
         if let cache = DiskCache.load() {
             rawBlobs = cache.blobs
+            blobsSyncedAt = cache.blobsSyncedAt
             if !cache.fxRates.isEmpty {
                 Money.rates = cache.fxRates
                 fxLoaded = true
@@ -327,13 +332,18 @@ final class DataStore {
         isLoading = rawBlobs.isEmpty // skeletons only when there's no cache
         loadError = nil
         do {
-            async let blobsTask = api.fetchAppData()
+            // Delta fetch: only blobs whose updated_at moved since last sync.
+            // First run (no watermark) pulls everything.
+            async let blobsTask = api.fetchAppData(since: blobsSyncedAt)
             async let ratesTask = api.fetchFxRates()
 
-            let blobs = try await blobsTask
-            rawBlobs = blobs
-            decode(blobs)
-            rebuildOverlays()
+            let (changed, stamp) = try await blobsTask
+            blobsSyncedAt = stamp
+            if !changed.isEmpty {
+                rawBlobs.merge(changed) { _, new in new }
+                decode(rawBlobs)
+                rebuildOverlays()
+            }
 
             if let rates = try? await ratesTask, !rates.isEmpty {
                 Money.rates = rates
@@ -358,13 +368,14 @@ final class DataStore {
             lastRefreshed = Date().timeIntervalSince1970
             DiskCache(
                 version: DiskCache.currentVersion,
-                blobs: blobs,
+                blobs: rawBlobs,
                 networthHistory: networthHistory,
                 portfolioHistory: portfolioHistory,
                 cryptoHistory: cryptoHistory,
                 fxRates: Money.rates,
                 livePrices: livePrices,
-                savedAt: lastRefreshed
+                savedAt: lastRefreshed,
+                blobsSyncedAt: blobsSyncedAt
             ).save()
         } catch {
             loadError = error.localizedDescription
@@ -801,11 +812,14 @@ enum BackgroundRefresher {
                 password: SupabaseConfig.ownerPassword
             )) != nil else { return }
         }
-        guard let blobs = try? await api.fetchAppData() else { return }
+        let cached = DiskCache.load()
+        guard let (changed, stamp) = try? await api.fetchAppData(
+            since: cached?.blobsSyncedAt
+        ) else { return }
+        var blobs = cached?.blobs ?? [:]
+        blobs.merge(changed) { _, new in new }
 
         let rates = (try? await api.fetchFxRates()) ?? [:]
-        // Incremental on top of the cached histories, same as the foreground.
-        let cached = DiskCache.load()
         func merged(_ type: String, _ current: [SnapshotPoint]) async -> [SnapshotPoint] {
             let fresh = (try? await api.fetchSnapshotsRaw(
                 type: type, since: current.last?.date
@@ -842,7 +856,8 @@ enum BackgroundRefresher {
             cryptoHistory: cryptoHistory,
             fxRates: rates,
             livePrices: live,
-            savedAt: Date().timeIntervalSince1970
+            savedAt: Date().timeIntervalSince1970,
+            blobsSyncedAt: stamp
         ).save()
     }
 }
