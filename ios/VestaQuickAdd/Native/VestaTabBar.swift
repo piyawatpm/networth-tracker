@@ -13,7 +13,13 @@ struct VestaTab: Identifiable, Equatable {
 struct VestaTabBar: View {
     let tabs: [VestaTab]
     @Binding var selection: Int
+    /// Tapping the tab you're already on — the system gesture for "back to
+    /// the top of this tab".
+    var onReselect: (Int) -> Void = { _ in }
     @State private var isDragging = false
+    /// Did this gesture actually move between tabs? A scrub that ends where
+    /// it began is not a re-tap.
+    @State private var scrubbed = false
 
     var body: some View {
         GeometryReader { geo in
@@ -72,6 +78,7 @@ struct VestaTabBar: View {
                             max(0, Int(value.location.x / slot))
                         )
                         if index != selection {
+                            scrubbed = true
                             withAnimation(.snappy(duration: 0.28, extraBounce: 0.12)) {
                                 selection = index
                             }
@@ -80,7 +87,13 @@ struct VestaTabBar: View {
                             withAnimation(.snappy(duration: 0.2)) { isDragging = true }
                         }
                     }
-                    .onEnded { _ in
+                    .onEnded { value in
+                        let index = min(
+                            tabs.count - 1,
+                            max(0, Int(value.location.x / slot))
+                        )
+                        if !scrubbed, index == selection { onReselect(index) }
+                        scrubbed = false
                         withAnimation(.spring(duration: 0.35, bounce: 0.3)) {
                             isDragging = false
                         }

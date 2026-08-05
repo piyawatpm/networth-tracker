@@ -1,20 +1,37 @@
 import SwiftUI
 import Charts
 
+/// Everywhere the More tab can push to.
+///
+/// Value-based rather than view-based links on purpose: a `[MoreRoute]` path
+/// is what makes "pop to root" a one-liner. View-based NavigationLinks don't
+/// appear in the stack's path, so there'd be nothing to clear.
+enum MoreRoute: Hashable {
+    case debts
+    case performance
+    case diagnostics
+    case tapLog
+    case debtDetail(String)
+}
+
 struct MoreView: View {
     @Environment(DataStore.self) private var store
+    @Environment(\.tabReselect) private var reselect
     @State private var showSettings = false
     @State private var showWeb = false
     @State private var webPath = "/dashboard"
+    // Screenshot/UI runs can open straight onto a pushed page.
+    @State private var path: [MoreRoute] =
+        ProcessInfo.processInfo.environment["VESTA_MORE_ROUTE"] == "debts" ? [.debts] : []
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             List {
                 Section("Money") {
-                    NavigationLink { DebtsView() } label: {
+                    NavigationLink(value: MoreRoute.debts) {
                         Label("Debts", systemImage: "person.2")
                     }
-                    NavigationLink { PerformanceLiteView() } label: {
+                    NavigationLink(value: MoreRoute.performance) {
                         Label("Performance", systemImage: "chart.xyaxis.line")
                     }
                 }
@@ -34,7 +51,7 @@ struct MoreView: View {
                     } label: {
                         Label("Action Button & server", systemImage: "bolt.circle")
                     }
-                    NavigationLink { QuickAddDiagnosticsView() } label: {
+                    NavigationLink(value: MoreRoute.diagnostics) {
                         HStack {
                             Label("Quick-add diagnostics", systemImage: "stethoscope")
                             if BuildExpiry.isExpiringSoon {
@@ -47,7 +64,7 @@ struct MoreView: View {
                             }
                         }
                     }
-                    NavigationLink { TapLogView() } label: {
+                    NavigationLink(value: MoreRoute.tapLog) {
                         Label("Card tap log", systemImage: "waveform.path.ecg")
                     }
                     Button(role: .destructive) {
@@ -66,11 +83,29 @@ struct MoreView: View {
             .scrollContentBackground(.hidden)
             .background(Ledger.background)
             .navigationTitle("More")
+            // Declared once at the root — it covers every push in the stack,
+            // including DebtsView's own links.
+            .navigationDestination(for: MoreRoute.self) { route in
+                switch route {
+                case .debts: DebtsView()
+                case .performance: PerformanceLiteView()
+                case .diagnostics: QuickAddDiagnosticsView()
+                case .tapLog: TapLogView()
+                case .debtDetail(let id): DebtDetailView(debtId: id)
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { FxChip() }
             }
             .sheet(isPresented: $showSettings) { SettingsView() }
             .sheet(isPresented: $showWeb) { WebSheet(path: webPath) }
+        }
+        // Tapping More while already on More means "back to the top" — the
+        // system gesture. Switching away and back still restores where you
+        // were, which is why the path isn't cleared on tab change.
+        .onChange(of: reselect) { _, new in
+            guard new.tab == VestaTabIndex.more, !path.isEmpty else { return }
+            withAnimation(.snappy(duration: 0.3)) { path.removeAll() }
         }
     }
 
@@ -223,9 +258,7 @@ struct DebtsView: View {
 
             Section {
                 ForEach(visibleRows) { row in
-                    NavigationLink {
-                        DebtDetailView(debtId: row.debt.id)
-                    } label: {
+                    NavigationLink(value: MoreRoute.debtDetail(row.debt.id)) {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(row.debt.person).font(.subheadline.weight(.medium))

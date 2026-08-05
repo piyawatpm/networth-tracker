@@ -52,6 +52,30 @@ struct RootView: View {
     }
 }
 
+/// Which tab is which. Named so the pop-to-root wiring can't drift from the
+/// tab order.
+enum VestaTabIndex {
+    static let home = 0, income = 1, spend = 2, invest = 3, more = 4
+}
+
+/// Broadcast when the active tab is tapped again. The count makes repeat
+/// taps on the same tab distinct events.
+struct TabReselect: Equatable {
+    var tab: Int = -1
+    var count: Int = 0
+}
+
+private struct TabReselectKey: EnvironmentKey {
+    static let defaultValue = TabReselect()
+}
+
+extension EnvironmentValues {
+    var tabReselect: TabReselect {
+        get { self[TabReselectKey.self] }
+        set { self[TabReselectKey.self] = newValue }
+    }
+}
+
 struct MainTabView: View {
     @Environment(DataStore.self) private var store
     // Screenshot/UI runs can land on a specific tab.
@@ -59,12 +83,14 @@ struct MainTabView: View {
         ProcessInfo.processInfo.environment["VESTA_INITIAL_TAB"] ?? ""
     ) ?? 0
 
+    @State private var reselect = TabReselect()
+
     private static let tabs = [
-        VestaTab(id: 0, title: "Home", icon: "square.grid.2x2"),
-        VestaTab(id: 1, title: "Income", icon: "arrow.down.left.circle"),
-        VestaTab(id: 2, title: "Spend", icon: "arrow.up.right.circle"),
-        VestaTab(id: 3, title: "Invest", icon: "chart.line.uptrend.xyaxis"),
-        VestaTab(id: 4, title: "More", icon: "ellipsis.circle"),
+        VestaTab(id: VestaTabIndex.home, title: "Home", icon: "square.grid.2x2"),
+        VestaTab(id: VestaTabIndex.income, title: "Income", icon: "arrow.down.left.circle"),
+        VestaTab(id: VestaTabIndex.spend, title: "Spend", icon: "arrow.up.right.circle"),
+        VestaTab(id: VestaTabIndex.invest, title: "Invest", icon: "chart.line.uptrend.xyaxis"),
+        VestaTab(id: VestaTabIndex.more, title: "More", icon: "ellipsis.circle"),
     ]
 
     var body: some View {
@@ -82,8 +108,12 @@ struct MainTabView: View {
             Tab(value: 4) { MoreView().hidesSystemTabBar() }
         }
         .safeAreaInset(edge: .bottom) {
-            VestaTabBar(tabs: Self.tabs, selection: $selection)
-                .padding(.bottom, 4)
+            VestaTabBar(tabs: Self.tabs, selection: $selection) { index in
+                // Switching tabs preserves where you were; tapping the tab
+                // you're already on is the ask to go back to its root.
+                reselect = TabReselect(tab: index, count: reselect.count + 1)
+            }
+            .padding(.bottom, 4)
         }
         .overlay(alignment: .bottom) {
             if let error = store.loadError {
@@ -98,6 +128,7 @@ struct MainTabView: View {
             }
         }
         .animation(.spring(duration: 0.3), value: store.loadError)
+        .environment(\.tabReselect, reselect)
     }
 
 }
