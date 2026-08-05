@@ -75,13 +75,12 @@ struct MainTabView: View {
         // switching feel heavy. TabView builds a page on first visit, keeps
         // its state, and leaves off-screen pages alone.
         TabView(selection: $selection) {
-            Tab(value: 0) { DashboardView() }
-            Tab(value: 1) { IncomeView() }
-            Tab(value: 2) { ExpensesView() }
-            Tab(value: 3) { InvestView() }
-            Tab(value: 4) { MoreView() }
+            Tab(value: 0) { DashboardView().hidesSystemTabBar() }
+            Tab(value: 1) { IncomeView().hidesSystemTabBar() }
+            Tab(value: 2) { ExpensesView().hidesSystemTabBar() }
+            Tab(value: 3) { InvestView().hidesSystemTabBar() }
+            Tab(value: 4) { MoreView().hidesSystemTabBar() }
         }
-        .toolbar(.hidden, for: .tabBar)
         .safeAreaInset(edge: .bottom) {
             VestaTabBar(tabs: Self.tabs, selection: $selection)
                 .padding(.bottom, 4)
@@ -101,6 +100,21 @@ struct MainTabView: View {
         .animation(.spring(duration: 0.3), value: store.loadError)
     }
 
+}
+
+private extension View {
+    /// Hide the tab bar this view is INSIDE of.
+    ///
+    /// `.toolbar(.hidden, for: .tabBar)` resolves against the enclosing tab
+    /// bar, so hanging it off the TabView itself addresses an ancestor that
+    /// doesn't exist and silently does nothing. iOS 26's own tab bar is a
+    /// floating glass capsule, so the result wasn't a missing hide — it was
+    /// the system capsule rendering behind the custom one, offset by a few
+    /// points, carrying its own selection pill under whichever tab was
+    /// active. It read as a deliberate double-layer style. It wasn't.
+    func hidesSystemTabBar() -> some View {
+        toolbar(.hidden, for: .tabBar)
+    }
 }
 
 #Preview {
