@@ -8,6 +8,8 @@ struct ExpensesView: View {
     @State private var search = ""
     /// Which month the record list shows; nil = every record.
     @State private var scope: String? = SydneyTime.currentMonthKey()
+    /// Tapping a category in the breakdown narrows the record list to it.
+    @State private var categoryFilter: String?
 
     private var month: String { SydneyTime.currentMonthKey() }
 
@@ -76,16 +78,31 @@ struct ExpensesView: View {
         let base = search.isEmpty
             ? store.expenses.filter { scope == nil || SydneyTime.monthKey($0.date) == scope }
             : store.expenses
-        let sorted = base.sorted {
+        let filtered = categoryFilter == nil
+            ? base : base.filter { $0.type == categoryFilter }
+        let sorted = filtered.sorted {
             $0.date != $1.date ? $0.date > $1.date : $0.createdAt > $1.createdAt
         }
         guard !search.isEmpty else { return sorted }
-        let q = search.lowercased()
         return sorted.filter {
-            $0.description.lowercased().contains(q)
-                || $0.vendor.lowercased().contains(q)
-                || store.expenseLabel($0.type).lowercased().contains(q)
+            FlowMath.matches(
+                query: search,
+                fields: [$0.description, $0.vendor, store.expenseLabel($0.type), $0.notes],
+                date: $0.date
+            )
         }
+    }
+
+    /// Calendar opportunities per weekday inside the scoped window — the
+    /// denominator behind the per-weekday average.
+    private var weekdayOccurrences: [Int] {
+        let today = SydneyTime.today()
+        guard let scope else {
+            let earliest = store.expenses.map(\.date).min().map { String($0.prefix(10)) }
+            return FlowMath.weekdayOccurrences(from: earliest ?? today, to: today)
+        }
+        let end = min(FlowMath.lastDay(ofMonth: scope), today)
+        return FlowMath.weekdayOccurrences(from: scope + "-01", to: end)
     }
 
     private var dayGroups: [DayGroup<ExpenseEntry>] {
@@ -214,10 +231,23 @@ struct ExpensesView: View {
                     Section {
                         WeekdayPatternCard(
                             totals: weekdayTotals,
+                            occurrences: weekdayOccurrences,
                             tint: Ledger.expense,
                             format: { store.format($0, compact: true) }
                         )
                         .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                    }
+                }
+
+                if search.isEmpty, let active = categoryFilter {
+                    Section {
+                        FilterChip(
+                            label: store.expenseLabel(active),
+                            color: store.expenseColor(active)
+                        ) { withAnimation(.snappy(duration: 0.2)) { categoryFilter = nil } }
+                        .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                     }
@@ -260,7 +290,9 @@ struct ExpensesView: View {
                 if dayGroups.isEmpty {
                     Section {
                         Text(search.isEmpty
-                             ? "Nothing recorded in this month."
+                             ? (categoryFilter == nil
+                                ? "Nothing recorded in this month."
+                                : "No \(store.expenseLabel(categoryFilter!)) in this month.")
                              : "No expenses match “\(search)”.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
@@ -277,7 +309,7 @@ struct ExpensesView: View {
             .listSectionSpacing(8)
             .scrollContentBackground(.hidden)
             .background(Ledger.background)
-            .searchable(text: $search, prompt: "Search expenses")
+            .searchable(text: $search, prompt: "Search expenses or a date")
             .navigationTitle("Expenses")
             .refreshable { await store.loadAll() }
             .toolbar {
@@ -338,6 +370,11 @@ struct ExpensesView: View {
             // eating the money", and ordered lengths answer it at a glance.
             VStack(spacing: 8) {
                 ForEach(byCategory.prefix(6), id: \.type) { row in
+                    Button {
+                        withAnimation(.snappy(duration: 0.2)) {
+                            categoryFilter = categoryFilter == row.type ? nil : row.type
+                        }
+                    } label: {
                     VStack(spacing: 4) {
                         HStack {
                             Circle().fill(row.color).frame(width: 7, height: 7)
@@ -356,6 +393,9 @@ struct ExpensesView: View {
                         .frame(height: 5)
                         .background(Capsule().fill(.primary.opacity(0.06)))
                     }
+                    .opacity(categoryFilter == nil || categoryFilter == row.type ? 1 : 0.4)
+                    }
+                    .buttonStyle(.plain)
                 }
             }
 

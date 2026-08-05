@@ -131,6 +131,7 @@ func debtNet(_ debt: DebtRecord, _ txs: [DebtTransaction]) -> Double {
 struct DebtsView: View {
     @Environment(DataStore.self) private var store
     @State private var addingDebt = false
+    @State private var search = ""
 
     private struct Row: Identifiable {
         let debt: DebtRecord
@@ -142,6 +143,23 @@ struct DebtsView: View {
         store.debts
             .map { Row(debt: $0, net: debtNet($0, store.debtTxs)) }
             .sorted { abs($0.net) > abs($1.net) }
+    }
+
+    /// Person, reason, currency — and dates, matched against the debt's own
+    /// creation day plus every repayment on it, so "aug" finds a ledger you
+    /// paid into in August.
+    private var visibleRows: [Row] {
+        guard !search.isEmpty else { return rows }
+        return rows.filter { row in
+            let created = SydneyTime.dayString(
+                Date(timeIntervalSince1970: row.debt.createdAt / 1000)
+            )
+            let fields = [row.debt.person, row.debt.reason, row.debt.notes, row.debt.currency]
+            if FlowMath.matches(query: search, fields: fields, date: created) { return true }
+            return store.debtTxs
+                .filter { $0.debtId == row.debt.id }
+                .contains { FlowMath.matches(query: search, fields: [$0.notes], date: $0.date) }
+        }
     }
 
     var body: some View {
@@ -160,8 +178,51 @@ struct DebtsView: View {
                 .financeCard()
             }
 
+            // Are the balances actually coming down? The tiles above are a
+            // snapshot; this is the only view that answers the trend.
+            let history = DebtHistory.series(
+                debts: store.debts, txs: store.debtTxs, months: 6
+            )
+            if history.count >= 2 {
+                Section {
+                    DebtTrendCard(
+                        points: history,
+                        convert: { store.convert($0, from: "USD") },
+                        format: { store.format($0, compact: true) }
+                    )
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                }
+            }
+
+            // Repayment activity per month — the trend shows the balance,
+            // this shows the effort behind it.
+            let repayments = FlowMath.flows(
+                store.debtTxs.compactMap { tx -> (date: String, value: Double)? in
+                    guard tx.amount > 0,
+                          let debt = store.debts.first(where: { $0.id == tx.debtId })
+                    else { return nil }
+                    return (tx.date, store.convert(tx.amount, from: debt.currency))
+                },
+                months: 6
+            )
+            if repayments.filter({ $0.total > 0.01 }).count >= 2 {
+                Section {
+                    MonthTrendCard(
+                        title: "Repayments · 6 months",
+                        flows: repayments,
+                        tint: Ledger.seriesDebt,
+                        format: { store.format($0, compact: true) }
+                    )
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                }
+            }
+
             Section {
-                ForEach(rows) { row in
+                ForEach(visibleRows) { row in
                     NavigationLink {
                         DebtDetailView(debtId: row.debt.id)
                     } label: {
@@ -201,6 +262,7 @@ struct DebtsView: View {
         }
         .scrollContentBackground(.hidden)
         .background(Ledger.background)
+        .searchable(text: $search, prompt: "Search people or a date")
         .navigationTitle("Debts")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {

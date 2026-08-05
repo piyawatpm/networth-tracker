@@ -98,6 +98,81 @@ enum FlowMath {
 /// list itself — same family as VESTA_INITIAL_TAB and VESTA_PERIOD.
 let vestaListOnly = ProcessInfo.processInfo.environment["VESTA_LIST_ONLY"] != nil
 
+// MARK: - Search
+
+extension FlowMath {
+    /// Does a record match a typed query, dates included?
+    ///
+    /// Dates are matched in every shape a person actually types them: the
+    /// stored "2026-08-05", the way the app prints them ("5 Aug"), the month
+    /// on its own ("Aug", "August", "2026-08"), and the weekday ("Wed").
+    /// Searching "aug" or "5 aug" should find a receipt; requiring the ISO
+    /// form would make the field feel broken.
+    static func matches(query: String, fields: [String], date: String) -> Bool {
+        let q = query.lowercased().trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return true }
+        // Every term must hit something — "aug food" narrows, it doesn't widen.
+        return q.split(separator: " ").allSatisfy { term in
+            let needle = String(term)
+            if fields.contains(where: { $0.lowercased().contains(needle) }) { return true }
+            return dateTokens(date).contains { $0.contains(needle) }
+        }
+    }
+
+    /// Every string form of a record's date, lowercased.
+    static func dateTokens(_ date: String) -> [String] {
+        let day = String(date.prefix(10))
+        var tokens = [day, String(day.prefix(7))]
+        let parts = day.split(separator: "-")
+        if parts.count == 3, let month = Int(parts[1]), month >= 1, month <= 12 {
+            let short = label(String(day.prefix(7)))
+            let dayNumber = Int(parts[2]).map(String.init) ?? String(parts[2])
+            tokens.append(short)
+            tokens.append(fullMonthName(month))
+            tokens.append("\(dayNumber) \(short)")
+            if let weekday = SnapshotDate.weekdayIndex(day) {
+                tokens.append(weekdayName(weekday))
+            }
+        }
+        return tokens.map { $0.lowercased() }
+    }
+
+    private static let fullMonthNames: [String] = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f.monthSymbols
+    }()
+
+    static func fullMonthName(_ month: Int) -> String {
+        fullMonthNames[max(0, min(11, month - 1))]
+    }
+}
+
+/// Tappable category filter, shown once a category is picked.
+struct FilterChip: View {
+    let label: String
+    let color: Color
+    let onClear: () -> Void
+
+    var body: some View {
+        Button(action: onClear) {
+            HStack(spacing: 5) {
+                Circle().fill(color).frame(width: 6, height: 6)
+                Text(label)
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                Image(systemName: "xmark")
+                    .font(.system(size: 8, weight: .bold))
+            }
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(color.opacity(0.18), in: .capsule)
+            .overlay(Capsule().strokeBorder(color.opacity(0.45), lineWidth: 0.8))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 // MARK: - Category composition per month
 
 /// One category's slice of one month's bar.
@@ -199,6 +274,32 @@ extension FlowMath {
 
     static func weekdayName(_ index: Int) -> String {
         weekdayNames[max(0, min(6, index))]
+    }
+
+    /// How many times each weekday occurred between two days, inclusive —
+    /// the denominator for a per-weekday average. The current month stops at
+    /// today, so a Monday that hasn't happened yet isn't counted against you.
+    static func weekdayOccurrences(from start: String, to end: String) -> [Int] {
+        var counts = [Int](repeating: 0, count: 7)
+        guard var date = SnapshotDate.parse(start),
+              let last = SnapshotDate.parse(end), date <= last
+        else { return counts }
+        while date <= last {
+            if let index = SnapshotDate.weekdayIndex(SydneyTime.dayString(date)) {
+                counts[index] += 1
+            }
+            date = date.addingTimeInterval(86400)
+        }
+        return counts
+    }
+
+    /// Last day of a month key ("2026-08" → "2026-08-31").
+    static func lastDay(ofMonth key: String) -> String {
+        guard let year = Int(key.prefix(4)), let month = Int(key.suffix(2)) else { return key }
+        let lengths = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+        var days = lengths[max(0, min(11, month - 1))]
+        if month == 2, (year % 4 == 0 && year % 100 != 0) || year % 400 == 0 { days = 29 }
+        return String(format: "%@-%02d", key, days)
     }
 
     /// Bucket records into days, newest first, each with a subtotal. This is
@@ -316,12 +417,29 @@ struct InsightsCard: View {
 /// the busiest day is named in words above it.
 struct WeekdayPatternCard: View {
     let totals: [Double]      // index 0 = Sunday
+    /// How many of each weekday actually occurred in the scoped window, so
+    /// the average divides by real opportunities rather than a flat 4.
+    let occurrences: [Int]
     let tint: Color
     let format: (Double) -> String
 
+    @State private var showAverage = true
+
+    /// Average spend per occurrence — the honest "what does a Monday cost me".
+    /// A raw total makes whichever weekday happened five times in the month
+    /// look like a habit when it's just the calendar.
+    private var values: [Double] {
+        guard showAverage else { return totals }
+        return totals.enumerated().map { index, total in
+            let count = occurrences.indices.contains(index) ? occurrences[index] : 0
+            return count > 0 ? total / Double(count) : 0
+        }
+    }
+
     private var peak: Int? {
-        guard let max = totals.max(), max > 0 else { return nil }
-        return totals.firstIndex(of: max)
+        let series = values
+        guard let max = series.max(), max > 0 else { return nil }
+        return series.firstIndex(of: max)
     }
 
     var body: some View {
@@ -329,13 +447,21 @@ struct WeekdayPatternCard: View {
             HStack {
                 Text("By weekday").labelMono()
                 Spacer()
-                if let peak {
-                    Text("busiest · \(FlowMath.weekdayName(peak))")
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundStyle(.tertiary)
+                Picker("", selection: $showAverage) {
+                    Text("Avg").tag(true)
+                    Text("Total").tag(false)
                 }
+                .pickerStyle(.segmented)
+                .frame(width: 110)
             }
-            Chart(Array(totals.enumerated()), id: \.offset) { index, total in
+            if let peak {
+                Text(showAverage
+                     ? "\(FlowMath.weekdayName(peak)) costs the most on average"
+                     : "Most spent on \(FlowMath.weekdayName(peak))")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+            }
+            Chart(Array(values.enumerated()), id: \.offset) { index, total in
                 BarMark(
                     x: .value("Day", FlowMath.weekdayName(index)),
                     y: .value("Total", total),

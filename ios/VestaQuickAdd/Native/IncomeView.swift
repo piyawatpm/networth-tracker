@@ -9,6 +9,8 @@ struct IncomeView: View {
     @State private var selectedAngle: Double?
     /// Which month the record list shows; nil = every record.
     @State private var scope: String? = SydneyTime.currentMonthKey()
+    /// Tapping a donut slice or legend row narrows the record list to it.
+    @State private var categoryFilter: String?
 
     private var month: String { SydneyTime.currentMonthKey() }
 
@@ -70,15 +72,18 @@ struct IncomeView: View {
         let base = search.isEmpty
             ? store.allIncome.filter { scope == nil || SydneyTime.monthKey($0.date) == scope }
             : store.allIncome
-        let sorted = base.sorted {
+        let filtered = categoryFilter == nil
+            ? base : base.filter { $0.type == categoryFilter }
+        let sorted = filtered.sorted {
             $0.date != $1.date ? $0.date > $1.date : $0.createdAt > $1.createdAt
         }
         guard !search.isEmpty else { return sorted }
-        let q = search.lowercased()
         return sorted.filter {
-            $0.description.lowercased().contains(q)
-                || $0.source.lowercased().contains(q)
-                || store.incomeLabel($0.type).lowercased().contains(q)
+            FlowMath.matches(
+                query: search,
+                fields: [$0.description, $0.source, store.incomeLabel($0.type)],
+                date: $0.date
+            )
         }
     }
 
@@ -181,6 +186,18 @@ struct IncomeView: View {
                     }
                 }
 
+                if search.isEmpty, let active = categoryFilter {
+                    Section {
+                        FilterChip(
+                            label: store.incomeLabel(active),
+                            color: store.incomeColor(active)
+                        ) { withAnimation(.snappy(duration: 0.2)) { categoryFilter = nil } }
+                        .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                    }
+                }
+
                 if search.isEmpty {
                     Section {
                         MonthScopeStrip(months: flows, selection: $scope, tint: Ledger.income)
@@ -218,7 +235,9 @@ struct IncomeView: View {
                 if dayGroups.isEmpty {
                     Section {
                         Text(search.isEmpty
-                             ? "Nothing recorded in this month."
+                             ? (categoryFilter == nil
+                                ? "Nothing recorded in this month."
+                                : "No \(store.incomeLabel(categoryFilter!)) in this month.")
                              : "No income matches “\(search)”.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
@@ -235,7 +254,7 @@ struct IncomeView: View {
             .listSectionSpacing(8)
             .scrollContentBackground(.hidden)
             .background(Ledger.background)
-            .searchable(text: $search, prompt: "Search income")
+            .searchable(text: $search, prompt: "Search income or a date")
             .navigationTitle("Income")
             .refreshable { await store.loadAll() }
             .toolbar {
@@ -306,14 +325,22 @@ struct IncomeView: View {
 
                     VStack(alignment: .leading, spacing: 6) {
                         ForEach(slices.prefix(5), id: \.type) { slice in
-                            HStack(spacing: 6) {
-                                Circle().fill(slice.color).frame(width: 7, height: 7)
-                                Text(slice.label).font(.caption).lineLimit(1)
-                                Spacer()
-                                Text(store.format(slice.value, compact: true))
-                                    .font(.system(.caption2, design: .monospaced))
-                                    .foregroundStyle(.secondary)
+                            Button {
+                                withAnimation(.snappy(duration: 0.2)) {
+                                    categoryFilter = categoryFilter == slice.type ? nil : slice.type
+                                }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Circle().fill(slice.color).frame(width: 7, height: 7)
+                                    Text(slice.label).font(.caption).lineLimit(1)
+                                    Spacer()
+                                    Text(store.format(slice.value, compact: true))
+                                        .font(.system(.caption2, design: .monospaced))
+                                        .foregroundStyle(.secondary)
+                                }
+                                .opacity(categoryFilter == nil || categoryFilter == slice.type ? 1 : 0.4)
                             }
+                            .buttonStyle(.plain)
                         }
                     }
                 }

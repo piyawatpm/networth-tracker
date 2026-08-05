@@ -59,6 +59,11 @@ enum SydneyTime {
         dayFormatter.string(from: Date())
     }
 
+    /// "yyyy-MM-dd" in Sydney, for any instant.
+    static func dayString(_ date: Date) -> String {
+        dayFormatter.string(from: date)
+    }
+
     static func monthKey(_ dateString: String) -> String {
         String(dateString.prefix(7))
     }
