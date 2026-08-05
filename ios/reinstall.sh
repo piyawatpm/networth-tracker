@@ -26,16 +26,18 @@ if [ -z "$DEVICE" ]; then
 fi
 
 echo "Building…"
+# Release, not Debug: the phone is a daily driver, not a debug target, and
+# -Onone Swift plus debug-mode SwiftUI is measurably slower everywhere.
 xcodebuild \
   -project VestaQuickAdd.xcodeproj \
   -scheme VestaQuickAdd \
-  -configuration Debug \
+  -configuration Release \
   -destination "id=$DEVICE" \
   -derivedDataPath build/dd \
   -allowProvisioningUpdates \
   build | tail -5
 
-APP=build/dd/Build/Products/Debug-iphoneos/VestaQuickAdd.app
+APP=build/dd/Build/Products/Release-iphoneos/VestaQuickAdd.app
 echo "Installing…"
 xcrun devicectl device install app --device "$DEVICE" "$APP"
 

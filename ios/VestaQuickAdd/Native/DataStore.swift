@@ -60,6 +60,30 @@ struct DiskCache: Codable {
     }
 }
 
+/// The cached boot, fully prepared off the main actor: the cache itself plus
+/// every parsed series derived from it. `bootstrap()` awaits this from a
+/// detached task and then just assigns — the main thread never parses.
+struct BootPayload: Sendable {
+    let cache: DiskCache
+    let networthParsed: [(date: Date, valueUsd: Double)]
+    let networthParsedNoSuper: [(date: Date, valueUsd: Double)]
+    let portfolioParsed: [(date: Date, valueUsd: Double)]
+    let portfolioParsedWithSuper: [(date: Date, valueUsd: Double)]
+    let cryptoParsed: [(date: Date, valueUsd: Double)]
+
+    static func prepare() -> BootPayload? {
+        guard let cache = DiskCache.load() else { return nil }
+        return BootPayload(
+            cache: cache,
+            networthParsed: DataStore.parseRows(cache.networthHistory),
+            networthParsedNoSuper: DataStore.parseRowsNoSuper(cache.networthHistory),
+            portfolioParsed: DataStore.parseRows(cache.portfolioHistory),
+            portfolioParsedWithSuper: DataStore.parseRows(cache.portfolioHistory, withSuper: true),
+            cryptoParsed: DataStore.parseRows(cache.cryptoHistory)
+        )
+    }
+}
+
 @Observable
 @MainActor
 final class DataStore {
@@ -196,26 +220,25 @@ final class DataStore {
         }
     }
 
-    private static let snapshotFormats: [DateFormatter] = {
-        ["yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd HH:mm", "yyyy-MM-dd"].map { format in
-            let f = DateFormatter()
-            f.locale = Locale(identifier: "en_US_POSIX")
-            f.timeZone = SydneyTime.zone
-            f.dateFormat = format
-            return f
-        }
-    }()
-
-    static func parseRows(
+    // Snapshot timestamps go through SnapshotDate, not DateFormatter — the
+    // formatter trio this replaced cost ~60µs a row and put 9.2s of parsing
+    // on the main thread at every cold launch. nonisolated so the boot path
+    // can run it off the main actor; it's a pure function.
+    nonisolated static func parseRows(
         _ rows: [SnapshotPoint], withSuper: Bool = false
     ) -> [(date: Date, valueUsd: Double)] {
         rows.compactMap { row in
-            for formatter in snapshotFormats {
-                if let date = formatter.date(from: row.date) {
-                    return (date, withSuper ? (row.valueWithSuper ?? row.value) : row.value)
-                }
-            }
-            return nil
+            guard let date = SnapshotDate.parse(row.date) else { return nil }
+            return (date, withSuper ? (row.valueWithSuper ?? row.value) : row.value)
+        }
+    }
+
+    nonisolated static func parseRowsNoSuper(
+        _ rows: [SnapshotPoint]
+    ) -> [(date: Date, valueUsd: Double)] {
+        rows.compactMap { row in
+            guard let date = SnapshotDate.parse(row.date) else { return nil }
+            return (date, row.valueNoSuper ?? row.value)
         }
     }
 
@@ -231,14 +254,7 @@ final class DataStore {
         default:
             networthHistory = rows
             networthParsed = Self.parseRows(rows)
-            networthParsedNoSuper = rows.compactMap { row in
-                for formatter in Self.snapshotFormats {
-                    if let date = formatter.date(from: row.date) {
-                        return (date, row.valueNoSuper ?? row.value)
-                    }
-                }
-                return nil
-            }
+            networthParsedNoSuper = Self.parseRowsNoSuper(rows)
             rebuildOverlays()
         }
     }
@@ -248,17 +264,29 @@ final class DataStore {
     /// daily-only overlay had nothing to draw on the 1D view, which is why
     /// the legend used to vanish there. Debt only moves on logged
     /// transactions, so its daily replay is forward-filled onto each row.
+    /// One cached day formatter — the old code allocated a fresh DateFormatter
+    /// per debt PER DAY inside the replay loop, at ~1ms per allocation.
+    private static let dayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = SydneyTime.zone
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
     private func rebuildOverlays() {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = SydneyTime.zone
-        formatter.dateFormat = "yyyy-MM-dd"
+        // Each debt's creation day, computed once for the whole replay.
+        let createdDays = debts.map {
+            Self.dayFormatter.string(from: Date(timeIntervalSince1970: $0.createdAt / 1000))
+        }
 
         // Replay debt once per distinct day, not once per intraday row.
         var debtByDay: [String: Double] = [:]
         for row in networthHistory {
             let day = String(row.date.prefix(10))
-            if debtByDay[day] == nil { debtByDay[day] = debtNetUsdAt(day: day) }
+            if debtByDay[day] == nil {
+                debtByDay[day] = debtNetUsdAt(day: day, createdDays: createdDays)
+            }
         }
 
         var portfolio: [(date: Date, valueUsd: Double)] = []
@@ -267,11 +295,7 @@ final class DataStore {
         var superDelta: [Date: Double] = [:]
 
         for row in networthHistory {
-            var parsedDate: Date?
-            for candidate in Self.snapshotFormats {
-                if let d = candidate.date(from: row.date) { parsedDate = d; break }
-            }
-            guard let date = parsedDate else { continue }
+            guard let date = SnapshotDate.parse(row.date) else { continue }
             if let p = row.portfolio { portfolio.append((date, p)) }
             if let c = row.crypto { crypto.append((date, c)) }
             if let noSuper = row.valueNoSuper { superDelta[date] = row.value - noSuper }
@@ -286,15 +310,11 @@ final class DataStore {
 
     /// Signed net debt (USD) as it stood at end of `day` — records created by
     /// then, transactions dated by then. Overpaid ledgers flip sides.
-    private func debtNetUsdAt(day: String) -> Double {
+    /// `createdDays` aligns with `debts`, precomputed by the caller.
+    private func debtNetUsdAt(day: String, createdDays: [String]) -> Double {
         var net = 0.0
-        for debt in debts {
-            let createdDay = Date(timeIntervalSince1970: debt.createdAt / 1000)
-            let formatter = DateFormatter()
-            formatter.locale = Locale(identifier: "en_US_POSIX")
-            formatter.timeZone = SydneyTime.zone
-            formatter.dateFormat = "yyyy-MM-dd"
-            guard formatter.string(from: createdDay) <= day else { continue }
+        for (debt, createdDay) in zip(debts, createdDays) {
+            guard createdDay <= day else { continue }
             let paid = debtTxs
                 .filter { $0.debtId == debt.id && String($0.date.prefix(10)) <= day }
                 .reduce(0) { $0 + $1.amount }
@@ -336,23 +356,36 @@ final class DataStore {
     // MARK: Session
 
     func bootstrap() async {
-        // 1. Paint instantly from the disk cache — no spinner, no network.
-        if let cache = DiskCache.load() {
-            rawBlobs = cache.blobs
-            blobsSyncedAt = cache.blobsSyncedAt
-            if !cache.fxRates.isEmpty {
-                Money.rates = cache.fxRates
-                fxLoaded = true
+        // 1. Paint from the disk cache — file read, 6MB JSON decode and all
+        //    date parsing happen OFF the main actor, so the first frame is on
+        //    screen while this works. The await suspends without blocking;
+        //    the main actor only assigns the finished arrays.
+        let prepared = await Perf.measureAsync("boot prepare (off-main)") {
+            await Task.detached(priority: .userInitiated) { BootPayload.prepare() }.value
+        }
+        if let p = prepared {
+            Perf.measure("boot apply (main)") {
+                rawBlobs = p.cache.blobs
+                blobsSyncedAt = p.cache.blobsSyncedAt
+                if !p.cache.fxRates.isEmpty {
+                    Money.rates = p.cache.fxRates
+                    fxLoaded = true
+                }
+                livePrices = p.cache.livePrices
+                lastRefreshed = p.cache.savedAt
+                // decode FIRST: rebuildOverlays needs `debts`/`debtTxs`.
+                decode(p.cache.blobs)
+                networthHistory = p.cache.networthHistory
+                networthParsed = p.networthParsed
+                networthParsedNoSuper = p.networthParsedNoSuper
+                portfolioHistory = p.cache.portfolioHistory
+                portfolioParsed = p.portfolioParsed
+                portfolioParsedWithSuper = p.portfolioParsedWithSuper
+                cryptoHistory = p.cache.cryptoHistory
+                cryptoParsed = p.cryptoParsed
+                rebuildOverlays()
+                recomputeDerived()
             }
-            livePrices = cache.livePrices
-            lastRefreshed = cache.savedAt
-            // decode FIRST: setHistory rebuilds the debt overlay, which needs
-            // `debts`/`debtTxs` to already be populated.
-            decode(cache.blobs)
-            setHistory("networth", cache.networthHistory)
-            setHistory("portfolio", cache.portfolioHistory)
-            setHistory("crypto", cache.cryptoHistory)
-            recomputeDerived()
         }
 
         // 2. Session: keychain restore, else silent owner sign-in. The login
@@ -448,7 +481,10 @@ final class DataStore {
             startLive()
 
             lastRefreshed = Date().timeIntervalSince1970
-            DiskCache(
+            // Encode+write off-main: serializing 6MB of JSON on the main
+            // actor after every refresh was a visible hitch. The struct is a
+            // value copy, so the store can keep mutating while it writes.
+            let snapshot = DiskCache(
                 version: DiskCache.currentVersion,
                 blobs: rawBlobs,
                 networthHistory: networthHistory,
@@ -458,7 +494,8 @@ final class DataStore {
                 livePrices: livePrices,
                 savedAt: lastRefreshed,
                 blobsSyncedAt: blobsSyncedAt
-            ).save()
+            )
+            Task.detached(priority: .utility) { snapshot.save() }
         } catch {
             loadError = error.localizedDescription
         }

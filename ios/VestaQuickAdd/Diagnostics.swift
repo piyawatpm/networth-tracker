@@ -36,6 +36,39 @@ func withDeadline<T: Sendable>(
     }
 }
 
+// MARK: - Timing
+
+/// Stopwatch for the boot path, DEBUG-only.
+///
+/// Cold launch is the one thing a user measures without being asked, and it's
+/// the one thing that can't be reasoned about from the code — the cost is in
+/// what the data actually is, not what the code says. Numbers first.
+enum Perf {
+    @discardableResult
+    static func measure<T>(_ label: String, _ work: () throws -> T) rethrows -> T {
+        #if DEBUG
+        let start = CFAbsoluteTimeGetCurrent()
+        defer {
+            let ms = (CFAbsoluteTimeGetCurrent() - start) * 1000
+            print(String(format: "[perf] %-26@ %7.1f ms", label as NSString, ms))
+        }
+        #endif
+        return try work()
+    }
+
+    @discardableResult
+    static func measureAsync<T>(_ label: String, _ work: () async throws -> T) async rethrows -> T {
+        #if DEBUG
+        let start = CFAbsoluteTimeGetCurrent()
+        defer {
+            let ms = (CFAbsoluteTimeGetCurrent() - start) * 1000
+            print(String(format: "[perf] %-26@ %7.1f ms", label as NSString, ms))
+        }
+        #endif
+        return try await work()
+    }
+}
+
 // MARK: - Intent breadcrumbs
 
 /// An on-device trail of what the quick-add intent did, and how far it got.
