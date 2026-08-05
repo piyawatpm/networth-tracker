@@ -342,11 +342,17 @@ struct HistoryChartCard: View {
         return image
     }
 
-    /// Hero line: dotted area + three stacked strokes that read as neon bloom
-    /// (Chart marks can't blur, so the glow is layered width).
+    /// Neon line: three stacked strokes that read as bloom (Chart marks can't
+    /// blur, so the glow is layered width), optionally over a dot-matrix fill.
+    ///
+    /// Every series uses this — in comparison mode the four lines are peers,
+    /// so a glowing hero beside flat context lines was an inconsistency, not a
+    /// hierarchy. The hero keeps the dot fill and a slightly heavier core so
+    /// it still reads first.
     @ChartContentBuilder
-    private func heroSeries(
-        _ segment: [Point], tint: Color, id: String, dimmed: Bool, yBase: Double, filled: Bool
+    private func neonLine(
+        _ segment: [Point], tint: Color, id: String, dimmed: Bool,
+        yBase: Double, filled: Bool, weight: CGFloat = 1
     ) -> some ChartContent {
         let dots = Image(uiImage: Self.dotTile(UIColor(tint)))
         ForEach(segment) { point in
@@ -364,7 +370,7 @@ struct HistoryChartCard: View {
                 x: .value("Date", point.date), y: .value("Value", point.value),
                 series: .value("s", "glow1-\(id)")
             )
-            .lineStyle(StrokeStyle(lineWidth: 11, lineCap: .round, lineJoin: .round))
+            .lineStyle(StrokeStyle(lineWidth: 11 * weight, lineCap: .round, lineJoin: .round))
             .foregroundStyle(tint)
             .opacity(dimmed ? 0.04 : 0.10)
 
@@ -372,7 +378,7 @@ struct HistoryChartCard: View {
                 x: .value("Date", point.date), y: .value("Value", point.value),
                 series: .value("s", "glow2-\(id)")
             )
-            .lineStyle(StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round))
+            .lineStyle(StrokeStyle(lineWidth: 5 * weight, lineCap: .round, lineJoin: .round))
             .foregroundStyle(tint)
             .opacity(dimmed ? 0.08 : 0.22)
 
@@ -380,7 +386,7 @@ struct HistoryChartCard: View {
                 x: .value("Date", point.date), y: .value("Value", point.value),
                 series: .value("s", "main-\(id)")
             )
-            .lineStyle(StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round))
+            .lineStyle(StrokeStyle(lineWidth: 2.2 * weight, lineCap: .round, lineJoin: .round))
             .foregroundStyle(tint)
             .opacity(dimmed ? 0.3 : 1)
         }
@@ -426,20 +432,29 @@ struct HistoryChartCard: View {
                         .foregroundStyle(.white.opacity(0.18))
                 }
 
-                heroSeries(lit, tint: tint, id: "lit", dimmed: false, yBase: yBase, filled: filled)
+                neonLine(lit, tint: tint, id: "lit", dimmed: false, yBase: yBase, filled: filled)
                 if !dim.isEmpty {
-                    heroSeries(dim, tint: tint, id: "dim", dimmed: true, yBase: yBase, filled: filled)
+                    neonLine(dim, tint: tint, id: "dim", dimmed: true, yBase: yBase, filled: filled)
                 }
 
-                // Component lines: thin, no glow, so the hero stays the hero.
+                // Component lines get the same neon treatment and the same
+                // scrub split — lit up to the finger, dimmed after.
                 ForEach(series, id: \.0.id) { overlay, pts in
-                    ForEach(pts) { p in
-                        LineMark(
-                            x: .value("Date", p.date), y: .value("Value", p.value),
-                            series: .value("s", "ov-\(overlay.name)")
+                    let cut = scrubbedPoint.flatMap { selected in
+                        pts.firstIndex { $0.date >= selected.date }
+                    }
+                    let ovLit = cut.map { Array(pts[...$0]) } ?? pts
+                    let ovDim = cut.map { $0 < pts.count - 1 ? Array(pts[$0...]) : [] } ?? []
+
+                    neonLine(
+                        ovLit, tint: overlay.color, id: "ov-lit-\(overlay.name)",
+                        dimmed: false, yBase: yBase, filled: false, weight: 0.72
+                    )
+                    if !ovDim.isEmpty {
+                        neonLine(
+                            ovDim, tint: overlay.color, id: "ov-dim-\(overlay.name)",
+                            dimmed: true, yBase: yBase, filled: false, weight: 0.72
                         )
-                        .lineStyle(StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round))
-                        .foregroundStyle(overlay.color)
                     }
                     // End marker doubles as the direct label anchor.
                     if let last = pts.last {
