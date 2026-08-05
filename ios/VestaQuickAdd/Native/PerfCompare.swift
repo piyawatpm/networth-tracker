@@ -247,6 +247,8 @@ struct PerfCompareCard: View {
     let benchmarks: [Benchmark]
     let values: [(date: String, value: Double)]
     let flows: [(date: String, value: Double)]
+    /// Extra caveat line under the fine print (e.g. the super-in warning).
+    var footnote: String?
 
     @State private var selected: Benchmark
     @State private var prices: [DcaCompare.PricePoint]?
@@ -255,12 +257,14 @@ struct PerfCompareCard: View {
 
     init(
         start: String, benchmarks: [Benchmark],
-        values: [(date: String, value: Double)], flows: [(date: String, value: Double)]
+        values: [(date: String, value: Double)], flows: [(date: String, value: Double)],
+        footnote: String? = nil
     ) {
         self.start = start
         self.benchmarks = benchmarks
         self.values = values
         self.flows = flows
+        self.footnote = footnote
         _selected = State(initialValue: benchmarks[0])
     }
 
@@ -434,6 +438,11 @@ struct PerfCompareCard: View {
         Text("growth of the same dollar · deposits neutralized (time-weighted) · dividends in S&P 500")
             .font(.system(size: 8, design: .monospaced))
             .foregroundStyle(.tertiary)
+        if let footnote {
+            Text("⚠ " + footnote)
+                .font(.system(size: 8, design: .monospaced))
+                .foregroundStyle(Ledger.seriesCrypto)
+        }
     }
 
     private func chip(_ name: String, _ pctValue: Double, _ color: Color) -> some View {

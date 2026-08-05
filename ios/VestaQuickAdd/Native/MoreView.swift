@@ -622,6 +622,11 @@ struct PerformanceLiteView: View {
     @Environment(DataStore.self) private var store
     @State private var series: [SnapshotPoint] = []
     @State private var kind = "networth"
+    /// Super stays OUT of the net-worth comparison by default: the Hostplus
+    /// contributions are only partially logged, so with super in, unlogged
+    /// deposits read as growth (the known +contamination). The toggle exists
+    /// for the "whole picture anyway" look.
+    @State private var includeSuper = false
 
     private var stockValues: [(date: String, value: Double)] {
         DcaCompare.dailyValues(store.portfolioParsed)
@@ -642,17 +647,23 @@ struct PerformanceLiteView: View {
         )
     }
 
-    /// Stock flows scoped to what the ex-super value series tracks: super
-    /// holdings' contributions and ghost flows of deleted holdings excluded
-    /// (three duplicate A$4,300 Hostplus entries live in the log).
-    private var stockCompareFlows: [(date: String, value: Double)] {
+    /// Stock flows scoped to what the chosen value series tracks. Ghost flows
+    /// of deleted holdings are always excluded (three duplicate A$4,300
+    /// Hostplus entries live in the log); super holdings' flows join only
+    /// when the values include super.
+    private func stockFlows(includeSuper: Bool) -> [(date: String, value: Double)] {
         let superIds = Set(store.holdings.filter { $0.accountType == "super" }.map(\.id))
         let knownIds = Set(store.holdings.map(\.id))
         return DcaCompare.flowsByDay(
             store.portfolioTxs.filter {
-                knownIds.contains($0.holdingId) && !superIds.contains($0.holdingId)
+                knownIds.contains($0.holdingId)
+                    && (includeSuper || !superIds.contains($0.holdingId))
             }
         )
+    }
+
+    private var stockCompareFlows: [(date: String, value: Double)] {
+        stockFlows(includeSuper: false)
     }
 
     var body: some View {
@@ -671,9 +682,28 @@ struct PerformanceLiteView: View {
                     PerfCompareCard(
                         start: "2026-05-01",
                         benchmarks: [.sp500, .btc],
-                        values: DcaCompare.combinedDaily(stockValues, cryptoPot),
-                        flows: DcaCompare.mergedFlows(stockCompareFlows, cryptoFlows)
+                        values: DcaCompare.combinedDaily(
+                            includeSuper
+                                ? DcaCompare.dailyValues(store.portfolioParsedWithSuper)
+                                : stockValues,
+                            cryptoPot
+                        ),
+                        flows: DcaCompare.mergedFlows(
+                            stockFlows(includeSuper: includeSuper), cryptoFlows
+                        ),
+                        footnote: includeSuper
+                            ? "super in — unlogged super contributions read as growth, trust the OFF number"
+                            : nil
                     )
+
+                    Toggle(isOn: $includeSuper.animation(.snappy(duration: 0.25))) {
+                        Text("Include super")
+                            .font(.subheadline)
+                    }
+                    .tint(Ledger.income)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .financeCard()
                 }
                 if kind == "portfolio" {
                     PerfCompareCard(
