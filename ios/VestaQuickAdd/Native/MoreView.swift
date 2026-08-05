@@ -22,7 +22,11 @@ struct MoreView: View {
     @State private var webPath = "/dashboard"
     // Screenshot/UI runs can open straight onto a pushed page.
     @State private var path: [MoreRoute] =
-        ProcessInfo.processInfo.environment["VESTA_MORE_ROUTE"] == "debts" ? [.debts] : []
+        switch ProcessInfo.processInfo.environment["VESTA_MORE_ROUTE"] {
+        case "debts": [.debts]
+        case "performance": [.performance]
+        default: []
+        }
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -620,8 +624,12 @@ struct PerformanceLiteView: View {
     @State private var kind = "portfolio"
 
     private var flowsUsd: [CashFlow] {
-        // Buys are money in (negative for XIRR), sells money out.
-        store.portfolioTxs.map { tx in
+        // Buys are money in (negative for XIRR), sells money out. Ghost flows
+        // of DELETED holdings are excluded — the log carries duplicate super
+        // buys under abandoned holding names, and a buy with no surviving
+        // position poisons the rate with capital that never existed.
+        let knownIds = Set(store.holdings.map(\.id))
+        return store.portfolioTxs.filter { knownIds.contains($0.holdingId) }.map { tx in
             let usd = Money.convert(tx.totalAmount, from: tx.currency, to: "USD")
             return CashFlow(date: tx.date, amount: tx.type == "buy" ? -usd : usd)
         }
@@ -647,13 +655,18 @@ struct PerformanceLiteView: View {
                 }
                 .pickerStyle(.segmented)
 
+                if kind == "portfolio" {
+                    // Same money, same days, into SPY instead — see PerfCompare.
+                    PerfCompareCard(start: "2026-05-01")
+                }
+
                 if let rate = xirrValue, kind == "portfolio" {
                     VStack(spacing: 4) {
                         Text("XIRR / yr").labelMono()
                         Text("\(rate >= 0 ? "+" : "")\(String(format: "%.1f", rate * 100))%")
                             .font(.system(size: 30, weight: .bold, design: .rounded))
                             .foregroundStyle(rate >= 0 ? Ledger.income : Ledger.expense)
-                        Text("money-weighted, all logged flows")
+                        Text("money-weighted · deleted-holding flows excluded")
                             .font(.caption2).foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity)
