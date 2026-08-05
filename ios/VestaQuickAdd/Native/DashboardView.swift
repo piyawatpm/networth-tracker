@@ -64,7 +64,13 @@ struct DashboardView: View {
         return [
             ChartOverlay(name: "Stocks", color: Ledger.seriesStocks, points: stocks),
             ChartOverlay(name: "Crypto", color: Ledger.seriesCrypto, points: store.overlayCrypto),
-            ChartOverlay(name: "Debt", color: Ledger.seriesDebt, points: store.overlayDebt),
+            // Not a peer line: a replayed daily ledger, an order of magnitude
+            // smaller, where "up" means the opposite of what it means for the
+            // others. It gets its own step strip — see ChartOverlay.Form.
+            ChartOverlay(
+                name: "Debt", color: Ledger.seriesDebt,
+                points: store.overlayDebt, form: .stepStrip
+            ),
         ]
     }
 

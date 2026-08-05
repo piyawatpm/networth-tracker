@@ -60,9 +60,42 @@ enum ChartMode {
 /// A component of net worth drawn alongside it. `points` share the hero
 /// series' timestamps so every line buckets identically.
 struct ChartOverlay: Identifiable {
+    /// How the series should be drawn — a property of the DATA, not a style
+    /// preference.
+    enum Form {
+        /// Varies continuously, on the same order of magnitude as the hero:
+        /// a peer line on the main plot.
+        case line
+
+        /// A balance that holds flat between discrete events, an order of
+        /// magnitude smaller: its own step-area strip beneath the main plot.
+        ///
+        /// Debt is the case this exists for, and it broke all three ways a
+        /// series can break when drawn as a peer line:
+        ///
+        ///   * **Interpolation lied.** The balance is replayed once per DAY
+        ///     and forward-filled onto ~170 intraday rows, so a repayment on
+        ///     the 3rd was drawn as a smooth slide from the 1st to the 5th.
+        ///     A value that holds until an event explicitly replaces it wants
+        ///     step interpolation; a diagonal asserts a transition that never
+        ///     happened.
+        ///   * **Scale.** Tens of thousands against a net worth in the
+        ///     millions: pinned flat to the floor in value mode, and in
+        ///     indexed mode dividing by a small base is what printed
+        ///     +1687038.1%.
+        ///   * **Polarity.** For every other series up is good. For debt up
+        ///     means the balance shrank — same grammar, opposite meaning, on
+        ///     the same axis.
+        ///
+        /// Its own strip fixes all three at once, and keeps the shared x-axis
+        /// and scrub that put debt on the chart in the first place.
+        case stepStrip
+    }
+
     let name: String
     let color: Color
     let points: [(date: Date, valueUsd: Double)]
+    var form: Form = .line
     var id: String { name }
 }
 
@@ -111,15 +144,47 @@ struct HistoryChartCard: View {
 
     // MARK: Derived state
 
+    /// Peer lines sharing the hero's axis.
     private var visibleOverlays: [ChartOverlay] {
-        overlays.filter { !hiddenOverlays.contains($0.name) && !(render.overlays[$0.name] ?? []).isEmpty }
+        overlays.filter {
+            $0.form == .line
+                && !hiddenOverlays.contains($0.name)
+                && !(render.overlays[$0.name] ?? []).isEmpty
+        }
+    }
+
+    /// Series that get their own strip. A ledger sitting at zero all window is
+    /// nothing to look at — no debt, no strip.
+    private var visibleStrips: [ChartOverlay] {
+        overlays.filter {
+            $0.form == .stepStrip
+                && !hiddenOverlays.contains($0.name)
+                && (render.overlays[$0.name] ?? []).contains { abs($0.value) > 0.01 }
+        }
     }
 
     /// Absolute values are only readable with a single series on the plot;
     /// past that, indexing is the honest default. An explicit toggle wins.
+    ///
+    /// Strips don't count: they left the shared axis, so turning debt on no
+    /// longer forces the whole chart out of real currency.
     private var mode: ChartMode {
         modeOverride ?? (visibleOverlays.isEmpty ? .value : .indexed)
     }
+
+    /// Pinned so the main plot and every strip share one time axis — without
+    /// it Charts infers a domain per plot and the two drift out of alignment.
+    private var xDomain: ClosedRange<Date>? {
+        guard let first = syncedHero.first?.date,
+              let last = syncedHero.last?.date, first < last
+        else { return nil }
+        return first...last
+    }
+
+    /// Both plots reserve exactly this much for y-axis labels, so their plot
+    /// areas start and end at the same x. A shared axis that doesn't line up
+    /// is worse than no shared axis.
+    private static let axisLabelWidth: CGFloat = 46
 
     /// Hero points with the last value pinned to the CURRENT live value —
     /// rebuilds are async, so between them the number moves with sockets and
@@ -238,14 +303,20 @@ struct HistoryChartCard: View {
                 // the whole card down whenever super was toggled.
                 legendChip(
                     name: legendTitle, color: Ledger.income, hidden: false,
-                    value: scrubValue(rendered(syncedHero)), isHero: true
+                    value: scrubValue(rendered(syncedHero)), isHero: true,
+                    asPercent: mode == .indexed
                 )
                 ForEach(overlays) { overlay in
+                    // A strip series never entered the indexed space, so its
+                    // chip stays in currency even when the main plot is in %.
+                    let strip = overlay.form == .stepStrip
+                    let points = render.overlays[overlay.name] ?? []
                     legendChip(
                         name: overlay.name, color: overlay.color,
                         hidden: hiddenOverlays.contains(overlay.name),
-                        value: scrubValue(rendered(render.overlays[overlay.name] ?? [])),
-                        isHero: false
+                        value: scrubValue(strip ? points : rendered(points)),
+                        isHero: false,
+                        asPercent: !strip && mode == .indexed
                     )
                 }
                 Spacer(minLength: 0)
@@ -275,7 +346,8 @@ struct HistoryChartCard: View {
     }
 
     private func legendChip(
-        name: String, color: Color, hidden: Bool, value: Double?, isHero: Bool
+        name: String, color: Color, hidden: Bool, value: Double?, isHero: Bool,
+        asPercent: Bool
     ) -> some View {
         Button {
             guard !isHero else { return } // the hero series is always drawn
@@ -295,7 +367,7 @@ struct HistoryChartCard: View {
                 }
                 if let value, !hidden {
                     Text(
-                        mode == .indexed
+                        asPercent
                             ? "\(value >= 0 ? "+" : "")\(String(format: "%.1f", value))%"
                             : Money.format(value, currency: store.displayCurrency, compact: true)
                     )
@@ -424,6 +496,11 @@ struct HistoryChartCard: View {
             let heroHigh = hero.first { $0.value == (heroValues.max() ?? 0) }
             let heroLow = hero.first { $0.value == (heroValues.min() ?? 0) }
 
+            // Main plot and strips stack as small multiples over one shared,
+            // pinned time axis — the sanctioned answer for two measures whose
+            // magnitudes can't share a scale, and the one that keeps debt
+            // scrubbable against net worth.
+            VStack(spacing: 7) {
             Chart {
                 // Zero line anchors the indexed view — "did it beat flat?"
                 if mode == .indexed {
@@ -503,22 +580,10 @@ struct HistoryChartCard: View {
                 }
             }
             .chartXSelection(value: $scrubDate)
+            // The bottom-most plot carries the time labels for the whole
+            // stack; repeating them between plots just adds ink.
             .chartXAxis {
-                AxisMarks(values: .automatic(desiredCount: 4)) { _ in
-                    if render.period == .d1 {
-                        AxisValueLabel(format: .dateTime.hour().minute())
-                            .font(.system(size: 9, design: .monospaced))
-                            .foregroundStyle(.tertiary)
-                    } else if render.period == .m6 || render.period == .y1 || render.period == .all {
-                        AxisValueLabel(format: .dateTime.month(.abbreviated).year(.twoDigits))
-                            .font(.system(size: 9, design: .monospaced))
-                            .foregroundStyle(.tertiary)
-                    } else {
-                        AxisValueLabel(format: .dateTime.day().month(.abbreviated))
-                            .font(.system(size: 9, design: .monospaced))
-                            .foregroundStyle(.tertiary)
-                    }
-                }
+                if visibleStrips.isEmpty { timeAxis() } else { AxisMarks { _ in } }
             }
             .chartYAxis {
                 // Value mode keeps the OKX-clean hidden axis (the hero number
@@ -531,15 +596,203 @@ struct HistoryChartCard: View {
                             if let v = value.as(Double.self) {
                                 Text("\(v >= 0 ? "+" : "")\(String(format: "%.0f", v))%")
                                     .font(.system(size: 9, design: .monospaced))
+                                    .frame(width: Self.axisLabelWidth, alignment: .trailing)
                             }
+                        }
+                    }
+                } else if !visibleStrips.isEmpty {
+                    // No labels to show here, but the strip below has some —
+                    // reserve the identical width or the two time axes drift.
+                    AxisMarks(position: .trailing, values: [yBase]) { _ in
+                        AxisValueLabel {
+                            Color.clear.frame(width: Self.axisLabelWidth, height: 1)
                         }
                     }
                 }
             }
             .chartYScale(domain: yBase...(high + span * 0.10))
-            .frame(height: 210)
+            .chartXScale(domain: xDomain ?? Date.distantPast...Date.distantFuture)
+            .frame(height: visibleStrips.isEmpty ? 210 : 176)
+
+            ForEach(visibleStrips) { overlay in
+                strip(overlay, isLast: overlay.id == visibleStrips.last?.id)
+            }
+            }
             .id(render.period)
             .transaction { $0.animation = nil }
+        }
+    }
+
+    /// The shared time axis. Lives in one place because both the main plot and
+    /// the bottom strip need to format it identically.
+    /// Tick positions, placed by hand rather than by `.automatic`.
+    ///
+    /// Automatic puts a tick on the domain's last instant, where the label is
+    /// centred half-outside the plot and gets clipped to an ellipsis against
+    /// the y-axis gutter. Insetting the ends is the only reliable fix — the
+    /// labels stay real dates, they just never sit on the edge.
+    private var timeTicks: [Date] {
+        guard let domain = xDomain else { return [] }
+        let start = domain.lowerBound.timeIntervalSince1970
+        let span = domain.upperBound.timeIntervalSince1970 - start
+        return [0.10, 0.5, 0.88].map { Date(timeIntervalSince1970: start + span * $0) }
+    }
+
+    private var timeFormat: Date.FormatStyle {
+        switch render.period {
+        case .d1: return .dateTime.hour().minute()
+        case .m6, .y1, .all: return .dateTime.month(.abbreviated).year(.twoDigits)
+        default: return .dateTime.day().month(.abbreviated)
+        }
+    }
+
+    @AxisContentBuilder
+    private func timeAxis() -> some AxisContent {
+        AxisMarks(values: timeTicks) { value in
+            AxisValueLabel {
+                if let date = value.as(Date.self) {
+                    // fixedSize: Charts truncates an axis label to whatever
+                    // slot it computed, and a date reading "Jul…" is worse
+                    // than one that overhangs by a few points.
+                    Text(date, format: timeFormat)
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                        .fixedSize()
+                }
+            }
+        }
+    }
+
+    /// A balance's own strip: a step sparkline of where the ledger moved.
+    ///
+    /// Step interpolation is the whole point — the balance is a replayed
+    /// ledger that holds until a transaction replaces it, so the horizontal
+    /// runs are "nothing happened" and the verticals are the repayments. A
+    /// diagonal between two points would assert a gradual paydown that never
+    /// occurred, and a dot on each vertical says which days you actually paid.
+    ///
+    /// The scale is fitted to the data, NOT anchored at zero, and both ends
+    /// are labelled. Zero-anchoring was the first attempt and it re-created
+    /// the bug being fixed: ฿82k of real paydown on a ฿530k balance collapsed
+    /// into a sliver at the bottom of the strip. Level and change are
+    /// different questions — the level is stated in the header where it reads
+    /// exactly, and the strip is given entirely to the change. The zero rule
+    /// appears only when the ledger genuinely crosses it.
+    @ViewBuilder
+    private func strip(_ overlay: ChartOverlay, isLast: Bool) -> some View {
+        let points = render.overlays[overlay.name] ?? []
+        let values = points.map(\.value)
+        let low = values.min() ?? 0
+        let high = values.max() ?? 0
+        let pad = max((high - low) * 0.22, max(abs(high), 1) * 0.02)
+        let floor = low - pad
+        let current = scrubValue(points) ?? 0
+        // Signed net: rising means the balance owed shrank.
+        let change = (values.last ?? 0) - (values.first ?? 0)
+        // Where the ledger actually moved — every other point is a hold.
+        let events = zip(points, points.dropFirst()).compactMap { previous, next in
+            abs(next.value - previous.value) > 0.005 ? next : nil
+        }
+        // A ledger that didn't move all window has one value, not a range —
+        // labelling both ends would print the same number twice.
+        let axisValues: [Double] = (high - low) > max(abs(high), 1) * 0.001
+            ? [low, high] : [high]
+
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 5) {
+                Circle().fill(overlay.color).frame(width: 6, height: 6)
+                Text(overlay.name.uppercased())
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                Text(Money.format(current, currency: store.displayCurrency, compact: true))
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.primary)
+                Spacer(minLength: 0)
+                // The question a debt strip exists to answer.
+                if abs(change) > 0.01 {
+                    Text(
+                        "\(change > 0 ? "↓" : "↑")\(Money.format(abs(change), currency: store.displayCurrency, compact: true)) \(change > 0 ? "paid" : "added")"
+                    )
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .foregroundStyle(change > 0 ? Ledger.income : Ledger.expense)
+                }
+            }
+
+            Chart {
+                // Fills from the floor of the fitted window, not from zero —
+                // it's a band under the line for legibility, and must not be
+                // read as height-encoded magnitude.
+                ForEach(points) { point in
+                    AreaMark(
+                        x: .value("Date", point.date),
+                        yStart: .value("Floor", floor),
+                        yEnd: .value("Balance", point.value),
+                        series: .value("s", "strip-area-\(overlay.name)")
+                    )
+                    .interpolationMethod(.stepEnd)
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [overlay.color.opacity(0.28), overlay.color.opacity(0.02)],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+                }
+                ForEach(points) { point in
+                    LineMark(
+                        x: .value("Date", point.date),
+                        y: .value("Balance", point.value),
+                        series: .value("s", "strip-line-\(overlay.name)")
+                    )
+                    .interpolationMethod(.stepEnd)
+                    .lineStyle(StrokeStyle(lineWidth: 1.8, lineJoin: .round))
+                    .foregroundStyle(overlay.color)
+                }
+                // Only meaningful when the ledger crosses it — an overpaid
+                // debt flips to money owed TO you, and that's worth marking.
+                if low <= 0, high >= 0 {
+                    RuleMark(y: .value("Clear", 0))
+                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [2, 3]))
+                        .foregroundStyle(.white.opacity(0.3))
+                }
+                // The events themselves — the days money actually moved.
+                ForEach(events) { point in
+                    PointMark(x: .value("Date", point.date), y: .value("Balance", point.value))
+                        .symbolSize(20)
+                        .foregroundStyle(overlay.color)
+                }
+
+                if let scrubDate, let point = points.min(by: {
+                    abs($0.date.timeIntervalSince(scrubDate)) < abs($1.date.timeIntervalSince(scrubDate))
+                }) {
+                    RuleMark(x: .value("Date", point.date))
+                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                        .foregroundStyle(.secondary.opacity(0.7))
+                    PointMark(x: .value("Date", point.date), y: .value("Balance", point.value))
+                        .symbolSize(46)
+                        .foregroundStyle(.white)
+                }
+            }
+            // Scrubbing either plot moves both — that shared instant is the
+            // reason debt belongs on this card at all.
+            .chartXSelection(value: $scrubDate)
+            .chartXScale(domain: xDomain ?? Date.distantPast...Date.distantFuture)
+            .chartYScale(domain: floor...(high + pad))
+            .chartXAxis { if isLast { timeAxis() } else { AxisMarks { _ in } } }
+            .chartYAxis {
+                // BOTH ends, always: the scale is truncated, so the reader has
+                // to be able to size the band they're looking at.
+                AxisMarks(position: .trailing, values: axisValues) { value in
+                    AxisValueLabel {
+                        if let v = value.as(Double.self) {
+                            Text(Money.format(v, currency: store.displayCurrency, compact: true))
+                                .font(.system(size: 8, design: .monospaced))
+                                .foregroundStyle(.tertiary)
+                                .frame(width: Self.axisLabelWidth, alignment: .trailing)
+                        }
+                    }
+                }
+            }
+            .frame(height: 56)
         }
     }
 
