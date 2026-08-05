@@ -91,9 +91,17 @@ export async function GET(req: NextRequest) {
   const startMs = Number.isFinite(fromMs) ? fromMs : Date.parse("2020-01-01");
 
   try {
+    // BTC rides the same Yahoo chart endpoint as the equities ("BTC-USD"):
+    // Binance geo-blocks US IPs, which is where Vercel functions run — the
+    // klines call worked from every laptop and 451'd in production. Binance
+    // stays as the fallback for regions where Yahoo is the flaky one.
     const prices =
       symbol === "BTC"
-        ? await fetchBtc(startMs)
+        ? (await fetchEquity(
+            "BTC-USD",
+            Math.floor(startMs / 1000),
+            Math.floor(Date.now() / 1000),
+          )) ?? (await fetchBtc(startMs))
         : await fetchEquity(
             symbol,
             Math.floor(startMs / 1000),
