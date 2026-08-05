@@ -623,28 +623,6 @@ struct PerformanceLiteView: View {
     @State private var series: [SnapshotPoint] = []
     @State private var kind = "portfolio"
 
-    private var flowsUsd: [CashFlow] {
-        // Buys are money in (negative for XIRR), sells money out. Ghost flows
-        // of DELETED holdings are excluded — the log carries duplicate super
-        // buys under abandoned holding names, and a buy with no surviving
-        // position poisons the rate with capital that never existed.
-        let knownIds = Set(store.holdings.map(\.id))
-        return store.portfolioTxs.filter { knownIds.contains($0.holdingId) }.map { tx in
-            let usd = Money.convert(tx.totalAmount, from: tx.currency, to: "USD")
-            return CashFlow(date: tx.date, amount: tx.type == "buy" ? -usd : usd)
-        }
-    }
-
-    private var xirrValue: Double? {
-        let current = store.holdings
-            .filter { $0.type != "savings" }
-            .reduce(0.0) { $0 + Money.convert($1.currentValue, from: $1.currency, to: "USD") }
-        guard current > 0 else { return nil }
-        var flows = flowsUsd
-        flows.append(CashFlow(date: SydneyTime.today(), amount: current))
-        return xirr(flows)
-    }
-
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
@@ -658,20 +636,6 @@ struct PerformanceLiteView: View {
                 if kind == "portfolio" {
                     // Same money, same days, into SPY instead — see PerfCompare.
                     PerfCompareCard(start: "2026-05-01")
-                }
-
-                if let rate = xirrValue, kind == "portfolio" {
-                    VStack(spacing: 4) {
-                        Text("XIRR / yr").labelMono()
-                        Text("\(rate >= 0 ? "+" : "")\(String(format: "%.1f", rate * 100))%")
-                            .font(.system(size: 30, weight: .bold, design: .rounded))
-                            .foregroundStyle(rate >= 0 ? Ledger.income : Ledger.expense)
-                        Text("money-weighted · deleted-holding flows excluded")
-                            .font(.caption2).foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(16)
-                    .financeCard()
                 }
 
                 VStack(alignment: .leading, spacing: 10) {

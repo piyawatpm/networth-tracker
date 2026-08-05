@@ -18,8 +18,9 @@ enum DcaCompare {
 
     struct Series {
         let dates: [Date]
-        let mine: [Double]    // USD P&L per day
-        let index: [Double]   // USD P&L per day, same flows into the index
+        let mine: [Double]     // USD P&L per day
+        let index: [Double]    // USD P&L per day, same flows into the index
+        let invested: [Double] // capital deployed by that day — the % base
     }
 
     /// Latest value at or before `day` (forward-fill over weekends/holidays).
@@ -82,6 +83,7 @@ enum DcaCompare {
         var dates: [Date] = []
         var mine: [Double] = []
         var index: [Double] = []
+        var deployed: [Double] = []
 
         guard var cursor = SnapshotDate.parse(start) else { return nil }
         let today = SydneyTime.today()
@@ -101,11 +103,12 @@ enum DcaCompare {
                 dates.append(cursor)
                 mine.append(mineValue - invested)
                 index.append(units * px - invested)
+                deployed.append(invested)
             }
             cursor = cursor.addingTimeInterval(86400)
         }
         guard dates.count >= 2 else { return nil }
-        return Series(dates: dates, mine: mine, index: index)
+        return Series(dates: dates, mine: mine, index: index, invested: deployed)
     }
 }
 
@@ -199,18 +202,39 @@ struct PerfCompareCard: View {
         .task { await load() }
     }
 
+    /// P&L as a percent of the capital deployed by that day.
+    private func pct(_ pnl: Double, _ invested: Double) -> Double {
+        abs(invested) > 1e-9 ? pnl / abs(invested) * 100 : 0
+    }
+
     @ViewBuilder
     private func content(_ series: DcaCompare.Series) -> some View {
-        let minePnl = store.convert(series.mine.last ?? 0, from: "USD")
-        let indexPnl = store.convert(series.index.last ?? 0, from: "USD")
-        let lead = minePnl - indexPnl
+        let lastInvested = series.invested.last ?? 0
+        let minePct = pct(series.mine.last ?? 0, lastInvested)
+        let indexPct = pct(series.index.last ?? 0, lastInvested)
+        let lead = minePct - indexPct
         let ahead = lead >= 0
 
-        // The verdict, in words, before any chart-reading is needed.
+        // Y-domain from the BULK of the data, not its extremes: a one-day
+        // snapshot glitch (value recorded mid-restructure) can spike to +90%
+        // and flatten the real ±10% story into a line at zero. The 2nd–98th
+        // percentile keeps the axis honest for the other ~95 days; the spike
+        // still shows, clipped at the plot edge instead of owning the scale.
+        let allPct = (0..<series.dates.count).flatMap {
+            [pct(series.mine[$0], series.invested[$0]), pct(series.index[$0], series.invested[$0])]
+        }.sorted()
+        let lo = allPct[Int(Double(allPct.count - 1) * 0.02)]
+        let hi = allPct[Int(Double(allPct.count - 1) * 0.98)]
+        let span = max(hi - lo, 1)
+        let yLow = min(lo - span * 0.25, -1)
+        let yHigh = max(hi + span * 0.25, 1)
+
+        // The verdict, in words, before any chart-reading is needed. Points,
+        // not %: the difference of two percentages is percentage points.
         HStack(spacing: 6) {
             Image(systemName: ahead ? "arrow.up.right" : "arrow.down.right")
                 .font(.caption2.bold())
-            Text("\(ahead ? "ahead of" : "behind") the index by \(store.format(abs(lead), compact: true))")
+            Text("\(ahead ? "ahead of" : "behind") the index by \(String(format: "%.1f", abs(lead))) pts")
                 .font(.system(.caption, design: .monospaced, weight: .semibold))
         }
         .foregroundStyle(ahead ? Ledger.income : Ledger.expense)
@@ -223,7 +247,7 @@ struct PerfCompareCard: View {
             ForEach(Array(series.dates.enumerated()), id: \.offset) { i, date in
                 LineMark(
                     x: .value("Date", date),
-                    y: .value("P&L", store.convert(series.mine[i], from: "USD")),
+                    y: .value("P&L %", pct(series.mine[i], series.invested[i])),
                     series: .value("s", "mine")
                 )
                 .lineStyle(StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round))
@@ -231,7 +255,7 @@ struct PerfCompareCard: View {
 
                 LineMark(
                     x: .value("Date", date),
-                    y: .value("P&L", store.convert(series.index[i], from: "USD")),
+                    y: .value("P&L %", pct(series.index[i], series.invested[i])),
                     series: .value("s", "spy")
                 )
                 .lineStyle(StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round))
@@ -243,24 +267,41 @@ struct PerfCompareCard: View {
                 AxisGridLine().foregroundStyle(.white.opacity(0.05))
                 AxisValueLabel {
                     if let v = value.as(Double.self) {
-                        Text(store.format(v, compact: true))
+                        Text("\(v >= 0 ? "+" : "")\(String(format: "%.0f", v))%")
                             .font(.system(size: 8, design: .monospaced))
                     }
                 }
             }
         }
+        .chartYScale(domain: yLow...yHigh)
+        // Charts does NOT clip marks to the plot — without this the glitch
+        // day draws a line up across the whole page.
+        .chartPlotStyle { $0.clipped() }
+        // Hand-placed ticks: .automatic puts one on the domain's last instant,
+        // where the label renders clipped to an ellipsis (same fix as the
+        // dashboard chart). fixedSize so Charts can't truncate the text.
         .chartXAxis {
-            AxisMarks(values: .automatic(desiredCount: 3)) { _ in
-                AxisValueLabel(format: .dateTime.day().month(.abbreviated))
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(.tertiary)
+            let ticks: [Date] = {
+                guard let first = series.dates.first, let last = series.dates.last else { return [] }
+                let span = last.timeIntervalSince(first)
+                return [0.10, 0.5, 0.88].map { first.addingTimeInterval(span * $0) }
+            }()
+            return AxisMarks(values: ticks) { value in
+                AxisValueLabel {
+                    if let date = value.as(Date.self) {
+                        Text(date, format: .dateTime.day().month(.abbreviated))
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                            .fixedSize()
+                    }
+                }
             }
         }
         .frame(height: 170)
 
         HStack(spacing: 8) {
-            chip("You", minePnl, Ledger.income)
-            chip("S&P 500 · same flows", indexPnl, Ledger.seriesStocks)
+            chip("You", minePct, store.convert(series.mine.last ?? 0, from: "USD"), Ledger.income)
+            chip("S&P 500 · same flows", indexPct, store.convert(series.index.last ?? 0, from: "USD"), Ledger.seriesStocks)
             Spacer(minLength: 0)
         }
 
@@ -269,7 +310,7 @@ struct PerfCompareCard: View {
             .foregroundStyle(.tertiary)
     }
 
-    private func chip(_ name: String, _ value: Double, _ color: Color) -> some View {
+    private func chip(_ name: String, _ pctValue: Double, _ money: Double, _ color: Color) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 5) {
                 Circle().fill(color).frame(width: 7, height: 7)
@@ -277,9 +318,12 @@ struct PerfCompareCard: View {
                     .font(.system(size: 10, weight: .semibold, design: .rounded))
                     .lineLimit(1)
             }
-            Text("\(value >= 0 ? "+" : "")\(store.format(value, compact: true))")
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                .foregroundStyle(value >= 0 ? Ledger.income : Ledger.expense)
+            Text("\(pctValue >= 0 ? "+" : "")\(String(format: "%.1f", pctValue))%")
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .foregroundStyle(pctValue >= 0 ? Ledger.income : Ledger.expense)
+            Text("\(money >= 0 ? "+" : "")\(store.format(money, compact: true))")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 9)
         .padding(.vertical, 6)
