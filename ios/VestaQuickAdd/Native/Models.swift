@@ -359,6 +359,11 @@ struct SnapshotPoint: Identifiable, Codable, Equatable {
     /// Portfolio snapshots only: `value` is EX-super, this includes super —
     /// same split the web's dailySnapshotValues reads.
     var valueWithSuper: Double?
+    /// Networth snapshots only: total excluding super.
+    var valueNoSuper: Double?
+    /// Networth snapshots only: component breakdown (USD).
+    var portfolio: Double?
+    var crypto: Double?
     var id: String { date }
 }
 

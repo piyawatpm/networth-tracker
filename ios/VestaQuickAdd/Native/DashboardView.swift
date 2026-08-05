@@ -9,13 +9,18 @@ struct DashboardView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     HistoryChartCard(
-                        title: "Net Worth",
-                        parsed: store.networthParsed,
+                        title: store.includeSuperStocks ? "Net Worth" : "Net Worth · ex-super",
+                        parsed: store.includeSuperStocks
+                            ? store.networthParsed : store.networthParsedNoSuper,
                         liveValue: store.netWorth,
                         heroSize: 40,
-                        showUpdatedStamp: true
+                        showUpdatedStamp: true,
+                        overlays: componentOverlays
                     )
+                    .id(store.includeSuperStocks)
                     .entranceTransition()
+                    superToggleCard.entranceTransition()
+                    monthStartCard.entranceTransition()
                     if let goal = activeGoal { goalCard(goal).entranceTransition() }
                     assetBreakdownCard.entranceTransition()
                     monthFlowCard.entranceTransition()
@@ -30,33 +35,94 @@ struct DashboardView: View {
             .navigationBarTitleDisplayMode(.large)
             .refreshable { await store.refresh() }
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    // One tap = next currency, exactly like the web's FX
-                    // toggle (same cycle order). Syncs through
-                    // preferred_currency, so the web app follows.
-                    Button {
-                        let cycle = ["AUD", "USD", "THB"]
-                        let index = cycle.firstIndex(of: store.displayCurrency) ?? 2
-                        withAnimation(.spring(duration: 0.5)) {
-                            store.setDisplayCurrency(cycle[(index + 1) % cycle.count])
-                        }
-                    } label: {
-                        Text("\(Money.symbol(store.displayCurrency)) \(store.displayCurrency)")
-                            .font(.system(.subheadline, design: .monospaced, weight: .semibold))
-                            .foregroundStyle(.primary)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 10)
-                            .background(Ledger.card, in: .capsule)
-                            .overlay(Capsule().strokeBorder(Color.white.opacity(0.08)))
-                            .contentShape(.capsule)
-                    }
-                    // .plain, NOT .glass — the glass style's pressed state
-                    // paints an opaque white square behind the text.
-                    .buttonStyle(.plain)
-                    .sensoryFeedback(.impact(weight: .light), trigger: store.displayCurrency)
-                }
+                ToolbarItem(placement: .topBarTrailing) { FxChip() }
             }
         }
+    }
+
+    // MARK: Net-worth components
+
+    /// Every factor of net worth as an overlay line: stocks (super-adjusted
+    /// per the toggle), crypto, and the replayed signed debt.
+    private var componentOverlays: [ChartOverlay] {
+        let superOn = store.includeSuperStocks
+        let stocks = store.overlayPortfolio.map { point -> (date: Date, valueUsd: Double) in
+            guard !superOn, let delta = store.overlaySuperDelta[point.date] else { return point }
+            return (point.date, max(0, point.valueUsd - delta))
+        }
+        return [
+            ChartOverlay(name: "Stocks", color: Ledger.chartColor(0), points: stocks),
+            ChartOverlay(name: "Crypto", color: Ledger.chartColor(12), points: store.overlayCrypto),
+            ChartOverlay(name: "Debt", color: Ledger.expense.opacity(0.9), points: store.overlayDebt),
+        ]
+    }
+
+    private var superToggleCard: some View {
+        @Bindable var store = store
+        return HStack {
+            Text("Include super").font(.subheadline)
+            Spacer()
+            Toggle("", isOn: $store.includeSuperStocks.animation(.spring(duration: 0.4)))
+                .labelsHidden()
+                .tint(Ledger.income)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .financeCard()
+    }
+
+    // MARK: Month starts
+
+    /// Net worth at the OPEN of each month + now — the trend at a glance.
+    private var monthStartCard: some View {
+        let rows = store.monthStartNetWorth
+        let converted = rows.map { (label: $0.label, value: store.convert($0.valueUsd, from: "USD"), isNow: $0.isNow) }
+        let lastDelta: Double? = converted.count >= 2
+            ? converted[converted.count - 1].value - converted[converted.count - 2].value
+            : nil
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Month Starts").labelMono()
+                Spacer()
+                if let lastDelta {
+                    Text("\(lastDelta >= 0 ? "+" : "")\(store.format(lastDelta, compact: true)) this month")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(lastDelta >= 0 ? Ledger.income : Ledger.expense)
+                }
+            }
+            if converted.count < 2 {
+                Text("Needs a month of snapshots to compare.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            } else {
+                Chart(Array(converted.enumerated()), id: \.offset) { _, row in
+                    BarMark(
+                        x: .value("Month", row.label),
+                        y: .value("Net Worth", row.value)
+                    )
+                    .cornerRadius(6)
+                    .foregroundStyle(row.isNow ? Ledger.income : Ledger.income.opacity(0.35))
+                    .annotation(position: .top, spacing: 2) {
+                        Text(Money.format(row.value, currency: store.displayCurrency, compact: true))
+                            .font(.system(size: 8, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .chartXScale(domain: converted.map(\.label))
+                .chartYAxis(.hidden)
+                .chartYScale(domain: (converted.map(\.value).min() ?? 0) * 0.94...(converted.map(\.value).max() ?? 1) * 1.1)
+                .chartXAxis {
+                    AxisMarks { _ in
+                        AxisValueLabel()
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .frame(height: 150)
+            }
+        }
+        .padding(16)
+        .financeCard()
     }
 
     // MARK: Goal

@@ -41,6 +41,9 @@ struct InvestView: View {
             }
             .background(Ledger.background)
             .navigationTitle("Invest")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { FxChip() }
+            }
         }
     }
 }

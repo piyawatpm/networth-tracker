@@ -44,6 +44,21 @@ enum ChartPeriod: String, CaseIterable {
     }
 }
 
+/// A secondary line on the big chart — a net-worth component (stocks,
+/// crypto, debt) drawn thin and glowless under the hero series.
+struct ChartOverlay: Identifiable {
+    let name: String
+    let color: Color
+    /// USD, daily resolution, ascending.
+    let points: [(date: Date, valueUsd: Double)]
+    var id: String { name }
+}
+
+private struct OverlayPoint: Identifiable {
+    let id: Date
+    let value: Double
+}
+
 /// One pot's value-over-time card: big scrub-aware number, delta badge,
 /// gradient line with high/low marks, desktop-parity period picker. Used for
 /// Net Worth (dashboard), Stocks and Crypto (invest tab).
@@ -57,10 +72,13 @@ struct HistoryChartCard: View {
     let liveValue: Double
     var heroSize: CGFloat = 34
     var showUpdatedStamp = false
+    /// Component lines with a tappable legend (dashboard only).
+    var overlays: [ChartOverlay] = []
 
     @State private var period: ChartPeriod = .d1
     @State private var scrubDate: Date?
     @State private var points: [Point] = []
+    @State private var hiddenOverlays: Set<String> = []
 
     struct Point: Identifiable {
         let date: Date
@@ -132,6 +150,35 @@ struct HistoryChartCard: View {
 
             chart
                 .padding(.top, 8)
+
+            // Overlay legend — tap a component to hide/show its line. The
+            // overlays are daily series, so the intraday view skips them.
+            if !overlays.isEmpty && period != .d1 {
+                HStack(spacing: 8) {
+                    ForEach(overlays) { overlay in
+                        let hidden = hiddenOverlays.contains(overlay.name)
+                        Button {
+                            withAnimation(.snappy(duration: 0.2)) {
+                                if hidden { hiddenOverlays.remove(overlay.name) }
+                                else { hiddenOverlays.insert(overlay.name) }
+                            }
+                        } label: {
+                            HStack(spacing: 5) {
+                                Circle().fill(overlay.color).frame(width: 6, height: 6)
+                                Text(overlay.name)
+                                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            }
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 5)
+                            .background(Color.white.opacity(hidden ? 0.03 : 0.08), in: .capsule)
+                            .opacity(hidden ? 0.4 : 1)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    Spacer()
+                }
+                .padding(.top, 6)
+            }
 
             Picker("Period", selection: $period.animation(.spring(duration: 0.5))) {
                 ForEach(ChartPeriod.allCases, id: \.self) { p in
@@ -262,8 +309,26 @@ struct HistoryChartCard: View {
         } else {
             let chartPoints = syncedPoints
             let values = chartPoints.map(\.value)
-            let low = values.min() ?? 0
-            let high = values.max() ?? 0
+            let cutoffDate = period.cutoffSeconds.map { Date().addingTimeInterval(-$0) }
+            let visibleOverlays: [(ChartOverlay, [OverlayPoint])] =
+                period == .d1 ? [] : overlays
+                    .filter { !hiddenOverlays.contains($0.name) }
+                    .map { overlay in
+                        let pts = overlay.points
+                            .filter { point in
+                                cutoffDate.map { point.date >= $0 } ?? true
+                            }
+                            .map { OverlayPoint(id: $0.date, value: store.convert($0.valueUsd, from: "USD")) }
+                        return (overlay, pts)
+                    }
+                    .filter { !$0.1.isEmpty }
+            let overlayValues = visibleOverlays.flatMap { $0.1.map(\.value) }
+            // Domain covers the hero series AND any visible overlays — a debt
+            // line below zero must not get clipped out of the plot.
+            let mainLow = values.min() ?? 0
+            let mainHigh = values.max() ?? 0
+            let low = min(mainLow, overlayValues.min() ?? mainLow)
+            let high = max(mainHigh, overlayValues.max() ?? mainHigh)
             let yBase = low - (high - low) * 0.06
             let rising = (values.last ?? 0) >= (values.first ?? 0)
             let tint = rising ? Ledger.income : Ledger.expense
@@ -278,8 +343,9 @@ struct HistoryChartCard: View {
                 index < chartPoints.count - 1 ? Array(chartPoints[index...]) : []
             } ?? []
 
-            let highPoint = chartPoints.first { $0.value == high }
-            let lowPoint = chartPoints.first { $0.value == low }
+            // High/low markers track the HERO series, not overlay extremes.
+            let highPoint = chartPoints.first { $0.value == mainHigh }
+            let lowPoint = chartPoints.first { $0.value == mainLow }
 
             Chart {
                 neonSeries(litSegment, tint: tint, id: "lit", dimmed: false, yBase: yBase)
@@ -308,6 +374,17 @@ struct HistoryChartCard: View {
                                 .font(.system(size: 9, weight: .medium, design: .monospaced))
                                 .foregroundStyle(.secondary)
                         }
+                }
+
+                ForEach(visibleOverlays, id: \.0.id) { overlay, pts in
+                    ForEach(pts) { p in
+                        LineMark(
+                            x: .value("Date", p.id), y: .value("Value", p.value),
+                            series: .value("s", "overlay-\(overlay.name)")
+                        )
+                        .lineStyle(StrokeStyle(lineWidth: 1.5, lineCap: .round))
+                        .foregroundStyle(overlay.color.opacity(0.85))
+                    }
                 }
 
                 if let point = scrubbedPoint {

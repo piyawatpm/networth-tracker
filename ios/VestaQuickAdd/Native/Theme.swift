@@ -67,6 +67,33 @@ struct FinanceCard: ViewModifier {
     }
 }
 
+/// The currency cycle chip (AUD → USD → THB), shared by every page's
+/// toolbar. Writes through preferred_currency so the web app follows.
+struct FxChip: View {
+    @Environment(DataStore.self) private var store
+
+    var body: some View {
+        Button {
+            let cycle = ["AUD", "USD", "THB"]
+            let index = cycle.firstIndex(of: store.displayCurrency) ?? 2
+            withAnimation(.spring(duration: 0.5)) {
+                store.setDisplayCurrency(cycle[(index + 1) % cycle.count])
+            }
+        } label: {
+            Text("\(Money.symbol(store.displayCurrency)) \(store.displayCurrency)")
+                .font(.system(.subheadline, design: .monospaced, weight: .semibold))
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(Ledger.card, in: .capsule)
+                .overlay(Capsule().strokeBorder(Color.white.opacity(0.08)))
+                .contentShape(.capsule)
+        }
+        .buttonStyle(.plain)
+        .sensoryFeedback(.impact(weight: .light), trigger: store.displayCurrency)
+    }
+}
+
 /// OKX's signed percent chip: tinted pill, volt for gains, pink for losses.
 struct PctBadge: View {
     let percent: Double

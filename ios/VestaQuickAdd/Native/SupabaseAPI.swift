@@ -291,9 +291,13 @@ actor SupabaseAPI {
             let date: String
             let value: Double
             let valueWithSuper: Double?
+            let valueNoSuper: Double?
+            let portfolio: Double?
+            let crypto: Double?
             enum CodingKeys: String, CodingKey {
-                case date, value
+                case date, value, portfolio, crypto
                 case valueWithSuper = "value_with_super"
+                case valueNoSuper = "value_no_super"
             }
         }
         var all: [SnapshotPoint] = []
@@ -302,7 +306,10 @@ actor SupabaseAPI {
                 "GET", path: "snapshots",
                 query: [
                     URLQueryItem(name: "type", value: "eq.\(type)"),
-                    URLQueryItem(name: "select", value: "date,value,value_with_super"),
+                    URLQueryItem(
+                        name: "select",
+                        value: "date,value,value_with_super,value_no_super,portfolio,crypto"
+                    ),
                     URLQueryItem(name: "order", value: "date.desc"),
                     URLQueryItem(name: "limit", value: "1000"),
                     URLQueryItem(name: "offset", value: String(page * 1000)),
@@ -310,7 +317,11 @@ actor SupabaseAPI {
             )
             let rows = try JSONDecoder().decode([Row].self, from: data)
             all.append(contentsOf: rows.map {
-                SnapshotPoint(date: $0.date, value: $0.value, valueWithSuper: $0.valueWithSuper)
+                SnapshotPoint(
+                    date: $0.date, value: $0.value,
+                    valueWithSuper: $0.valueWithSuper, valueNoSuper: $0.valueNoSuper,
+                    portfolio: $0.portfolio, crypto: $0.crypto
+                )
             })
             if rows.count < 1000 { break }
             if let since, let oldest = rows.last?.date, oldest <= since { break }

@@ -50,6 +50,9 @@ struct MoreView: View {
             .scrollContentBackground(.hidden)
             .background(Ledger.background)
             .navigationTitle("More")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { FxChip() }
+            }
             .sheet(isPresented: $showSettings) { SettingsView() }
             .sheet(isPresented: $showWeb) { WebSheet(path: webPath) }
         }

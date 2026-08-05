@@ -89,7 +89,8 @@ struct IncomeView: View {
             .navigationTitle("Income")
             .refreshable { await store.loadAll() }
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    FxChip()
                     Button { showAdd = true } label: {
                         Image(systemName: "plus")
                     }

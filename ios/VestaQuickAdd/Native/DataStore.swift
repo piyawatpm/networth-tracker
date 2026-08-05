@@ -22,8 +22,9 @@ struct DiskCache: Codable {
     /// fetches rows NEWER than the cached max and would freeze the old
     /// truncated history in place forever (first point stuck at Aug 3).
     /// v3: adds the portfolio + crypto series. v4: portfolio rows carry
-    /// value_with_super (old rows lack it → with-super chart would be wrong).
-    static let currentVersion = 4
+    /// value_with_super. v5: networth rows carry value_no_super +
+    /// portfolio/crypto components for the overlay lines.
+    static let currentVersion = 5
 
     var version: Int // decoding a versionless v1 cache fails → treated as empty
     var blobs: [String: String]
@@ -100,6 +101,15 @@ final class DataStore {
     /// Same rows with dates parsed once — 20k string→Date parses per chart
     /// render would jank the scrubber.
     private(set) var networthParsed: [(date: Date, valueUsd: Double)] = []
+    /// Networth excluding super (value_no_super, falling back to value).
+    private(set) var networthParsedNoSuper: [(date: Date, valueUsd: Double)] = []
+    /// Daily component overlays for the dashboard chart (USD, last of day):
+    /// portfolio (with super), the day's super delta (for the toggle),
+    /// crypto, and the replayed signed debt net.
+    private(set) var overlayPortfolio: [(date: Date, valueUsd: Double)] = []
+    private(set) var overlaySuperDelta: [Date: Double] = [:]
+    private(set) var overlayCrypto: [(date: Date, valueUsd: Double)] = []
+    private(set) var overlayDebt: [(date: Date, valueUsd: Double)] = []
     /// Ex-super — the snapshot `value` column.
     private(set) var portfolioParsed: [(date: Date, valueUsd: Double)] = []
     /// Including super (falls back to ex-super where the column is null).
@@ -150,7 +160,68 @@ final class DataStore {
         default:
             networthHistory = rows
             networthParsed = Self.parseRows(rows)
+            networthParsedNoSuper = rows.compactMap { row in
+                for formatter in Self.snapshotFormats {
+                    if let date = formatter.date(from: row.date) {
+                        return (date, row.valueNoSuper ?? row.value)
+                    }
+                }
+                return nil
+            }
+            rebuildOverlays()
         }
+    }
+
+    /// Daily (last-of-day) component series for the dashboard overlays. Debt
+    /// is replayed from records + transactions at each day, the same
+    /// sign-classified math the Debts page uses.
+    private func rebuildOverlays() {
+        var lastPerDay: [String: SnapshotPoint] = [:]
+        for row in networthHistory { lastPerDay[String(row.date.prefix(10))] = row }
+        let days = lastPerDay.keys.sorted()
+
+        var portfolio: [(Date, Double)] = []
+        var crypto: [(Date, Double)] = []
+        var debt: [(Date, Double)] = []
+        var superDelta: [Date: Double] = [:]
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = SydneyTime.zone
+        formatter.dateFormat = "yyyy-MM-dd"
+
+        for day in days {
+            guard let row = lastPerDay[day], let date = formatter.date(from: day) else { continue }
+            if let p = row.portfolio { portfolio.append((date, p)) }
+            if let c = row.crypto { crypto.append((date, c)) }
+            if let noSuper = row.valueNoSuper { superDelta[date] = row.value - noSuper }
+            debt.append((date, debtNetUsdAt(day: day)))
+        }
+        overlayPortfolio = portfolio
+        overlayCrypto = crypto
+        overlayDebt = debt
+        overlaySuperDelta = superDelta
+    }
+
+    /// Signed net debt (USD) as it stood at end of `day` — records created by
+    /// then, transactions dated by then. Overpaid ledgers flip sides.
+    private func debtNetUsdAt(day: String) -> Double {
+        var net = 0.0
+        for debt in debts {
+            let createdDay = Date(timeIntervalSince1970: debt.createdAt / 1000)
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = SydneyTime.zone
+            formatter.dateFormat = "yyyy-MM-dd"
+            guard formatter.string(from: createdDay) <= day else { continue }
+            let paid = debtTxs
+                .filter { $0.debtId == debt.id && String($0.date.prefix(10)) <= day }
+                .reduce(0) { $0 + $1.amount }
+            let balance = debt.originalAmount - paid
+            let signed = debt.direction == "owed_to_me" ? balance : -balance
+            net += Money.convert(signed, from: debt.currency, to: "USD")
+        }
+        return net
     }
 
     private func history(for type: String) -> [SnapshotPoint] {
@@ -262,6 +333,7 @@ final class DataStore {
             let blobs = try await blobsTask
             rawBlobs = blobs
             decode(blobs)
+            rebuildOverlays()
 
             if let rates = try? await ratesTask, !rates.isEmpty {
                 Money.rates = rates
@@ -668,7 +740,36 @@ final class DataStore {
         return net
     }
 
-    var netWorth: Double { stocksValue + cryptoValue + debtNet }
+    /// Honors the app-wide super toggle — dashboard, goal and chart all agree.
+    var netWorth: Double { stocksValueVisible + cryptoValue + debtNet }
+
+    /// Net worth at the START of each month (first snapshot reading), USD,
+    /// plus a live "now" sample — the month-over-month trend card.
+    var monthStartNetWorth: [(label: String, valueUsd: Double, isNow: Bool)] {
+        var firstPerMonth: [String: SnapshotPoint] = [:]
+        for row in networthHistory {
+            let month = String(row.date.prefix(7))
+            if firstPerMonth[month] == nil { firstPerMonth[month] = row } // rows are ascending
+        }
+        let labeler = DateFormatter()
+        labeler.locale = Locale(identifier: "en_US_POSIX")
+        labeler.dateFormat = "MMM"
+        var out: [(String, Double, Bool)] = []
+        for month in firstPerMonth.keys.sorted().suffix(11) {
+            guard let row = firstPerMonth[month] else { continue }
+            let value = includeSuperStocks ? row.value : (row.valueNoSuper ?? row.value)
+            let parts = month.split(separator: "-")
+            var label = month
+            if parts.count == 2, let m = Int(parts[1]) {
+                labeler.dateFormat = "MMM"
+                let comps = DateComponents(calendar: .current, year: Int(parts[0]), month: m)
+                if let date = comps.date { label = labeler.string(from: date) }
+            }
+            out.append((label, value, false))
+        }
+        out.append(("Now", Money.convert(netWorth, from: displayCurrency, to: "USD"), true))
+        return out
+    }
 
     // MARK: Derived — month aggregates
 

@@ -73,7 +73,8 @@ struct ExpensesView: View {
             .navigationTitle("Expenses")
             .refreshable { await store.loadAll() }
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    FxChip()
                     Button { showAdd = true } label: {
                         Image(systemName: "plus")
                     }
