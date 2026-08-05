@@ -249,9 +249,17 @@ actor SupabaseAPI {
     /// Returns the newest updated_at seen, to thread into the next call.
     func fetchAppData(since: String? = nil) async throws
         -> (blobs: [String: String], maxUpdatedAt: String?) {
+        // A "+00:00" offset in a query string decodes to a SPACE server-side
+        // ("…24.604 00:00" → Postgres 22007). Normalize to the Z suffix,
+        // which is offset-free and URL-safe; a watermark that still carries a
+        // "+" after that can't be sent safely — drop it and fetch everything.
+        func urlSafe(_ stamp: String) -> String? {
+            let z = stamp.replacingOccurrences(of: "+00:00", with: "Z")
+            return z.contains("+") ? nil : z
+        }
         var query = [URLQueryItem(name: "select", value: "key,value,updated_at")]
-        if let since {
-            query.append(URLQueryItem(name: "updated_at", value: "gt.\(since)"))
+        if let since, let safe = urlSafe(since) {
+            query.append(URLQueryItem(name: "updated_at", value: "gt.\(safe)"))
         }
         let data = try await restRequest("GET", path: "app_data", query: query)
         struct Row: Codable {
@@ -270,7 +278,8 @@ actor SupabaseAPI {
             result[row.key] = row.value ?? ""
             if let stamp = row.updatedAt, stamp > (maxStamp ?? "") { maxStamp = stamp }
         }
-        return (result, maxStamp)
+        // Store the watermark pre-normalized so the cache never holds a "+".
+        return (result, maxStamp.flatMap(urlSafe))
     }
 
     /// Read-modify-write of one blob. Same last-write-wins semantics the web
