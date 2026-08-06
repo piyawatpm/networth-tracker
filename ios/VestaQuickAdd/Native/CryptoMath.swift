@@ -215,6 +215,62 @@ enum CryptoMath {
         return holdings
     }
 
+    // MARK: All-time realized (computeRealizedPnl port — sells AND transferOuts)
+
+    struct RealizedByToken: Identifiable {
+        let token: String
+        let realizedPnlUsd: Double
+        var id: String { token }
+    }
+
+    /// The crypto page's "All-Time Realized" card: avg-buy replay across every
+    /// token ever traded — fully exited coins included — booking sell AND
+    /// transferOut disposals against the running average. Broader on purpose
+    /// than realizedSales() below, whose income feed must skip transfers.
+    static func computeRealizedPnl(
+        _ transactions: [CryptoTransaction]
+    ) -> (total: Double, byToken: [RealizedByToken]) {
+        let sorted = transactions.sorted { $0.date < $1.date }
+
+        struct State {
+            var boughtAmount: Double = 0
+            var boughtCost: Double = 0
+            var realized: Double = 0
+        }
+        var map: [String: State] = [:]
+
+        for tx in sorted {
+            var s = map[tx.token] ?? State()
+            switch tx.type {
+            case "buy", "transferIn":
+                // Valueless transferIns move units only — pricing them at zero
+                // would drag the average buy price down on every deposit.
+                if let value = tx.totalValueUsd {
+                    s.boughtAmount += tx.amount
+                    s.boughtCost += value
+                }
+            case "sell", "transferOut":
+                if let value = tx.totalValueUsd, s.boughtAmount > 0 {
+                    s.realized += value - tx.amount * (s.boughtCost / s.boughtAmount)
+                }
+            default:
+                break
+            }
+            map[tx.token] = s
+        }
+
+        var byToken: [RealizedByToken] = []
+        var total: Double = 0
+        for (token, s) in map {
+            if isStablecoin(token) { continue }
+            if abs(s.realized) < 0.01 { continue }
+            byToken.append(RealizedByToken(token: token, realizedPnlUsd: s.realized))
+            total += s.realized
+        }
+        byToken.sort { $0.realizedPnlUsd > $1.realizedPnlUsd }
+        return (total, byToken)
+    }
+
     // MARK: Realized sells (computeRealizedSales port — sells ONLY)
 
     /// Counts `sell` rows only. transferOut is yield / inter-exchange movement

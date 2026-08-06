@@ -41,6 +41,27 @@ struct CryptoSection: View {
             .financeCard()
             .entranceTransition()
 
+            // The web crypto page's Realized P&L card: avg-buy replay over the
+            // tx CSV, sells and transfer-outs alike, exited coins included.
+            // In USD like everything crypto, converted for display.
+            if !store.cryptoTxs.isEmpty {
+                let realized = CryptoMath.computeRealizedPnl(store.cryptoTxs)
+                RealizedPnlCard(
+                    rows: realized.byToken.map {
+                        RealizedPnlCard.Row(
+                            id: $0.token,
+                            name: $0.token,
+                            ticker: "",
+                            value: store.convert($0.realizedPnlUsd, from: "USD")
+                        )
+                    },
+                    countNoun: "token",
+                    emptyHint: "",
+                    zeroHeaderWhenEmpty: true
+                )
+                .entranceTransition()
+            }
+
             if rows.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "bitcoinsign.circle")

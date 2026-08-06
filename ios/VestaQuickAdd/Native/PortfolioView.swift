@@ -93,6 +93,22 @@ private struct PortfolioSection: View {
             }
     }
 
+    // The web's realizedBreakdown: only holdings with a recorded sell appear,
+    // biggest gain first, each converted to the display currency. Follows the
+    // same scope as the list above, so the super toggle applies here too.
+    private var realizedRows: [RealizedPnlCard.Row] {
+        rows.compactMap { row in
+            guard row.position.totalSold > 0 else { return nil }
+            return RealizedPnlCard.Row(
+                id: row.holding.id,
+                name: row.holding.name,
+                ticker: row.holding.ticker,
+                value: store.convert(row.position.realizedPnl, from: row.holding.currency)
+            )
+        }
+        .sorted { $0.value > $1.value }
+    }
+
     var body: some View {
         @Bindable var store = store
         VStack(spacing: 12) {
@@ -119,6 +135,15 @@ private struct PortfolioSection: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .financeCard()
+            .entranceTransition()
+
+            // The web's Realized P&L card: gains locked in by sells, replayed
+            // from the transaction log at average cost.
+            RealizedPnlCard(
+                rows: realizedRows,
+                countNoun: "position",
+                emptyHint: "Realized gains and losses show up here once you log a sell — including holdings you've fully exited."
+            )
             .entranceTransition()
 
             ForEach(rows, id: \.holding.id) { row in
@@ -185,6 +210,101 @@ private struct HoldingCard: View {
         }
         .padding(14)
         .financeCard()
+    }
+}
+
+/// The web's "All-Time Realized" card, shared by both pots: locked-in P&L
+/// total up top, a per-position breakdown below, biggest gain first. Values
+/// arrive pre-converted to the display currency.
+struct RealizedPnlCard: View {
+    struct Row: Identifiable {
+        let id: String
+        let name: String
+        let ticker: String
+        let value: Double
+    }
+
+    @Environment(DataStore.self) private var store
+    let rows: [Row]
+    let countNoun: String
+    let emptyHint: String
+    /// Web parity: the crypto card keeps its zero header + footnote while the
+    /// CSV has no sells; the stocks card collapses to a hint instead.
+    var zeroHeaderWhenEmpty = false
+
+    private var total: Double { rows.reduce(0) { $0 + $1.value } }
+
+    var body: some View {
+        if rows.isEmpty && !zeroHeaderWhenEmpty {
+            HStack(spacing: 12) {
+                Image(systemName: "receipt")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 38, height: 38)
+                    .background(.primary.opacity(0.06), in: .rect(cornerRadius: 12))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Track realized profit").font(.footnote.weight(.medium))
+                    Text(emptyHint)
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(14)
+            .financeCard()
+        } else {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("All-Time Realized").labelMono()
+                        Text("\(total >= 0 ? "+" : "")\(store.format(total))")
+                            .font(.system(.title3, design: .monospaced, weight: .semibold))
+                            .foregroundStyle(total >= 0 ? Ledger.income : Ledger.expense)
+                    }
+                    Spacer()
+                    if !rows.isEmpty {
+                        Text("\(rows.count) \(countNoun)\(rows.count == 1 ? "" : "s")")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(14)
+
+                Divider().opacity(0.6)
+
+                if rows.isEmpty {
+                    Text("No realized sells yet — locked-in gains show up here once you sell.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 16)
+                } else {
+                    ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                        if index > 0 {
+                            Divider().opacity(0.35).padding(.leading, 14)
+                        }
+                        HStack(spacing: 6) {
+                            Text(row.name)
+                                .font(.footnote.weight(.medium))
+                                .lineLimit(1)
+                            if !row.ticker.isEmpty && row.ticker != row.name {
+                                Text(row.ticker)
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text("\(row.value >= 0 ? "+" : "")\(store.format(row.value, compact: true))")
+                                .font(.system(.footnote, design: .monospaced, weight: .semibold))
+                                .foregroundStyle(row.value >= 0 ? Ledger.income : Ledger.expense)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 9)
+                    }
+                }
+            }
+            .financeCard()
+        }
     }
 }
 
