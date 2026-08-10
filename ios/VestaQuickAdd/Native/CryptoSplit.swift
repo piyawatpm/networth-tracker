@@ -29,16 +29,84 @@ enum CryptoSplit {
         tx.totalValueUsd ?? (tx.priceUsd ?? 1) * tx.amount
     }
 
-    /// Is this transfer explicitly marked as earn income?
-    ///
-    /// BY DECISION, earn is never inferred: past transfers mixed bot payouts
-    /// with the user's own money moving between venues, and guessing painted
-    /// capital as income. From now the Notes column says so — "E" or
-    /// anything containing "earn" — and only those rows count. Everything
-    /// unmarked is the user's own money: cost basis at arrival, no income.
+    /// The day the Notes-column convention started. From here on, earn is
+    /// opt-in: "E" (or anything containing "earn") in the note, nothing else.
+    /// BEFORE it, the user's CMC habit was the opposite — earn was recorded
+    /// AS a transferIn — so pre-era transfer-ins count by default, with two
+    /// guards: venue moves (an in that bounces straight back out) are
+    /// auto-excluded, and a lone "x" note vetoes any row that was actually
+    /// the user's own capital arriving.
+    static let markerEpoch = "2026-08-05"
+
+    /// Is this transfer explicitly marked as earn income? ("E" / "earn")
     static func isEarnMarked(_ tx: CryptoTransaction) -> Bool {
         let note = tx.notes.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return note == "e" || note.contains("earn")
+    }
+
+    /// Pre-era opt-out: "x" (or "not earn") says this arrival was capital.
+    static func isOptedOut(_ tx: CryptoTransaction) -> Bool {
+        let note = tx.notes.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return note == "x" || note == "not earn"
+    }
+
+    private static func pairKey(_ tx: CryptoTransaction) -> String {
+        "\(tx.date.prefix(10))|\(tx.token)|\(tx.amount)"
+    }
+
+    /// Pre-era transfer-ins that bounce back out — same token, within 3 days,
+    /// amount within 12% — are the user's own money hopping venues, not
+    /// income. Greedy one-to-one matching, oldest first; returns a multiset
+    /// of pair keys so duplicate-looking rows only cancel once each.
+    private static func internalMoveKeys(_ txs: [CryptoTransaction]) -> [String: Int] {
+        let pre = txs.filter { String($0.date.prefix(10)) < markerEpoch }
+        let ins = pre.filter { $0.type == "transferIn" }.sorted { $0.date < $1.date }
+        var outs = pre.filter { $0.type == "transferOut" }.sorted { $0.date < $1.date }
+            .map { (tx: $0, used: false) }
+        var keys: [String: Int] = [:]
+        for arrival in ins {
+            guard arrival.amount > 0,
+                  let inDate = SnapshotDate.parse(arrival.date) else { continue }
+            for i in outs.indices where !outs[i].used {
+                let out = outs[i].tx
+                guard out.token == arrival.token,
+                      let outDate = SnapshotDate.parse(out.date),
+                      abs(outDate.timeIntervalSince(inDate)) <= 3 * 86400,
+                      abs(out.amount - arrival.amount) / arrival.amount < 0.12
+                else { continue }
+                outs[i].used = true
+                keys[pairKey(arrival), default: 0] += 1
+                break
+            }
+        }
+        return keys
+    }
+
+    /// The one earn decision, shared by every computation in this file so the
+    /// card, the per-coin page, and the ledger can never disagree:
+    /// marked rows always count; pre-era transfer-ins count unless vetoed
+    /// ("x") or recognized as a venue move. Stateful because the venue-move
+    /// multiset is consumed as rows match — instantiate one per pass.
+    struct EarnRule {
+        private var internalMoves: [String: Int]
+
+        init(_ txs: [CryptoTransaction]) {
+            internalMoves = CryptoSplit.internalMoveKeys(txs)
+        }
+
+        mutating func countsAsEarn(_ tx: CryptoTransaction) -> Bool {
+            if CryptoSplit.isEarnMarked(tx) { return true }
+            guard tx.type == "transferIn",
+                  String(tx.date.prefix(10)) < CryptoSplit.markerEpoch,
+                  !CryptoSplit.isOptedOut(tx)
+            else { return false }
+            let key = CryptoSplit.pairKey(tx)
+            if let count = internalMoves[key], count > 0 {
+                internalMoves[key] = count - 1
+                return false
+            }
+            return true
+        }
     }
 
     /// The token's logged price nearest in time to `date` — how a coin
@@ -67,18 +135,20 @@ enum CryptoSplit {
     ) -> Split {
         var split = Split()
         let arrivalPrice = nearestPrices(txs)
+        var earnRule = EarnRule(txs)
 
-        // Trading replay with transfers booked as INCOME AT ARRIVAL VALUE —
-        // Earn pays in kind (ETH, BTC…) as well as USDT, and pricing those
-        // arrivals at zero was hiding ฿35K of yield inside "unrealized".
-        // A transferred coin gets its arrival value as cost basis, so the
-        // trading rows measure only what happened AFTER it arrived.
+        // Trading replay with earn transfers booked as INCOME AT ARRIVAL
+        // VALUE — Earn pays in kind (ETH, BTC…) as well as USDT, and pricing
+        // those arrivals at zero was hiding ฿35K of yield inside
+        // "unrealized". A transferred coin gets its arrival value as cost
+        // basis, so the trading rows measure only what happened AFTER it
+        // arrived.
         var lastPrice: [String: Double] = [:]
         var bags: [String: (amount: Double, cost: Double)] = [:]
         for tx in txs.sorted(by: { $0.date < $1.date }) {
             if let p = tx.priceUsd, p > 0 { lastPrice[tx.token] = p }
             if CryptoMath.isCashLike(tx.token, tags: tags) {
-                guard isEarnMarked(tx) else { continue } // unmarked = cash management
+                guard earnRule.countsAsEarn(tx) else { continue } // else cash management
                 if tx.type == "transferIn" { split.yieldInUsd += stableValue(tx) }
                 if tx.type == "transferOut" { split.yieldOutUsd += stableValue(tx) }
                 continue
@@ -93,7 +163,7 @@ enum CryptoSplit {
                 if let px = arrivalPrice(tx.token, tx.date) {
                     let value = tx.amount * px
                     bag.cost += value // arrival basis either way
-                    if isEarnMarked(tx) { split.yieldInUsd += value }
+                    if earnRule.countsAsEarn(tx) { split.yieldInUsd += value }
                 }
             case "sell", "transferOut":
                 guard bag.amount > 1e-9 else { break }
@@ -101,7 +171,7 @@ enum CryptoSplit {
                 let avg = bag.cost / bag.amount
                 if tx.type == "sell", let value = tx.totalValueUsd {
                     split.realizedUsd += value - avg * take
-                } else if tx.type == "transferOut", isEarnMarked(tx),
+                } else if tx.type == "transferOut", earnRule.countsAsEarn(tx),
                           let px = arrivalPrice(tx.token, tx.date) {
                     split.yieldOutUsd += take * px
                 }
@@ -141,6 +211,7 @@ enum CryptoSplit {
         livePrice: (String) -> Double?
     ) -> [CoinPnl] {
         let arrivalPrice = nearestPrices(txs)
+        var earnRule = EarnRule(txs)
         var lastPrice: [String: Double] = [:]
         var bags: [String: (amount: Double, cost: Double)] = [:]
         var realized: [String: Double] = [:]
@@ -158,7 +229,7 @@ enum CryptoSplit {
                 if let px = arrivalPrice(tx.token, tx.date) {
                     let value = tx.amount * px
                     bag.cost += value
-                    if isEarnMarked(tx) { earned[tx.token, default: 0] += value }
+                    if earnRule.countsAsEarn(tx) { earned[tx.token, default: 0] += value }
                 }
             case "sell", "transferOut":
                 guard bag.amount > 1e-9 else { break }
@@ -166,7 +237,7 @@ enum CryptoSplit {
                 let avg = bag.cost / bag.amount
                 if tx.type == "sell", let value = tx.totalValueUsd {
                     realized[tx.token, default: 0] += value - avg * take
-                } else if tx.type == "transferOut", isEarnMarked(tx),
+                } else if tx.type == "transferOut", earnRule.countsAsEarn(tx),
                           let px = arrivalPrice(tx.token, tx.date) {
                     earned[tx.token, default: 0] -= take * px
                 }
@@ -197,29 +268,34 @@ enum CryptoSplit {
         return out.sorted { $0.netUsd > $1.netUsd }
     }
 
-    /// Every transfer — USDT payouts AND in-kind coin rewards — valued at
-    /// arrival, newest first. The bot/Earn pay history.
+    /// Every earn transfer — USDT payouts AND in-kind coin rewards — valued
+    /// at arrival, newest first. The bot/Earn pay history. Pre-era rows
+    /// (the CMC transferIn habit) and marked rows alike, one shared rule.
     static func yieldEvents(txs: [CryptoTransaction], tags: [String: Bool]) -> [YieldEvent] {
         let arrivalPrice = nearestPrices(txs)
-        return txs.compactMap { tx -> YieldEvent? in
+        var earnRule = EarnRule(txs)
+        var events: [YieldEvent] = []
+        // Date order so the venue-move multiset consumes rows the same way
+        // compute() does.
+        for tx in txs.sorted(by: { $0.date < $1.date }) {
             guard tx.type == "transferIn" || tx.type == "transferOut",
-                  isEarnMarked(tx) else { return nil }
+                  earnRule.countsAsEarn(tx) else { continue }
             let value: Double
             if CryptoMath.isCashLike(tx.token, tags: tags) {
                 value = stableValue(tx)
             } else if let px = arrivalPrice(tx.token, tx.date) {
                 value = tx.amount * px
             } else {
-                return nil // no price anywhere — cannot state a value honestly
+                continue // no price anywhere — cannot state a value honestly
             }
-            return YieldEvent(
+            events.append(YieldEvent(
                 date: String(tx.date.prefix(10)),
                 token: tx.token,
                 usd: tx.type == "transferIn" ? value : -value,
                 notes: tx.notes
-            )
+            ))
         }
-        .sorted { $0.date > $1.date }
+        return events.sorted { $0.date > $1.date }
     }
 }
 
@@ -240,7 +316,7 @@ struct CryptoSplitCard: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Where crypto P&L comes from").labelMono()
 
-            row("Earn & bot income", "transfers you marked E / Earn in notes", s.netYieldUsd, emphasize: true)
+            row("Earn & bot income", "pre-Aug-5 transfer-ins + rows marked E / Earn", s.netYieldUsd, emphasize: true)
             row("Trading · realized", "locked in by sells", s.realizedUsd)
             row("Trading · unrealized", "bags vs cost incl. arrival value", s.unrealizedUsd)
 
@@ -285,7 +361,7 @@ struct CryptoSplitCard: View {
                     .font(.system(size: 8, design: .monospaced))
                     .foregroundStyle(.tertiary)
             }
-            Text("earn is never guessed: mark a transfer with E (or Earn) in its note and it counts from then on — everything unmarked is your own money moving · outs subtract, they may be your own redeployments")
+            Text("before 5 Aug 2026 every transfer-in counts as earn (the old CMC habit) — venue moves that bounce back out are auto-excluded, and an x note vetoes a row that was really your own deposit · from 5 Aug only rows marked E / Earn count · marked outs subtract")
                 .font(.system(size: 8, design: .monospaced))
                 .foregroundStyle(.tertiary)
         }
@@ -382,12 +458,19 @@ struct BotIncomeView: View {
             if events.isEmpty {
                 Section {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Starting fresh").font(.headline)
-                        Text("From now on, put E (or Earn) in a transfer's note when you record it — bot payouts, Earn interest, rewards. Marked rows appear here; nothing is ever guessed from history.")
+                        Text("No earn yet").font(.headline)
+                        Text("Transfer-ins recorded before 5 Aug 2026 count automatically (that was the CMC habit). From then on, put E (or Earn) in a transfer's note — bot payouts, Earn interest, rewards — and it appears here.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                     .padding(.vertical, 4)
+                }
+            } else {
+                Section {
+                    Text("pre-5 Aug 2026: transfer-ins count as earn (venue moves excluded, note x on a row to veto it) · after: only rows marked E / Earn")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                        .listRowBackground(Color.clear)
                 }
             }
 
@@ -486,7 +569,7 @@ struct CoinPnlView: View {
                         currency: store.displayCurrency,
                         tint: total >= 0 ? Ledger.income : Ledger.expense
                     )
-                    Text("realized + unrealized · transfers carry arrival-price basis · only notes marked E count as earn")
+                    Text("realized + unrealized · transfers carry arrival-price basis · earn (pre-Aug-5 ins + marked E) lives on its own page")
                         .font(.system(size: 8, design: .monospaced))
                         .foregroundStyle(.tertiary)
                 }
