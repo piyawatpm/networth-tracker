@@ -73,9 +73,14 @@ enum OnDeviceAI {
             let session = LanguageModelSession(instructions: """
                 You answer questions about the user's own finances using \
                 ONLY the fact sheet in the prompt. Quote numbers exactly as \
-                written. If the facts can't answer the question, say so in \
-                one sentence and name what's missing. At most three short \
-                sentences. Never give investment advice.
+                written; amounts are pre-converted into several currencies — \
+                pick the one the user asked for, never convert or compute \
+                yourself. People's names may be Thai nicknames written in \
+                Thai script or romanized — treat phonetic transliterations \
+                as the same person (e.g. อ้น ↔ Oon) and answer in the \
+                language the question was asked in. If the facts can't \
+                answer, say so in one sentence and name what's missing. At \
+                most three short sentences. Never give investment advice.
                 """)
             return try await session.respond(to: "FACT SHEET:\n\(facts)\n\nQUESTION: \(question)")
                 .content.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -104,7 +109,63 @@ extension DataStore {
     func moneyFacts() -> String {
         var lines: [String] = []
         lines.append("Currency: \(displayCurrency). Today: \(SydneyTime.today()).")
-        lines.append("Net worth: \(format(netWorth, compact: true)). Stocks & funds: \(format(stocksValueVisible, compact: true)). Crypto: \(format(cryptoValue, compact: true)). Debts (net, negative = I owe): \(format(debtNet, compact: true)).")
+        let nwAlt = ["AUD", "USD"]
+            .filter { $0 != displayCurrency }
+            .map { Money.format(Money.convert(netWorth, from: displayCurrency, to: $0), currency: $0, compact: true) }
+            .joined(separator: " = ")
+        lines.append("Net worth: \(format(netWorth, compact: true)) = \(nwAlt). Stocks & funds: \(format(stocksValueVisible, compact: true)). Crypto: \(format(cryptoValue, compact: true)). Debts (net, negative = I owe): \(format(debtNet, compact: true)).")
+
+        // Debts, person by person — precomputed in the currencies people
+        // actually ask in, because the model must never convert numbers
+        // itself. Overpaid ledgers flip sides; say what is true now.
+        let debtLines = debts.compactMap { debt -> String? in
+            let paid = debtTxs.filter { $0.debtId == debt.id }.reduce(0) { $0 + $1.amount }
+            let balance = debt.originalAmount - paid
+            guard abs(balance) > 0.01 else { return nil }
+            let owesMe = (debt.direction == "owed_to_me") == (balance > 0)
+            let magnitude = abs(balance)
+            let amounts = ["AUD", "THB", "USD"]
+                .map { code in
+                    Money.format(
+                        Money.convert(magnitude, from: debt.currency, to: code),
+                        currency: code, compact: true
+                    )
+                }
+                .joined(separator: " = ")
+            return "- \(owesMe ? "\(debt.person) owes me" : "I owe \(debt.person)"): \(amounts) (ledger in \(debt.currency): originally \(Money.format(debt.originalAmount, currency: debt.currency, compact: true)), repaid \(Money.format(paid, currency: debt.currency, compact: true)))"
+        }
+        if debtLines.isEmpty {
+            lines.append("No open debts.")
+        } else {
+            // The same person can sit on several ledgers in different
+            // directions (Oon owes on one, is owed on another) — "my total
+            // debt to X" needs the NET, and the model must not subtract, so
+            // net it here. Signed in AUD, + = they owe me.
+            var netByPerson: [String: Double] = [:]
+            for debt in debts {
+                let paid = debtTxs.filter { $0.debtId == debt.id }.reduce(0) { $0 + $1.amount }
+                let balance = debt.originalAmount - paid
+                guard abs(balance) > 0.01 else { continue }
+                let signed = debt.direction == "owed_to_me" ? balance : -balance
+                netByPerson[debt.person, default: 0]
+                    += Money.convert(signed, from: debt.currency, to: "AUD")
+            }
+            lines.append("Net position per person (all their ledgers combined):")
+            for (person, netAud) in netByPerson.sorted(by: { abs($0.value) > abs($1.value) })
+            where abs(netAud) > 0.01 {
+                let amounts = ["AUD", "THB", "USD"]
+                    .map { code in
+                        Money.format(
+                            Money.convert(abs(netAud), from: "AUD", to: code),
+                            currency: code, compact: true
+                        )
+                    }
+                    .joined(separator: " = ")
+                lines.append("- \(netAud > 0 ? "\(person) owes me (net)" : "I owe \(person) (net)"): \(amounts)")
+            }
+            lines.append("Individual ledgers:")
+            lines.append(contentsOf: debtLines)
+        }
 
         // Month-by-month flow, oldest → newest, so "June" questions work.
         for key in FlowMath.monthKeys(back: 6).sorted() {
@@ -224,8 +285,8 @@ struct AskMoneyView: View {
 
     private let suggestions = [
         "How much did I spend on food this month?",
+        "Who owes me money right now?",
         "Am I up or down on crypto overall?",
-        "What was my biggest vendor this month?",
         "How does this month compare to last month?",
     ]
 
