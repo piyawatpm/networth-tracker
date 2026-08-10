@@ -112,6 +112,12 @@ final class DataStore {
     var livePrices: [String: Double] = [:]
     var tickerMappings: [String: String] = [:]
     var stablecoinTags: [String: Bool] = [:]
+    /// token → exchange name, hand-set on the web crypto page.
+    var exchangeOverrides: [String: String] = [:]
+    /// Earn events the user manually removed ("this arrival wasn't income")
+    /// — keys are CryptoSplit's date|token|amount, synced via app_data so
+    /// they survive CSV re-uploads and reinstalls.
+    private(set) var earnExclusions: Set<String> = []
     var goals: [NetworthGoal] = []
     /// display-name → CoinGecko image URL (maintained by the web app).
     var coinImages: [String: String] = [:]
@@ -569,6 +575,8 @@ final class DataStore {
         cryptoPrices = blob("crypto_prices", CryptoPricesBlob.self)?.prices ?? [:]
         tickerMappings = blob("crypto_ticker_mappings", [String: String].self) ?? [:]
         stablecoinTags = blob("crypto_stablecoin_tags", [String: Bool].self) ?? [:]
+        exchangeOverrides = blob("crypto_exchange_overrides", [String: String].self) ?? [:]
+        earnExclusions = Set(blob("earn_exclusions", [String].self) ?? [])
         goals = blob("networth_goals", [NetworthGoal].self) ?? []
         coinImages = blob("crypto_coin_images", [String: String].self) ?? [:]
         stockLogos = blob("portfolio_stock_logos", [String: String].self) ?? [:]
@@ -668,6 +676,18 @@ final class DataStore {
 
         recomputeDerived()
         try await persist("portfolio_transactions", portfolioTxs)
+    }
+
+    /// Flip one earn event in or out of the excluded set and persist. Errors
+    /// surface via loadError but the local flip stays — the list re-syncs on
+    /// the next refresh either way.
+    func setEarnExcluded(_ key: String, _ excluded: Bool) async {
+        if excluded { earnExclusions.insert(key) } else { earnExclusions.remove(key) }
+        do {
+            try await persist("earn_exclusions", earnExclusions.sorted())
+        } catch {
+            loadError = error.localizedDescription
+        }
     }
 
     func saveDebt(_ debt: DebtRecord) async throws {

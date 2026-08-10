@@ -47,6 +47,17 @@ struct CryptoSection: View {
             .financeCard()
             .entranceTransition()
 
+            // The web page's allocation donut: top coins + Other, cash
+            // included — it is part of the pot.
+            if rows.count > 1 {
+                AllocationDonutCard(
+                    title: "Allocation",
+                    modes: [("Coins", coinSlices)],
+                    centerNoun: "coins"
+                )
+                .entranceTransition()
+            }
+
             // The web crypto page's Realized P&L card: avg-buy replay over the
             // tx CSV, sells and transfer-outs alike, exited coins included.
             // In USD like everything crypto, converted for display.
@@ -130,7 +141,56 @@ struct CryptoSection: View {
                 .financeCard()
                 .entranceTransition()
             }
+
+            // The web page's "By Exchange" section — driven by the exchange
+            // names hand-set on the web (crypto_exchange_overrides).
+            if !exchangeBars.isEmpty {
+                BreakdownBarsCard(title: "By exchange", rows: exchangeBars)
+                    .entranceTransition()
+            }
         }
+    }
+
+    /// Top six coins + Other, display currency — the donut's diet.
+    private var coinSlices: [AllocationSlice] {
+        let sorted = rows.sorted { $0.valueUsd > $1.valueUsd }
+        var slices = sorted.prefix(6).enumerated().map { index, row in
+            AllocationSlice(
+                name: row.token,
+                value: store.convert(row.valueUsd, from: "USD"),
+                color: Ledger.chartColor(index)
+            )
+        }
+        let rest = sorted.dropFirst(6).reduce(0) { $0 + $1.valueUsd }
+        if rest > 0 {
+            slices.append(AllocationSlice(
+                name: "Other",
+                value: store.convert(rest, from: "USD"),
+                color: Ledger.chartColor(6)
+            ))
+        }
+        return slices
+    }
+
+    /// Value per exchange, display currency. Rendered only once at least one
+    /// token has an exchange assigned — an all-Unassigned card says nothing.
+    private var exchangeBars: [BreakdownBar] {
+        var byExchange: [String: (value: Double, count: Int)] = [:]
+        var assigned = false
+        for row in rows {
+            let name = store.exchangeOverrides[row.token]?
+                .trimmingCharacters(in: .whitespaces) ?? ""
+            if !name.isEmpty { assigned = true }
+            let key = name.isEmpty ? "Unassigned" : name
+            var entry = byExchange[key] ?? (0, 0)
+            entry.value += store.convert(row.valueUsd, from: "USD")
+            entry.count += 1
+            byExchange[key] = entry
+        }
+        guard assigned else { return [] }
+        return byExchange
+            .map { BreakdownBar(name: $0.key, count: $0.value.count, value: $0.value.value) }
+            .sorted { $0.value > $1.value }
     }
 
     /// "0.5182 @ $3,421.55" — the web card's amount line. Sub-$1 tokens keep

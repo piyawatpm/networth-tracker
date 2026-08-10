@@ -122,6 +122,87 @@ private struct PortfolioSection: View {
         }
     }
 
+    private func displayValue(_ holding: PortfolioHolding) -> Double {
+        store.convert(store.holdingLiveValue(holding), from: holding.currency)
+    }
+
+    private static let typeLabels: [String: String] = [
+        "stock": "Stocks", "etf": "ETFs", "fund": "Funds",
+        "bond": "Bonds", "other": "Other",
+    ]
+    // Mirror of the web's HOLDING_TYPE_COLOR_MAP chart indices.
+    private static let typeColorIndex: [String: Int] = [
+        "stock": 0, "etf": 1, "fund": 2, "bond": 3, "other": 4,
+    ]
+
+    /// The web page's three donuts, one segmented card: by type, top
+    /// holdings, by country.
+    private var allocationModes: [(label: String, slices: [AllocationSlice])] {
+        var byType: [String: Double] = [:]
+        var byCountry: [String: Double] = [:]
+        for row in rows {
+            byType[row.holding.type, default: 0] += displayValue(row.holding)
+            let country = row.holding.country.isEmpty ? "Unknown" : row.holding.country
+            byCountry[country, default: 0] += displayValue(row.holding)
+        }
+        let typeSlices = byType
+            .map { type, value in
+                AllocationSlice(
+                    name: Self.typeLabels[type] ?? type,
+                    value: value,
+                    color: Ledger.chartColor(Self.typeColorIndex[type] ?? 4)
+                )
+            }
+            .sorted { $0.value > $1.value }
+
+        let sorted = rows.sorted { displayValue($0.holding) > displayValue($1.holding) }
+        var holdingSlices = sorted.prefix(6).enumerated().map { index, row in
+            AllocationSlice(
+                name: row.holding.ticker.isEmpty ? row.holding.name : row.holding.ticker,
+                value: displayValue(row.holding),
+                color: Ledger.chartColor(index)
+            )
+        }
+        let rest = sorted.dropFirst(6).reduce(0) { $0 + displayValue($1.holding) }
+        if rest > 0 {
+            holdingSlices.append(AllocationSlice(name: "Other", value: rest, color: Ledger.chartColor(6)))
+        }
+
+        let countrySlices = byCountry
+            .sorted { $0.value > $1.value }
+            .enumerated()
+            .map { index, entry in
+                AllocationSlice(name: entry.key, value: entry.value, color: Ledger.chartColor(index))
+            }
+
+        return [("Type", typeSlices), ("Holdings", holdingSlices), ("Country", countrySlices)]
+    }
+
+    /// The web's By Broker section over the same visible scope.
+    private var brokerBars: [BreakdownBar] {
+        var byBroker: [String: (value: Double, count: Int)] = [:]
+        for row in rows {
+            let name = row.holding.broker.isEmpty ? "Unknown" : row.holding.broker
+            var entry = byBroker[name] ?? (0, 0)
+            entry.value += displayValue(row.holding)
+            entry.count += 1
+            byBroker[name] = entry
+        }
+        return byBroker
+            .map { BreakdownBar(name: $0.key, count: $0.value.count, value: $0.value.value) }
+            .sorted { $0.value > $1.value }
+    }
+
+    /// Latest trades across the visible holdings, newest first.
+    private var recentTrades: [PortfolioTransaction] {
+        let visibleIds = Set(rows.map(\.holding.id))
+        return store.portfolioTxs
+            .filter { visibleIds.contains($0.holdingId) }
+            .sorted { $0.date != $1.date ? $0.date > $1.date : $0.createdAt > $1.createdAt }
+            .prefix(8)
+            .map { $0 }
+    }
+
     var body: some View {
         @Bindable var store = store
         VStack(spacing: 12) {
@@ -175,6 +256,16 @@ private struct PortfolioSection: View {
             .financeCard()
             .entranceTransition()
 
+            // The web page's donuts (Type | Holdings | Country), one card.
+            if rows.count > 1 {
+                AllocationDonutCard(
+                    title: "Allocation",
+                    modes: allocationModes,
+                    centerNoun: "holdings"
+                )
+                .entranceTransition()
+            }
+
             // The web's Realized P&L card: gains locked in by sells, replayed
             // from the transaction log at average cost.
             RealizedPnlCard(
@@ -183,6 +274,11 @@ private struct PortfolioSection: View {
                 emptyHint: "Realized gains and losses show up here once you log a sell — including holdings you've fully exited."
             )
             .entranceTransition()
+
+            if brokerBars.count > 1 {
+                BreakdownBarsCard(title: "By broker", rows: brokerBars)
+                    .entranceTransition()
+            }
 
             ForEach(rows, id: \.holding.id) { row in
                 NavigationLink {
@@ -194,6 +290,12 @@ private struct PortfolioSection: View {
                 }
                 .buttonStyle(.plain)
                 .entranceTransition()
+            }
+
+            // The web page's transaction history, phone-sized.
+            if !recentTrades.isEmpty {
+                RecentTradesCard(txs: recentTrades)
+                    .entranceTransition()
             }
         }
     }

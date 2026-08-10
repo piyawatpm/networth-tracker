@@ -20,7 +20,10 @@ enum CryptoSplit {
         let token: String
         let usd: Double    // signed: + arrived, − left
         let notes: String
-        var id: String { date + token + String(usd) }
+        /// The date|token|amount identity used for manual exclusion — stable
+        /// across CSV re-uploads, which row ids would not be.
+        let key: String
+        var id: String { key + String(usd) }
     }
 
     /// A stable transfer's USD value: the CSV usually leaves `totalValueUsd`
@@ -50,9 +53,11 @@ enum CryptoSplit {
         return note == "x" || note == "not earn"
     }
 
-    private static func pairKey(_ tx: CryptoTransaction) -> String {
+    /// The stable identity of a transfer for pairing and manual exclusion.
+    static func earnKey(_ tx: CryptoTransaction) -> String {
         "\(tx.date.prefix(10))|\(tx.token)|\(tx.amount)"
     }
+    private static func pairKey(_ tx: CryptoTransaction) -> String { earnKey(tx) }
 
     /// Pre-era transfer-ins that bounce back out — same token, within 3 days,
     /// amount within 12% — are the user's own money hopping venues, not
@@ -89,12 +94,17 @@ enum CryptoSplit {
     /// multiset is consumed as rows match — instantiate one per pass.
     struct EarnRule {
         private var internalMoves: [String: Int]
+        private let excluded: Set<String>
 
-        init(_ txs: [CryptoTransaction]) {
+        init(_ txs: [CryptoTransaction], exclusions: Set<String> = []) {
             internalMoves = CryptoSplit.internalMoveKeys(txs)
+            excluded = exclusions
         }
 
         mutating func countsAsEarn(_ tx: CryptoTransaction) -> Bool {
+            // Manual veto beats everything, marked rows included — the user
+            // taps "not earn" in the ledger and the row stops counting.
+            if excluded.contains(CryptoSplit.earnKey(tx)) { return false }
             if CryptoSplit.isEarnMarked(tx) { return true }
             guard tx.type == "transferIn",
                   String(tx.date.prefix(10)) < CryptoSplit.markerEpoch,
@@ -131,11 +141,12 @@ enum CryptoSplit {
     static func compute(
         txs: [CryptoTransaction],
         tags: [String: Bool],
-        livePrice: (String) -> Double?
+        livePrice: (String) -> Double?,
+        exclusions: Set<String> = []
     ) -> Split {
         var split = Split()
         let arrivalPrice = nearestPrices(txs)
-        var earnRule = EarnRule(txs)
+        var earnRule = EarnRule(txs, exclusions: exclusions)
 
         // Trading replay with earn transfers booked as INCOME AT ARRIVAL
         // VALUE — Earn pays in kind (ETH, BTC…) as well as USDT, and pricing
@@ -208,10 +219,11 @@ enum CryptoSplit {
     static func perCoin(
         txs: [CryptoTransaction],
         tags: [String: Bool],
-        livePrice: (String) -> Double?
+        livePrice: (String) -> Double?,
+        exclusions: Set<String> = []
     ) -> [CoinPnl] {
         let arrivalPrice = nearestPrices(txs)
-        var earnRule = EarnRule(txs)
+        var earnRule = EarnRule(txs, exclusions: exclusions)
         var lastPrice: [String: Double] = [:]
         var bags: [String: (amount: Double, cost: Double)] = [:]
         var realized: [String: Double] = [:]
@@ -271,9 +283,13 @@ enum CryptoSplit {
     /// Every earn transfer — USDT payouts AND in-kind coin rewards — valued
     /// at arrival, newest first. The bot/Earn pay history. Pre-era rows
     /// (the CMC transferIn habit) and marked rows alike, one shared rule.
-    static func yieldEvents(txs: [CryptoTransaction], tags: [String: Bool]) -> [YieldEvent] {
+    static func yieldEvents(
+        txs: [CryptoTransaction],
+        tags: [String: Bool],
+        exclusions: Set<String> = []
+    ) -> [YieldEvent] {
         let arrivalPrice = nearestPrices(txs)
-        var earnRule = EarnRule(txs)
+        var earnRule = EarnRule(txs, exclusions: exclusions)
         var events: [YieldEvent] = []
         // Date order so the venue-move multiset consumes rows the same way
         // compute() does.
@@ -292,7 +308,8 @@ enum CryptoSplit {
                 date: String(tx.date.prefix(10)),
                 token: tx.token,
                 usd: tx.type == "transferIn" ? value : -value,
-                notes: tx.notes
+                notes: tx.notes,
+                key: earnKey(tx)
             ))
         }
         return events.sorted { $0.date > $1.date }
@@ -307,7 +324,8 @@ struct CryptoSplitCard: View {
         CryptoSplit.compute(
             txs: store.cryptoTxs,
             tags: store.stablecoinTags,
-            livePrice: { store.livePrices[$0] }
+            livePrice: { store.livePrices[$0] },
+            exclusions: store.earnExclusions
         )
     }
 
@@ -394,9 +412,22 @@ struct CryptoSplitCard: View {
 /// the full transfer ledger. This is the page for "tf in USDT x, ETH y".
 struct BotIncomeView: View {
     @Environment(DataStore.self) private var store
+    @State private var removalCandidate: CryptoSplit.YieldEvent?
 
     private var events: [CryptoSplit.YieldEvent] {
-        CryptoSplit.yieldEvents(txs: store.cryptoTxs, tags: store.stablecoinTags)
+        CryptoSplit.yieldEvents(
+            txs: store.cryptoTxs,
+            tags: store.stablecoinTags,
+            exclusions: store.earnExclusions
+        )
+    }
+
+    /// The rows the user has taken off — computed from the unfiltered set so
+    /// they stay visible (and restorable) at the bottom of the page.
+    private var removedEvents: [CryptoSplit.YieldEvent] {
+        guard !store.earnExclusions.isEmpty else { return [] }
+        return CryptoSplit.yieldEvents(txs: store.cryptoTxs, tags: store.stablecoinTags)
+            .filter { store.earnExclusions.contains($0.key) }
     }
 
     /// Net earn per token, biggest first — USDT (the bots) beside the
@@ -496,26 +527,33 @@ struct BotIncomeView: View {
             ForEach(months, id: \.key) { month in
                 Section {
                     ForEach(month.items) { event in
-                        HStack(spacing: 10) {
-                            Image(systemName: event.usd >= 0 ? "arrow.down.left.circle.fill" : "arrow.up.right.circle")
-                                .font(.system(size: 14))
-                                .foregroundStyle(event.usd >= 0 ? Ledger.income : Ledger.subtle)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(event.usd >= 0 ? "Bot payout · \(event.token)" : "Moved out · \(event.token)")
-                                    .font(.subheadline)
-                                if !event.notes.isEmpty {
-                                    Text(event.notes).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                        // Tap = "this wasn't earn" — the manual veto for
+                        // backfilled rows the CMC habit swept in wrongly.
+                        Button {
+                            removalCandidate = event
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: event.usd >= 0 ? "arrow.down.left.circle.fill" : "arrow.up.right.circle")
+                                    .font(.system(size: 14))
+                                    .foregroundStyle(event.usd >= 0 ? Ledger.income : Ledger.subtle)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(event.usd >= 0 ? "Bot payout · \(event.token)" : "Moved out · \(event.token)")
+                                        .font(.subheadline)
+                                    if !event.notes.isEmpty {
+                                        Text(event.notes).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                                    }
+                                }
+                                Spacer()
+                                VStack(alignment: .trailing, spacing: 1) {
+                                    Text("\(event.usd >= 0 ? "+" : "")\(store.format(store.convert(event.usd, from: "USD"), compact: true))")
+                                        .font(.system(.footnote, design: .monospaced, weight: .medium))
+                                        .foregroundStyle(event.usd >= 0 ? Ledger.income : Ledger.expense)
+                                    Text(SydneyTime.shortLabel(event.date))
+                                        .font(.caption2).foregroundStyle(.tertiary)
                                 }
                             }
-                            Spacer()
-                            VStack(alignment: .trailing, spacing: 1) {
-                                Text("\(event.usd >= 0 ? "+" : "")\(store.format(store.convert(event.usd, from: "USD"), compact: true))")
-                                    .font(.system(.footnote, design: .monospaced, weight: .medium))
-                                    .foregroundStyle(event.usd >= 0 ? Ledger.income : Ledger.expense)
-                                Text(SydneyTime.shortLabel(event.date))
-                                    .font(.caption2).foregroundStyle(.tertiary)
-                            }
                         }
+                        .buttonStyle(.plain)
                     }
                 } header: {
                     HStack {
@@ -525,6 +563,37 @@ struct BotIncomeView: View {
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundStyle(month.net >= 0 ? Ledger.income.opacity(0.85) : Ledger.expense.opacity(0.85))
                     }
+                }
+            }
+
+            if !removedEvents.isEmpty {
+                Section {
+                    ForEach(removedEvents) { event in
+                        Button {
+                            Task { await store.setEarnExcluded(event.key, false) }
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "arrow.uturn.backward.circle")
+                                    .font(.system(size: 14))
+                                    .foregroundStyle(.secondary)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text("\(event.token) · \(SydneyTime.shortLabel(event.date))")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                    Text("tap to count it as earn again")
+                                        .font(.caption2).foregroundStyle(.tertiary)
+                                }
+                                Spacer()
+                                Text(store.format(store.convert(abs(event.usd), from: "USD"), compact: true))
+                                    .font(.system(.footnote, design: .monospaced))
+                                    .foregroundStyle(.tertiary)
+                                    .strikethrough()
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                } header: {
+                    Text("Removed by you · not earn")
                 }
             }
 
@@ -539,6 +608,24 @@ struct BotIncomeView: View {
         .toolbar { ToolbarItem(placement: .topBarTrailing) { FxChip() } }
         .navigationTitle("Earn income")
         .navigationBarTitleDisplayMode(.inline)
+        .confirmationDialog(
+            removalCandidate.map { "\($0.token) · \(store.format(store.convert(abs($0.usd), from: "USD"), compact: true)) on \(SydneyTime.shortLabel($0.date))" } ?? "",
+            isPresented: Binding(
+                get: { removalCandidate != nil },
+                set: { if !$0 { removalCandidate = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Not earn — remove it", role: .destructive) {
+                if let event = removalCandidate {
+                    Task { await store.setEarnExcluded(event.key, true) }
+                }
+                removalCandidate = nil
+            }
+            Button("Cancel", role: .cancel) { removalCandidate = nil }
+        } message: {
+            Text("Removed rows stop counting everywhere (totals, per-token, this ledger) and move to the bottom of this page, where a tap restores them.")
+        }
     }
 }
 
@@ -551,7 +638,8 @@ struct CoinPnlView: View {
         CryptoSplit.perCoin(
             txs: store.cryptoTxs,
             tags: store.stablecoinTags,
-            livePrice: { store.livePrices[$0] }
+            livePrice: { store.livePrices[$0] },
+            exclusions: store.earnExclusions
         )
     }
 
