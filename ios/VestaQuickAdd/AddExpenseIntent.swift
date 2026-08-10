@@ -125,9 +125,22 @@ struct AddExpenseIntent: LiveActivityIntent {
         let code = DeepLink.currencyCode(in: suppliedText, explicit: nil)
             ?? Settings.defaultCurrency
 
+        // Wallet automations supply a merchant but leave the category empty
+        // — the on-device model fills it from the real category list. The
+        // Action Button path arrives with a category already resolved, so
+        // this never overrides a human choice.
+        var resolvedCategory = category
+        if resolvedCategory == nil, let vendor, !vendor.isEmpty {
+            resolvedCategory = await OnDeviceAI.categorize(
+                vendor: vendor,
+                categories: Settings.cachedCategories ?? CategoryOptionsProvider.fallback
+            )
+            if let picked = resolvedCategory { IntentLog.write("ai category → \(picked)") }
+        }
+
         let expense = PendingExpense(
             amount: value,
-            type: category ?? Settings.defaultCategory,
+            type: resolvedCategory ?? Settings.defaultCategory,
             vendor: vendor ?? "",
             currency: code
         )

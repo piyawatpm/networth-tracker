@@ -160,19 +160,32 @@ struct MainTabView: View {
                     tapInspection = "Add failed — no amount in:\n\(data.raw)"
                     return
                 }
-                let expense = PendingExpense(
-                    amount: amount,
-                    type: Settings.defaultCategory,
-                    vendor: data.merchant,
-                    currency: data.currency ?? Settings.defaultCurrency
-                )
-                BreadcrumbLog.tap.write("URL ADD · \(expense.currency) \(amount) · \(data.merchant)")
+                BreadcrumbLog.tap.write("URL ADD · \(data.currency ?? Settings.defaultCurrency) \(amount) · \(data.merchant)")
                 Task {
+                    // On-device categorizer: the tap carries a merchant but
+                    // no category — let the local model pick one from the
+                    // real list. Falls back to the default when the model is
+                    // off, slow, or unsure.
+                    var type = Settings.defaultCategory
+                    if !data.merchant.isEmpty,
+                       let picked = await OnDeviceAI.categorize(
+                           vendor: data.merchant,
+                           categories: Settings.cachedCategories ?? CategoryOptionsProvider.fallback
+                       ) {
+                        type = picked
+                        BreadcrumbLog.tap.write("URL ADD · ai category → \(picked)")
+                    }
+                    let expense = PendingExpense(
+                        amount: amount,
+                        type: type,
+                        vendor: data.merchant,
+                        currency: data.currency ?? Settings.defaultCurrency
+                    )
                     let delivered = (try? await PendingQueue.shared.submit(expense)) ?? false
                     await MainActor.run {
                         tapInspection = """
                         \(delivered ? "Logged" : "Saved — will sync"):
-                        \(expense.currency) \(amount)\(data.merchant.isEmpty ? "" : " at " + data.merchant)
+                        \(expense.currency) \(amount)\(data.merchant.isEmpty ? "" : " at " + data.merchant) · \(type)
                         """
                     }
                 }

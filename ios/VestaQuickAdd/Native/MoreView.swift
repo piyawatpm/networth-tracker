@@ -14,6 +14,7 @@ enum MoreRoute: Hashable {
     case debtDetail(String)
     case botIncome
     case coinPnl
+    case ask
 }
 
 struct MoreView: View {
@@ -41,6 +42,9 @@ struct MoreView: View {
                     }
                     NavigationLink(value: MoreRoute.performance) {
                         Label("Performance", systemImage: "chart.xyaxis.line")
+                    }
+                    NavigationLink(value: MoreRoute.ask) {
+                        Label("Ask your money", systemImage: "sparkles")
                     }
                 }
 
@@ -102,6 +106,7 @@ struct MoreView: View {
                 case .debtDetail(let id): DebtDetailView(debtId: id)
                 case .botIncome: BotIncomeView()
                 case .coinPnl: CoinPnlView()
+                case .ask: AskMoneyView()
                 }
             }
             .toolbar {

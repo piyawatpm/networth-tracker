@@ -187,6 +187,23 @@ struct ExpensesView: View {
         return out
     }
 
+    /// Precomputed facts for the on-device blurb — the model narrates these
+    /// numbers, it never computes its own.
+    private var aiFacts: String {
+        guard !monthExpenses.isEmpty else { return "" }
+        var lines = ["Spending, \(scopeTitle): total \(store.format(scopedTotal, compact: true)) across \(monthExpenses.count) purchases."]
+        let categories = byCategory.prefix(4)
+            .map { "\($0.label) \(store.format($0.value, compact: true))" }
+        if !categories.isEmpty { lines.append("By category: " + categories.joined(separator: ", ") + ".") }
+        let vendors = topVendors.map { "\($0.name) \(store.format($0.total, compact: true))" }
+        if !vendors.isEmpty { lines.append("Top vendors: " + vendors.joined(separator: ", ") + ".") }
+        for insight in insights { lines.append("\(insight.text): \(insight.value).") }
+        if let peak = weekdayTotals.enumerated().max(by: { $0.element < $1.element }), peak.element > 0 {
+            lines.append("Highest-spend weekday: \(FlowMath.weekdayName(peak.offset)).")
+        }
+        return lines.joined(separator: "\n")
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -221,6 +238,15 @@ struct ExpensesView: View {
                 if !vestaListOnly, !insights.isEmpty {
                     Section {
                         InsightsCard(title: "Insights", insights: insights)
+                            .listRowInsets(EdgeInsets())
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
+                }
+
+                if !vestaListOnly {
+                    Section {
+                        AIBlurbCard(facts: aiFacts, cacheKey: "expenses")
                             .listRowInsets(EdgeInsets())
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)

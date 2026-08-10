@@ -144,6 +144,18 @@ struct IncomeView: View {
         return out
     }
 
+    /// Precomputed facts for the on-device blurb — narrated, never computed,
+    /// by the model.
+    private var aiFacts: String {
+        guard !monthEntries.isEmpty else { return "" }
+        var lines = ["Income, \(scopeTitle): total \(store.format(scopedTotal, compact: true)) across \(monthEntries.count) entries."]
+        let sources = slices.prefix(4)
+            .map { "\($0.label) \(store.format($0.value, compact: true))" }
+        if !sources.isEmpty { lines.append("By source: " + sources.joined(separator: ", ") + ".") }
+        for insight in insights { lines.append("\(insight.text): \(insight.value).") }
+        return lines.joined(separator: "\n")
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -180,6 +192,15 @@ struct IncomeView: View {
                 if !vestaListOnly, !insights.isEmpty {
                     Section {
                         InsightsCard(title: "Insights", insights: insights)
+                            .listRowInsets(EdgeInsets())
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
+                }
+
+                if !vestaListOnly {
+                    Section {
+                        AIBlurbCard(facts: aiFacts, cacheKey: "income")
                             .listRowInsets(EdgeInsets())
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
