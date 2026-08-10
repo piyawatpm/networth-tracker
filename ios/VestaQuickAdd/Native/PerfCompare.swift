@@ -125,7 +125,8 @@ enum DcaCompare {
         values: [(date: String, value: Double)],
         flows: [(date: String, value: Double)],
         prices: [PricePoint],
-        start: String
+        start: String,
+        maskSettling: Bool = false
     ) -> Series? {
         let priceRows = prices.map { (date: $0.date, value: $0.close) }
         let today = SydneyTime.today()
@@ -153,6 +154,31 @@ enum DcaCompare {
         }
         .sorted { $0.date < $1.date }
         var flowIndex = 0
+
+        // Settling windows of LARGE flows. Hand-marked values record a
+        // deposit days after (or before) the flow itself, and every such
+        // pair draws a fake tooth in the P&L path — +31.7% for exactly one
+        // day at the June gap re-entry, −13pp dives on the July paydays.
+        // Readings inside [flow − 1d, flow + 4d] are dropped FROM THE
+        // DRAWING when the flow is ≥4% of capital: pure sampling, nothing
+        // invented — the walk still processes every reading, so endpoints
+        // and every kept point are the exact honest numbers. First and last
+        // readings always survive. Off for crypto, whose snapshot values
+        // price flows the same day.
+        var settling: [(from: Date, to: Date)] = []
+        if maskSettling {
+            var probe = opening
+            for flow in inWindow {
+                let big = abs(flow.value) >= max(500, 0.04 * max(abs(probe), 1))
+                probe += flow.value
+                if big, let day = SnapshotDate.parse(flow.date) {
+                    settling.append((
+                        from: day.addingTimeInterval(-86400),
+                        to: day.addingTimeInterval(4 * 86400)
+                    ))
+                }
+            }
+        }
 
         var dates: [Date] = []
         var minePct: [Double] = []
@@ -182,6 +208,25 @@ enum DcaCompare {
             indexPct.append(bench / abs(invested) * 100)
         }
         guard dates.count >= 2 else { return nil }
+
+        if !settling.isEmpty {
+            var kept: [Int] = []
+            for index in dates.indices {
+                let isEdge = index == 0 || index == dates.count - 1
+                let masked = settling.contains {
+                    dates[index] >= $0.from && dates[index] <= $0.to
+                }
+                if isEdge || !masked { kept.append(index) }
+            }
+            if kept.count >= 2 {
+                dates = kept.map { dates[$0] }
+                minePct = kept.map { minePct[$0] }
+                indexPct = kept.map { indexPct[$0] }
+                mineUsd = kept.map { mineUsd[$0] }
+                indexUsd = kept.map { indexUsd[$0] }
+            }
+        }
+
         return Series(
             dates: dates, minePct: minePct, indexPct: indexPct,
             mineUsd: mineUsd, indexUsd: indexUsd
@@ -308,6 +353,9 @@ struct PerfCompareCard: View {
     let flows: [(date: String, value: Double)]
     /// Extra caveat line under the fine print (e.g. the super-in warning).
     var footnote: String?
+    /// Hide readings while big deposits settle into the hand-marks — for
+    /// scopes whose values lag their flows (stocks, net worth).
+    var maskSettling: Bool
 
     @State private var selected: Benchmark
     @State private var window: CompareWindow = .all
@@ -318,13 +366,14 @@ struct PerfCompareCard: View {
     init(
         allStart: String, benchmarks: [Benchmark],
         values: [(date: String, value: Double)], flows: [(date: String, value: Double)],
-        footnote: String? = nil
+        footnote: String? = nil, maskSettling: Bool = false
     ) {
         self.allStart = allStart
         self.benchmarks = benchmarks
         self.values = values
         self.flows = flows
         self.footnote = footnote
+        self.maskSettling = maskSettling
         _selected = State(initialValue: benchmarks[0])
     }
 
@@ -338,7 +387,10 @@ struct PerfCompareCard: View {
 
     private var series: DcaCompare.Series? {
         guard let prices else { return nil }
-        return DcaCompare.build(values: values, flows: flows, prices: prices, start: start)
+        return DcaCompare.build(
+            values: values, flows: flows, prices: prices, start: start,
+            maskSettling: maskSettling
+        )
     }
 
     var body: some View {
@@ -510,7 +562,7 @@ struct PerfCompareCard: View {
             Spacer(minLength: 0)
         }
 
-        Text("P&L as % of capital deployed · same money, same days into the benchmark · dividends in S&P 500")
+        Text("P&L as % of capital deployed · same money, same days into the benchmark · dividends in S&P 500\(maskSettling ? " · days right after big deposits hidden while marks settle" : "")")
             .font(.system(size: 8, design: .monospaced))
             .foregroundStyle(.tertiary)
         if let footnote {

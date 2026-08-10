@@ -721,8 +721,9 @@ struct PerformanceLiteView: View {
                             stockFlows(includeSuper: includeSuper), cryptoFlows
                         ),
                         footnote: includeSuper
-                            ? "super in — unlogged super contributions read as growth, trust the OFF number"
-                            : nil
+                            ? "super marks lag deposits by days — short wiggles self-correct"
+                            : nil,
+                        maskSettling: true
                     )
 
                     Toggle(isOn: $includeSuper.animation(.snappy(duration: 0.25))) {
@@ -743,8 +744,9 @@ struct PerformanceLiteView: View {
                             : stockValues,
                         flows: stockFlows(includeSuper: includeSuper),
                         footnote: includeSuper
-                            ? "super in — unlogged super contributions read as growth, trust the OFF number"
-                            : nil
+                            ? "super marks lag deposits by days — short wiggles self-correct"
+                            : nil,
+                        maskSettling: true
                     )
 
                     Toggle(isOn: $includeSuper.animation(.snappy(duration: 0.25))) {
