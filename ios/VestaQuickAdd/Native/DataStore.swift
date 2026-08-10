@@ -631,7 +631,41 @@ final class DataStore {
     }
 
     func savePortfolioTx(_ tx: PortfolioTransaction) async throws {
+        let before = PortfolioMath.derivePosition(
+            portfolioTxs.filter { $0.holdingId == tx.holdingId }
+        )
         portfolioTxs.append(tx)
+
+        // Reconcile the holding exactly like the web page does: units and
+        // cost move by the replay delta, keeping any baseline the log doesn't
+        // explain, and value rescales at the last-known price per unit. This
+        // matters most for super — its balance is units × price (cron), so a
+        // buy that doesn't grow units would be erased by the next reprice and
+        // the contribution would read as an instant loss on the perf page.
+        if let index = holdings.firstIndex(where: { $0.id == tx.holdingId }) {
+            let after = PortfolioMath.derivePosition(
+                portfolioTxs.filter { $0.holdingId == tx.holdingId }
+            )
+            var holding = holdings[index]
+            let baseUnits = holding.units - before.units
+            let baseCost = holding.amountInvested - before.costBasis
+            let pricePerUnit = holding.units > 1e-9
+                ? holding.currentValue / holding.units : 0
+
+            var units = baseUnits + after.units
+            var amountInvested = baseCost + after.costBasis
+            if abs(units) < 1e-9 { units = 0 }
+            if amountInvested < 1e-9 { amountInvested = 0 }
+
+            holding.units = units
+            holding.amountInvested = amountInvested
+            holding.currentValue = units == 0
+                ? 0
+                : (pricePerUnit > 0 ? pricePerUnit * units : holding.currentValue)
+            holdings[index] = holding
+            try await persist("portfolio_holdings", holdings)
+        }
+
         recomputeDerived()
         try await persist("portfolio_transactions", portfolioTxs)
     }

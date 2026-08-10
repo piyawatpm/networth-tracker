@@ -65,13 +65,26 @@ export function valueAsOf(
   values: { date: string; value: number }[],
   date: string,
 ): number | null {
+  return valueRowAsOf(values, date)?.value ?? null;
+}
+
+/**
+ * Same forward-fill, but keeps the reading's own date. Callers use it to
+ * decide whether the opening value genuinely reads from the start day or is
+ * a stale fill from earlier — which changes whether start-day flows count
+ * (see `includeStartFlows`).
+ */
+export function valueRowAsOf(
+  values: { date: string; value: number }[],
+  date: string,
+): { date: string; value: number } | null {
   let lo = 0;
   let hi = values.length - 1;
-  let found: number | null = null;
+  let found: { date: string; value: number } | null = null;
   while (lo <= hi) {
     const mid = (lo + hi) >> 1;
     if (values[mid].date <= date) {
-      found = values[mid].value;
+      found = values[mid];
       lo = mid + 1;
     } else {
       hi = mid - 1;
@@ -80,14 +93,28 @@ export function valueAsOf(
   return found;
 }
 
-/** Net external flow strictly after `start`, up to and including `end`. */
+/**
+ * Net external flow in `(start, end]` — or `[start, end]` with
+ * `includeStartFlows`.
+ *
+ * Pass `includeStartFlows: true` when the opening value was forward-filled
+ * from BEFORE the start day (`valueRowAsOf(values, start).date < start`):
+ * the window then begins on a flow day whose money is in neither the opening
+ * value nor the strict-after flows, and excluding it books that whole deposit
+ * as fake profit. When the opening reading is the start day itself it already
+ * contains the money, and counting the flow again would double it.
+ */
 export function netFlowsInWindow(
   flows: DailyFlow[],
   start: string,
   end: string,
+  includeStartFlows = false,
 ): number {
   return flows.reduce(
-    (sum, f) => (f.date > start && f.date <= end ? sum + f.amount : sum),
+    (sum, f) =>
+      (f.date > start || (includeStartFlows && f.date === start)) && f.date <= end
+        ? sum + f.amount
+        : sum,
     0,
   );
 }
@@ -104,13 +131,14 @@ export function windowPnl(
   start: string,
   end: string,
   endValueOverride?: number,
+  includeStartFlows = false,
 ): DcaOutcome | null {
   const startValue = valueAsOf(values, start);
   if (startValue == null) return null;
   const endValue = endValueOverride ?? valueAsOf(values, end);
   if (endValue == null) return null;
 
-  const net = netFlowsInWindow(flows, start, end);
+  const net = netFlowsInWindow(flows, start, end, includeStartFlows);
   const invested = startValue + net;
   const pnl = endValue - invested;
   return {
@@ -139,6 +167,7 @@ export function simulateDca(
   prices: PricePoint[],
   start: string,
   end: string,
+  includeStartFlows = false,
 ): DcaOutcome | null {
   const startPrice = priceAsOf(prices, start);
   const endPrice = priceAsOf(prices, end);
@@ -147,8 +176,14 @@ export function simulateDca(
   let units = openingValue / startPrice;
   let invested = openingValue;
 
+  // Must mirror windowPnl's flag exactly — `invested` being identical across
+  // the "You" row and every index row is the module's core promise.
   const inWindow = flows
-    .filter((f) => f.date > start && f.date <= end)
+    .filter(
+      (f) =>
+        (f.date > start || (includeStartFlows && f.date === start)) &&
+        f.date <= end,
+    )
     .sort((a, b) => (a.date < b.date ? -1 : 1));
 
   for (const f of inWindow) {

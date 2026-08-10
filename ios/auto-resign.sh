@@ -18,8 +18,12 @@
 set -u
 cd "$(dirname "$0")"
 
-# On the Desktop by request — glanceable without digging into ~/Library.
-LOG=~/Desktop/vesta-resign.log
+# Home dotfolder, NOT the Desktop: launchd jobs can't open anything under
+# ~/Desktop (macOS privacy protection) — every scheduled run died with exit
+# 127 before reaching this line. The Desktop still shows the log through a
+# symlink, which Finder follows fine; only the writer had to move.
+LOG="${VESTA_RESIGN_LOG:-$HOME/.vesta-resign/resign.log}"
+mkdir -p "$(dirname "$LOG")"
 exec >>"$LOG" 2>&1
 echo "── $(date '+%F %T') auto-resign run"
 

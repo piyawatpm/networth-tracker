@@ -29,7 +29,7 @@ import {
 import { parseCryptoCSV } from "@/lib/utils/crypto-csv";
 import {
   simulateDca,
-  valueAsOf,
+  valueRowAsOf,
   windowPnl,
   type DcaOutcome,
 } from "@/lib/utils/dca-benchmark";
@@ -436,17 +436,23 @@ export default function PerformancePage() {
   // stripped) against a lump-sum index. Here the timing is kept, because
   // whether you'd actually have more money depends on when the cash landed.
   const dcaCompare = useMemo(() => {
-    const openingValue = valueAsOf(scopeValues, dcaStart);
+    const openingRow = valueRowAsOf(scopeValues, dcaStart);
+    const openingValue = openingRow?.value ?? null;
     if (scopeValues.length === 0) {
       return { rows: [] as DcaRow[], reason: "No valuation history yet for this scope." };
     }
-    if (openingValue == null) {
+    if (openingRow == null || openingValue == null) {
       const firstTracked = scopeValues[0].date;
       return {
         rows: [] as DcaRow[],
         reason: `No valuation on or before ${dcaStart} for this scope — tracked history starts ${firstTracked}. Pick a later start date.`,
       };
     }
+
+    // Start-day flows count only when the opening value was forward-filled
+    // from before the start day — otherwise that money is in neither side and
+    // an opening buy on day one reads back as pure profit.
+    const includeStartFlows = openingRow.date < dcaStart;
 
     // Live current value beats the last snapshot as the end point, and the
     // index rows are priced at today's close, so both sides end together.
@@ -456,10 +462,13 @@ export default function PerformancePage() {
       dcaStart,
       today,
       scopeCurrentValueUsd > 0 ? scopeCurrentValueUsd : undefined,
+      includeStartFlows,
     );
 
     const sim = (prices: BenchCache["prices"] | null): DcaOutcome | null =>
-      prices ? simulateDca(openingValue, scopeFlows, prices, dcaStart, today) : null;
+      prices
+        ? simulateDca(openingValue, scopeFlows, prices, dcaStart, today, includeStartFlows)
+        : null;
 
     const rows: DcaRow[] = [
       { name: "You", color: ECHARTS_COLORS[0], outcome: mine, isYou: true },

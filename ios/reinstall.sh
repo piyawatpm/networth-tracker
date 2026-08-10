@@ -46,3 +46,13 @@ EXPIRY=$(security cms -D -i "$APP/embedded.mobileprovision" 2>/dev/null \
 echo
 echo "Installed. Signature good until: $EXPIRY"
 echo "Open the app once so iOS registers the intent, then test a card tap."
+
+# Keep the auto-resign mirror in step with what was just installed. The
+# launchd agent re-signs from ~/.vesta-resign because it can't read this repo
+# under ~/Desktop (TCC) — without this refresh it would happily downgrade the
+# phone to whatever code the mirror last saw. Skipped when this IS the mirror.
+MIRROR="$HOME/.vesta-resign/ios"
+if [ "$(pwd)" != "$MIRROR" ] && [ -d "$HOME/.vesta-resign" ]; then
+  rsync -a --delete --exclude build --exclude '*.log' ./ "$MIRROR/"
+  echo "Auto-resign mirror refreshed."
+fi

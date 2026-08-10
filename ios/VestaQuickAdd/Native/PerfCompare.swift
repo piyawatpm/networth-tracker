@@ -41,11 +41,20 @@ enum DcaCompare {
     /// Latest value at or before `day` (forward-fill over weekends/holidays).
     /// `rows` ascending by date string.
     static func asOf(_ rows: [(date: String, value: Double)], _ day: String) -> Double? {
+        asOfRow(rows, day)?.value
+    }
+
+    /// Same forward-fill, but keeps the reading's own date — build() needs to
+    /// know whether the opening it read is genuinely from the start day or a
+    /// stale fill from earlier.
+    static func asOfRow(
+        _ rows: [(date: String, value: Double)], _ day: String
+    ) -> (date: String, value: Double)? {
         var lo = 0, hi = rows.count - 1
-        var found: Double?
+        var found: (date: String, value: Double)?
         while lo <= hi {
             let mid = (lo + hi) / 2
-            if rows[mid].date <= day { found = rows[mid].value; lo = mid + 1 }
+            if rows[mid].date <= day { found = rows[mid]; lo = mid + 1 }
             else { hi = mid - 1 }
         }
         return found
@@ -121,15 +130,28 @@ enum DcaCompare {
         let priceRows = prices.map { (date: $0.date, value: $0.close) }
         let today = SydneyTime.today()
         let readings = values.filter { $0.date >= start && $0.date <= today }
-        guard let opening = asOf(values, start),
+        guard let openingRow = asOfRow(values, start),
               let startPrice = asOf(priceRows, start), startPrice > 0,
               readings.count >= 2
         else { return nil }
+        let opening = openingRow.value
+
+        // Flows dated ON the start day: counted only when the opening reading
+        // is older than the start day itself. All-time starts at the first
+        // logged flow, and when the last reading before it predates the buy,
+        // that capital is in neither the opening nor the flows — the A$26.4k
+        // super opening buy vanished from `invested` this way and its whole
+        // value came back as fake profit (+143% instead of ~+20%). When the
+        // opening reading IS the start day it already contains the money, and
+        // counting the flow again would double it.
+        let startDayCounts = openingRow.date < start
 
         var invested = opening
         var units = opening / startPrice
-        let inWindow = flows.filter { $0.date > start && $0.date <= today }
-            .sorted { $0.date < $1.date }
+        let inWindow = flows.filter {
+            ($0.date > start || (startDayCounts && $0.date == start)) && $0.date <= today
+        }
+        .sorted { $0.date < $1.date }
         var flowIndex = 0
 
         var dates: [Date] = []
