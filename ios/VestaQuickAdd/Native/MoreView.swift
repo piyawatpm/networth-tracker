@@ -639,7 +639,9 @@ struct PerformanceLiteView: View {
     /// contributions are only partially logged, so with super in, unlogged
     /// deposits read as growth (the known +contamination). The toggle exists
     /// for the "whole picture anyway" look.
-    @State private var includeSuper = false
+    // Env override so simulator test runs can open straight onto super-IN.
+    @State private var includeSuper =
+        ProcessInfo.processInfo.environment["VESTA_PERF_SUPER"] == "1"
 
     private var stockValues: [(date: String, value: Double)] {
         DcaCompare.dailyValues(store.portfolioParsed)

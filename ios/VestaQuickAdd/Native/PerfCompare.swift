@@ -137,15 +137,29 @@ enum DcaCompare {
         else { return nil }
         let opening = openingRow.value
 
-        // Flows dated ON the start day: counted only when the opening reading
-        // is older than the start day itself. All-time starts at the first
+        // Flows dated ON the start day: counted when the opening reading is
+        // older than the start day itself — all-time starts at the first
         // logged flow, and when the last reading before it predates the buy,
-        // that capital is in neither the opening nor the flows — the A$26.4k
-        // super opening buy vanished from `invested` this way and its whole
-        // value came back as fake profit (+143% instead of ~+20%). When the
-        // opening reading IS the start day it already contains the money, and
-        // counting the flow again would double it.
+        // that capital is in neither the opening nor the flows. The A$26.4k
+        // super opening buy vanished from `invested` this way and came back
+        // as fake profit (+143% instead of ~+14%).
+        //
+        // The date test alone has a loophole in COMBINED series: net worth
+        // had a reading dated exactly on the start day (the crypto side did),
+        // but its stocks half was still a stale forward-fill — same missing
+        // capital, +58.8% instead of ~+8%. So start-day flows also count
+        // when the day's buys exceed the entire opening reading: money that
+        // big cannot plausibly already be inside it. When the opening
+        // genuinely contains the buys (marks updated the same day), the
+        // opening is at least as large as they are and the test stays false.
+        // The 1.5× margin keeps a same-day-priced pot that opened slightly
+        // below cost (crypto: $483 pot vs $500 buy after a small dip) from
+        // tripping it — a genuine miss shows up as a multiple, not a hair.
+        let startDayBuys = flows
+            .filter { $0.date == start && $0.value > 0 }
+            .reduce(0) { $0 + $1.value }
         let startDayCounts = openingRow.date < start
+            || startDayBuys > openingRow.value * 1.5
 
         var invested = opening
         var units = opening / startPrice
