@@ -23,7 +23,9 @@ struct CryptoSection: View {
             )
             .entranceTransition()
 
-            // Investments vs the stable cash layer, same split the web uses.
+            // Investments vs the stable cash layer, same split the web uses —
+            // plus the unrealized verdict on the invested pot, so realized
+            // (card below) and unrealized are both one glance away.
             HStack(spacing: 14) {
                 potBadge(
                     "Invested",
@@ -36,6 +38,10 @@ struct CryptoSection: View {
                     Ledger.chartColor(5)
                 )
                 Spacer()
+                unrealizedBadge(
+                    investedRows.reduce(0) { $0 + $1.pnlUsd },
+                    cost: investedRows.reduce(0) { $0 + $1.costUsd }
+                )
             }
             .padding(14)
             .financeCard()
@@ -77,32 +83,46 @@ struct CryptoSection: View {
                 .financeCard()
             }
 
+            let portTotal = rows.reduce(0) { $0 + $1.valueUsd }
             ForEach(rows) { row in
-                HStack(spacing: 10) {
-                    LogoCircle(url: store.coinImageURL(row.token), fallback: row.token)
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 5) {
-                            Text(row.token).font(.subheadline.weight(.semibold))
-                            if row.isCash {
-                                Text("CASH")
-                                    .font(.system(size: 9, design: .monospaced))
-                                    .padding(.horizontal, 5).padding(.vertical, 2)
-                                    .background(.primary.opacity(0.08), in: .capsule)
-                            } else if row.isLive {
-                                // Priced by Binance seconds ago, not the CSV.
-                                Circle().fill(Ledger.income).frame(width: 5, height: 5)
+                // Same fields as the web's holdings card: amount @ price up
+                // top, value on the right, then P&L (abs + %) against the
+                // share of the portfolio.
+                VStack(spacing: 8) {
+                    HStack(spacing: 10) {
+                        LogoCircle(url: store.coinImageURL(row.token), fallback: row.token)
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 5) {
+                                Text(row.token).font(.subheadline.weight(.semibold))
+                                if row.isCash {
+                                    Text("CASH")
+                                        .font(.system(size: 9, design: .monospaced))
+                                        .padding(.horizontal, 5).padding(.vertical, 2)
+                                        .background(.primary.opacity(0.08), in: .capsule)
+                                } else if row.isLive {
+                                    // Priced by Binance seconds ago, not the CSV.
+                                    Circle().fill(Ledger.income).frame(width: 5, height: 5)
+                                }
                             }
+                            Text(amountLine(row))
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(.secondary)
                         }
-                        Text(String(format: "%.6g", row.amount))
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    VStack(alignment: .trailing, spacing: 2) {
+                        Spacer()
                         Text(store.format(store.convert(row.valueUsd, from: "USD"), compact: true))
                             .font(.system(.footnote, design: .monospaced, weight: .semibold))
+                    }
+                    HStack {
                         if !row.isCash && row.costUsd > 0 {
-                            PctBadge(percent: row.pnlUsd / row.costUsd * 100)
+                            Text("\(row.pnlUsd >= 0 ? "+" : "")\(store.format(store.convert(row.pnlUsd, from: "USD"), compact: true))  \(row.pnlUsd >= 0 ? "+" : "")\(String(format: "%.1f", row.pnlUsd / row.costUsd * 100))%")
+                                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                                .foregroundStyle(row.pnlUsd >= 0 ? Ledger.income : Ledger.expense)
+                        }
+                        Spacer()
+                        if portTotal > 0 {
+                            Text(String(format: "%.1f%% of port", row.valueUsd / portTotal * 100))
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.tertiary)
                         }
                     }
                 }
@@ -113,12 +133,45 @@ struct CryptoSection: View {
         }
     }
 
+    /// "0.5182 @ $3,421.55" — the web card's amount line. Sub-$1 tokens keep
+    /// four decimals so meme-coin prices don't collapse to $0.00.
+    private func amountLine(_ row: DataStore.CryptoDisplayRow) -> String {
+        let amount = String(format: "%.6g", row.amount)
+        guard row.amount > 0, !row.isCash else { return amount }
+        let price = row.valueUsd / row.amount
+        let priceText = price < 1
+            ? String(format: "$%.4f", price)
+            : "$" + Self.priceFormatter.string(from: NSNumber(value: price))!
+        return "\(amount) @ \(priceText)"
+    }
+
+    private static let priceFormatter: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.minimumFractionDigits = 2
+        f.maximumFractionDigits = 2
+        return f
+    }()
+
     private func potBadge(_ label: String, _ usd: Double, _ tint: Color) -> some View {
         HStack(spacing: 6) {
             Circle().fill(tint).frame(width: 7, height: 7)
             Text(label).font(.caption2).foregroundStyle(.secondary)
             Text(store.format(store.convert(usd, from: "USD"), compact: true))
                 .font(.system(.caption2, design: .monospaced, weight: .medium))
+        }
+    }
+
+    private func unrealizedBadge(_ pnlUsd: Double, cost: Double) -> some View {
+        VStack(alignment: .trailing, spacing: 1) {
+            Text("\(pnlUsd >= 0 ? "+" : "")\(store.format(store.convert(pnlUsd, from: "USD"), compact: true))")
+                .font(.system(.caption2, design: .monospaced, weight: .semibold))
+                .foregroundStyle(pnlUsd >= 0 ? Ledger.income : Ledger.expense)
+            Text(cost > 0
+                 ? "unrealized \(pnlUsd >= 0 ? "+" : "")\(String(format: "%.1f", pnlUsd / cost * 100))%"
+                 : "unrealized")
+                .font(.system(size: 8, design: .monospaced))
+                .foregroundStyle(.tertiary)
         }
     }
 }

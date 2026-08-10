@@ -109,6 +109,19 @@ private struct PortfolioSection: View {
         .sorted { $0.value > $1.value }
     }
 
+    // Web parity: holding-level invested vs live value, display currency.
+    private var investedTotal: Double {
+        rows.reduce(0) { $0 + store.convert($1.holding.amountInvested, from: $1.holding.currency) }
+    }
+    private var unrealizedTotal: Double {
+        rows.reduce(0) {
+            $0 + store.convert(
+                store.holdingLiveValue($1.holding) - $1.holding.amountInvested,
+                from: $1.holding.currency
+            )
+        }
+    }
+
     var body: some View {
         @Bindable var store = store
         VStack(spacing: 12) {
@@ -134,6 +147,31 @@ private struct PortfolioSection: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
+            .financeCard()
+            .entranceTransition()
+
+            // Invested vs unrealized over the visible scope — the totals the
+            // web's summary row carries, so realized (card below) and
+            // unrealized are both on the page.
+            HStack(spacing: 14) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Invested").font(.caption2).foregroundStyle(.secondary)
+                    Text(store.format(investedTotal, compact: true))
+                        .font(.system(.caption, design: .monospaced, weight: .medium))
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text("\(unrealizedTotal >= 0 ? "+" : "")\(store.format(unrealizedTotal, compact: true))")
+                        .font(.system(.caption, design: .monospaced, weight: .semibold))
+                        .foregroundStyle(unrealizedTotal >= 0 ? Ledger.income : Ledger.expense)
+                    Text(investedTotal > 0
+                         ? "unrealized \(unrealizedTotal >= 0 ? "+" : "")\(String(format: "%.1f", unrealizedTotal / investedTotal * 100))%"
+                         : "unrealized")
+                        .font(.system(size: 8, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .padding(14)
             .financeCard()
             .entranceTransition()
 
@@ -174,6 +212,7 @@ private struct HoldingCard: View {
         let base = position.costBasis > 0 ? position.costBasis : holding.amountInvested
         let pct = base > 0 ? gain / base * 100 : 0
         let isLive = store.liveStockPrices[holding.ticker] != nil
+        let units = position.units > 0 ? position.units : holding.units
 
         HStack(spacing: 10) {
             LogoCircle(
@@ -199,13 +238,22 @@ private struct HoldingCard: View {
                             .padding(.horizontal, 5).padding(.vertical, 2)
                             .background(Ledger.chartColor(1).opacity(0.15), in: .capsule)
                     }
+                    if units > 0 {
+                        // The web row's "…/u" — what one unit trades at now.
+                        Text("\(Money.format(liveValue / units, currency: holding.currency, compact: true))/u")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 3) {
                 Text(Money.format(liveValue, currency: holding.currency))
                     .font(.system(.footnote, design: .monospaced, weight: .semibold))
-                PctBadge(percent: pct)
+                // Web parity: absolute P&L beside the percent, not % alone.
+                Text("\(gain >= 0 ? "+" : "")\(Money.format(gain, currency: holding.currency, compact: true)) (\(gain >= 0 ? "+" : "")\(String(format: "%.1f", pct))%)")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(gain >= 0 ? Ledger.income : Ledger.expense)
             }
         }
         .padding(14)
@@ -328,15 +376,30 @@ struct HoldingDetailView: View {
             VStack(spacing: 16) {
                 VStack(spacing: 12) {
                     MoneyText(amount: holding.currentValue, currency: holding.currency)
+                    let units = position.units > 0 ? position.units : holding.units
+                    let cost = position.costBasis > 0 ? position.costBasis : holding.amountInvested
+                    let unrealized = holding.currentValue - cost
                     HStack(spacing: 0) {
-                        statTile("Units", String(format: "%.4g", position.units > 0 ? position.units : holding.units))
+                        statTile("Units", String(format: "%.4g", units))
                         Divider().padding(.vertical, 4)
-                        statTile("Cost", Money.format(position.costBasis > 0 ? position.costBasis : holding.amountInvested, currency: holding.currency, compact: true))
+                        statTile("Price / u", units > 0
+                            ? Money.format(holding.currentValue / units, currency: holding.currency, compact: true)
+                            : "—")
                         Divider().padding(.vertical, 4)
+                        statTile("Cost", Money.format(cost, currency: holding.currency, compact: true))
+                    }
+                    Divider()
+                    HStack(spacing: 0) {
                         statTile(
                             "Realized",
                             Money.format(position.realizedPnl, currency: holding.currency, compact: true),
                             tint: position.realizedPnl >= 0 ? Ledger.income : Ledger.expense
+                        )
+                        Divider().padding(.vertical, 4)
+                        statTile(
+                            "Unrealized",
+                            Money.format(unrealized, currency: holding.currency, compact: true),
+                            tint: unrealized >= 0 ? Ledger.income : Ledger.expense
                         )
                     }
                 }

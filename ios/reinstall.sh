@@ -1,11 +1,14 @@
-#!/bin/sh
+#!/bin/bash
 # Rebuild Vesta and put it back on the connected iPhone.
 #
 # Free personal-team signatures last seven days. On day eight the app refuses to
 # launch and every Wallet automation fails with "couldn't communicate with a
 # helper application" — so this needs running weekly, and the app warns two days
 # ahead. Plug the phone in, unlock it, run this.
-set -e
+# pipefail matters: the xcodebuild | tail pipeline otherwise reports tail's
+# exit status, and a FAILED build would fall through to installing the stale
+# app from the previous successful build.
+set -e -o pipefail
 cd "$(dirname "$0")"
 
 # The hardware UDID, not the CoreDevice identifier devicectl prints in its
