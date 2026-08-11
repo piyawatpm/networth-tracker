@@ -118,6 +118,9 @@ final class DataStore {
     /// — keys are CryptoSplit's date|token|amount, synced via app_data so
     /// they survive CSV re-uploads and reinstalls.
     private(set) var earnExclusions: Set<String> = []
+    /// Option code → (yyyy-MM-dd → unit price), accumulated by the cron —
+    /// the visible log of the daily Hostplus repricing.
+    var hostplusPriceHistory: [String: [String: Double]] = [:]
     var goals: [NetworthGoal] = []
     /// display-name → CoinGecko image URL (maintained by the web app).
     var coinImages: [String: String] = [:]
@@ -577,6 +580,7 @@ final class DataStore {
         stablecoinTags = blob("crypto_stablecoin_tags", [String: Bool].self) ?? [:]
         exchangeOverrides = blob("crypto_exchange_overrides", [String: String].self) ?? [:]
         earnExclusions = Set(blob("earn_exclusions", [String].self) ?? [])
+        hostplusPriceHistory = blob("hostplus_price_history", [String: [String: Double]].self) ?? [:]
         goals = blob("networth_goals", [NetworthGoal].self) ?? []
         coinImages = blob("crypto_coin_images", [String: String].self) ?? [:]
         stockLogos = blob("portfolio_stock_logos", [String: String].self) ?? [:]

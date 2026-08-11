@@ -508,6 +508,39 @@ struct HoldingDetailView: View {
                 .padding(16)
                 .financeCard()
 
+                // The Hostplus unit-price log — proof the daily auto-reprice
+                // is alive, since the balance alone moves too quietly to see.
+                if let code = HostplusAPI.optionCodeByTicker[holding.ticker.uppercased()],
+                   let history = store.hostplusPriceHistory[code], !history.isEmpty {
+                    let days = Array(history.sorted { $0.key > $1.key }.prefix(7))
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Unit price · Hostplus feed").labelMono()
+                        ForEach(days.indices, id: \.self) { index in
+                            let (date, price) = days[index]
+                            HStack {
+                                Text(SydneyTime.shortLabel(date)).font(.caption)
+                                Spacer()
+                                if index + 1 < days.count {
+                                    let previous = days[index + 1].value
+                                    let deltaPct = previous > 0 ? (price - previous) / previous * 100 : 0
+                                    Text("\(deltaPct >= 0 ? "+" : "")\(String(format: "%.2f", deltaPct))%")
+                                        .font(.system(size: 10, design: .monospaced))
+                                        .foregroundStyle(deltaPct >= 0 ? Ledger.income : Ledger.expense)
+                                }
+                                Text(String(format: "$%.4f", price))
+                                    .font(.system(.caption, design: .monospaced, weight: .semibold))
+                                    .frame(width: 64, alignment: .trailing)
+                            }
+                        }
+                        Text("auto-updated by the daily server job · Hostplus publishes each day's price the next business day ~6pm Sydney · balance = units × price")
+                            .font(.system(size: 8, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(16)
+                    .financeCard()
+                }
+
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Transactions").labelMono()
                     if transactions.isEmpty {

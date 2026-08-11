@@ -17,6 +17,12 @@ enum HostplusAPI {
         "HOSTPLUS": "International Shares - Indexed",
     ]
 
+    /// Option CODE per ticker — the key the cron's rolling price-history
+    /// blob (`hostplus_price_history`) is stored under.
+    static let optionCodeByTicker: [String: String] = [
+        "HOSTPLUS": "HC21A",
+    ]
+
     private static let base =
         "https://hostplus.com.au/content/hostplus-program/home/members/our-products-and-services/investment-options/investment-returns"
 

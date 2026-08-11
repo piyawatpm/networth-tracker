@@ -21,6 +21,19 @@ export const dynamic = "force-dynamic";
 // Helpers
 // ---------------------------------------------------------------------------
 
+// "Friday 31 July 2026" (a Hostplus DateHeader) → "2026-07-31".
+const HOSTPLUS_MONTHS: Record<string, string> = {
+  january: "01", february: "02", march: "03", april: "04",
+  may: "05", june: "06", july: "07", august: "08",
+  september: "09", october: "10", november: "11", december: "12",
+};
+function hostplusDateToIso(label: string): string | null {
+  const m = label?.trim().match(/(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})/);
+  if (!m) return null;
+  const mm = HOSTPLUS_MONTHS[m[2].toLowerCase()];
+  return mm ? `${m[3]}-${mm}-${m[1].padStart(2, "0")}` : null;
+}
+
 function nextDay(dateStr: string): string {
   const [y, m, d] = dateStr.split("-").map(Number);
   const date = new Date(y, m - 1, d + 1);
@@ -127,6 +140,7 @@ export async function GET(request: Request) {
       "crypto_ticker_mappings",
       "debt_records",
       "debt_transactions",
+      "hostplus_price_history",
     ];
 
     const { data: rows } = await supabase
@@ -242,6 +256,32 @@ export async function GET(request: Request) {
           else updates.push({ key: "portfolio_holdings", value: JSON.stringify(holdings), updated_at: now });
           const sample = HOSTPLUS_OPTION_BY_TICKER[hostplusHoldings[0].ticker];
           log.push(`Hostplus: ${repriced} super holding(s) repriced (${sample}=$${(priceByCode.get(sample) ?? 0).toFixed(4)})`);
+
+          // Rolling unit-price history — the feed only ever serves 5
+          // business days, so accumulate them. This is the visible
+          // "price auto-update log" the balance change alone never shows.
+          const history = parse<Record<string, Record<string, number>>>("hostplus_price_history", {});
+          let historyGrew = false;
+          for (const h of hostplusHoldings) {
+            const code = HOSTPLUS_OPTION_BY_TICKER[h.ticker];
+            const option = hp.options.find((o) => o.code === code);
+            // Alignment with DateHeaders is only trustworthy when no price
+            // was dropped in parsing.
+            if (!option || option.history.length !== hp.dates.length) continue;
+            const byDate = history[code] ?? {};
+            option.history.forEach((price, i) => {
+              const iso = hostplusDateToIso(hp.dates[i]);
+              if (iso && price > 0 && byDate[iso] !== price) {
+                byDate[iso] = price;
+                historyGrew = true;
+              }
+            });
+            history[code] = byDate;
+          }
+          if (historyGrew) {
+            updates.push({ key: "hostplus_price_history", value: JSON.stringify(history), updated_at: now });
+            log.push(`Hostplus history: ${Object.entries(history).map(([c, m]) => `${c}=${Object.keys(m).length}d`).join(" ")}`);
+          }
         } else {
           log.push(`Hostplus: matched ${hostplusHoldings.length} holding(s) but no price returned`);
         }
