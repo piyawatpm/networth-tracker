@@ -71,6 +71,12 @@ export default function PortfolioPage() {
   const [lastFetchStatus, setLastFetchStatus] = useState<string | null>(null);
   const [updateLog, setUpdateLog] = useState<PriceUpdateLog[]>([]);
   const [logHoldingId, setLogHoldingId] = useState<string | null>(null);
+  // Server-side unit-price log the daily cron accumulates (Hostplus) — the
+  // localStorage updateLog above only ever sees THIS browser's edits.
+  const [hostplusPriceHistory] = useCloudStorage<Record<string, Record<string, number>>>(
+    "hostplus_price_history",
+    {},
+  );
   const [transactions, setTransactions] = useCloudStorage<PortfolioTransaction[]>("portfolio_transactions", []);
   const [txHistoryHoldingId, setTxHistoryHoldingId] = useState<string | null>(null);
 
@@ -785,6 +791,7 @@ export default function PortfolioPage() {
       <PriceUpdateStatus
         holdings={holdings}
         updateLog={updateLog}
+        priceHistory={hostplusPriceHistory}
         logHoldingId={logHoldingId}
         setLogHoldingId={setLogHoldingId}
         format={format}
