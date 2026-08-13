@@ -576,7 +576,7 @@ struct PerfCompareCard: View {
             Spacer(minLength: 0)
         }
 
-        Text("P&L as % of capital deployed · same money, same days into the benchmark · dividends in S&P 500\(maskSettling ? " · days right after big deposits hidden while marks settle" : "")")
+        Text("P&L as % of capital deployed · same money, same days into the benchmark — so the benchmark line follows YOUR deposit schedule and shifts when scope or the super toggle changes it · dividends in S&P 500\(maskSettling ? " · days right after big deposits hidden while marks settle" : "")")
             .font(.system(size: 8, design: .monospaced))
             .foregroundStyle(.tertiary)
         if let footnote {
