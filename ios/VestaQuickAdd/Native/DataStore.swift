@@ -122,6 +122,8 @@ final class DataStore {
     /// the visible log of the daily Hostplus repricing.
     var hostplusPriceHistory: [String: [String: Double]] = [:]
     var goals: [NetworthGoal] = []
+    /// Forecast levers, synced with the web (see Forecast.swift).
+    var forecastAssumptions: ForecastAssumptions = .default
     /// display-name → CoinGecko image URL (maintained by the web app).
     var coinImages: [String: String] = [:]
     /// ticker → Finnhub logo URL.
@@ -582,6 +584,7 @@ final class DataStore {
         earnExclusions = Set(blob("earn_exclusions", [String].self) ?? [])
         hostplusPriceHistory = blob("hostplus_price_history", [String: [String: Double]].self) ?? [:]
         goals = blob("networth_goals", [NetworthGoal].self) ?? []
+        forecastAssumptions = blob("forecast_assumptions", ForecastAssumptions.self) ?? .default
         coinImages = blob("crypto_coin_images", [String: String].self) ?? [:]
         stockLogos = blob("portfolio_stock_logos", [String: String].self) ?? [:]
         recurringIncome = blob("recurring_income_templates", [RecurringTemplate].self) ?? []
@@ -680,6 +683,23 @@ final class DataStore {
 
         recomputeDerived()
         try await persist("portfolio_transactions", portfolioTxs)
+    }
+
+    /// Upsert a net-worth goal — same blob the web's GoalSection edits.
+    func saveGoal(_ goal: NetworthGoal) async throws {
+        if let index = goals.firstIndex(where: { $0.id == goal.id }) {
+            goals[index] = goal
+        } else {
+            goals.append(goal)
+        }
+        try await persist("networth_goals", goals)
+    }
+
+    /// Forecast levers; local flip first so the page answers instantly.
+    func saveForecastAssumptions(_ next: ForecastAssumptions) async {
+        forecastAssumptions = next
+        do { try await persist("forecast_assumptions", next) }
+        catch { loadError = error.localizedDescription }
     }
 
     /// Flip one earn event in or out of the excluded set and persist. Errors

@@ -25,6 +25,7 @@ import {
   ChevronDown,
   MoreHorizontal,
   X,
+  Telescope,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useCurrency } from "@/components/providers/currency-provider";
@@ -44,6 +45,7 @@ const PRIMARY_NAV = [
 
 const SECONDARY_NAV = [
   { href: "/performance", label: "Performance", icon: LineChart },
+  { href: "/forecast", label: "Forecast", icon: Telescope },
   { href: "/liabilities", label: "Liabilities", icon: Handshake },
   { href: "/emergency-fund", label: "Emergency", icon: Shield },
   { href: "/budget", label: "Budget", icon: FileSpreadsheet },

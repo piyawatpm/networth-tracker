@@ -15,6 +15,7 @@ enum MoreRoute: Hashable {
     case botIncome
     case coinPnl
     case ask
+    case forecast
 }
 
 struct MoreView: View {
@@ -30,6 +31,7 @@ struct MoreView: View {
         case "performance": [.performance]
         case "coinpnl": [.performance, .coinPnl]
         case "earn": [.performance, .botIncome]
+        case "forecast": [.forecast]
         default: []
         }
 
@@ -45,6 +47,9 @@ struct MoreView: View {
                     }
                     NavigationLink(value: MoreRoute.ask) {
                         Label("Ask your money", systemImage: "sparkles")
+                    }
+                    NavigationLink(value: MoreRoute.forecast) {
+                        Label("Forecast & goals", systemImage: "flag.checkered")
                     }
                 }
 
@@ -107,6 +112,7 @@ struct MoreView: View {
                 case .botIncome: BotIncomeView()
                 case .coinPnl: CoinPnlView()
                 case .ask: AskMoneyView()
+                case .forecast: ForecastView()
                 }
             }
             .toolbar {

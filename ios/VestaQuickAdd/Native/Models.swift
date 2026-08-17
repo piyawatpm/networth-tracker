@@ -282,6 +282,23 @@ struct NetworthGoal: Identifiable, Codable, Equatable {
     var currency: String
     var setAt: Double
     var achievedAt: Double?
+    /// Optional deadline (yyyy-MM-dd) — with one set, the forecast page turns
+    /// from "when will I get there?" into "what would it take by then?".
+    var targetDate: String?
+
+    init(
+        id: String = UUID().uuidString, name: String, amount: Double, currency: String,
+        setAt: Double = Date().timeIntervalSince1970 * 1000, achievedAt: Double? = nil,
+        targetDate: String? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.amount = amount
+        self.currency = currency
+        self.setAt = setAt
+        self.achievedAt = achievedAt
+        self.targetDate = targetDate
+    }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -291,6 +308,30 @@ struct NetworthGoal: Identifiable, Codable, Equatable {
         currency = try c.decodeIfPresent(String.self, forKey: .currency) ?? "AUD"
         setAt = try c.decodeIfPresent(Double.self, forKey: .setAt) ?? 0
         achievedAt = try c.decodeIfPresent(Double.self, forKey: .achievedAt)
+        targetDate = try c.decodeIfPresent(String.self, forKey: .targetDate)
+    }
+}
+
+/// Synced forecast levers (app_data `forecast_assumptions`); nil means
+/// "use the measured value". Mirrors lib/utils/forecast.ts.
+struct ForecastAssumptions: Codable, Equatable {
+    var annualReturnPct: Double?
+    var monthlySaving: Double?
+    var contributionGrowthPct: Double
+
+    static let `default` = ForecastAssumptions(annualReturnPct: nil, monthlySaving: nil, contributionGrowthPct: 0)
+
+    init(annualReturnPct: Double?, monthlySaving: Double?, contributionGrowthPct: Double) {
+        self.annualReturnPct = annualReturnPct
+        self.monthlySaving = monthlySaving
+        self.contributionGrowthPct = contributionGrowthPct
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        annualReturnPct = try c.decodeIfPresent(Double.self, forKey: .annualReturnPct)
+        monthlySaving = try c.decodeIfPresent(Double.self, forKey: .monthlySaving)
+        contributionGrowthPct = try c.decodeIfPresent(Double.self, forKey: .contributionGrowthPct) ?? 0
     }
 }
 

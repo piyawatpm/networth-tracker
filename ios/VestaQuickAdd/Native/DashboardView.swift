@@ -207,40 +207,39 @@ struct DashboardView: View {
 
     // MARK: Goal
 
-    /// When the goal lands if the trailing-90-day pace holds. Deliberately
-    /// silent when the pace is flat or negative — a "never" ETA is noise.
+    /// When the goal lands under the compound forecast — the same walk the
+    /// Forecast page draws, so card and page never name different dates.
+    /// (Replaced a trailing-90-day straight line, which ignored compounding
+    /// and read a hot quarter as a permanent slope.) Silent when the path
+    /// never gets there — a "never" ETA is noise on a dashboard.
     private func goalETA(target: Double) -> String? {
-        let remaining = target - store.netWorth
-        guard remaining > 0, let dailyUsd = store.dailyGrowthUsd(days: 90) else { return nil }
-        let daily = store.convert(dailyUsd, from: "USD")
-        guard daily > 0 else { return nil }
-        let days = remaining / daily
-        guard days < 365 * 25 else { return nil }
-        guard let eta = Calendar.current.date(byAdding: .day, value: Int(days), to: Date()) else {
-            return nil
-        }
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "MMM yyyy"
-        return "on pace for \(f.string(from: eta))"
+        guard let months = ForecastMath.monthsToReach(store.forecastInputs, target: target),
+              months > 0 else { return nil }
+        return "\(ForecastMath.monthYear(ForecastMath.addMonths(months))) · \(ForecastMath.describe(months: months)) at this pace"
     }
 
 
     private var activeGoal: NetworthGoal? {
-        store.goals.filter { $0.achievedAt == nil }.max { $0.setAt < $1.setAt }
+        store.forecastGoal
     }
 
     private func goalCard(_ goal: NetworthGoal) -> some View {
         let target = store.convert(goal.amount, from: goal.currency)
         let progress = target > 0 ? min(1, max(0, store.netWorth / target)) : 0
 
-        return VStack(alignment: .leading, spacing: 8) {
+        return NavigationLink {
+            ForecastView()
+        } label: {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(goal.name.isEmpty ? "Goal" : goal.name).labelMono()
                 Spacer()
                 Text("\(Int(progress * 100))%")
                     .font(.system(.caption, design: .monospaced, weight: .semibold))
                     .foregroundStyle(Ledger.income)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.tertiary)
             }
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
@@ -271,6 +270,8 @@ struct DashboardView: View {
         }
         .padding(16)
         .financeCard()
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: Assets

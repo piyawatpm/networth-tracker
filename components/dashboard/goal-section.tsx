@@ -17,6 +17,13 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import Link from "next/link";
+import { getLastNMonthKeys, getMonthKey } from "@/lib/utils/timezone";
+import type { IncomeEntry, ExpenseEntry } from "@/lib/utils/types";
+import {
+  DEFAULT_ASSUMPTIONS, FALLBACK_RETURN_PCT, type ForecastAssumptions,
+  describeMonths, measuredMonthlySaving, monthsToReach,
+} from "@/lib/utils/forecast";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -29,6 +36,14 @@ interface Goal {
   currency: string;
   setAt: number;
   achievedAt: number | null;
+  targetDate?: string | null;
+}
+
+/** The forecast's effective inputs, threaded to every goal row. */
+interface Pace {
+  monthlySaving: number | null;
+  returnPct: number;
+  contributionGrowthPct: number;
 }
 
 interface GoalSectionProps {
@@ -41,21 +56,28 @@ interface GoalSectionProps {
 // Pure Helpers
 // ---------------------------------------------------------------------------
 
-function computeProjection(snapshots: { date: string; value: number }[], goal: number): Date | null {
-  const pts = snapshots.filter((s) => s.value > 0).slice(-60);
-  if (pts.length < 3) return null;
-  const d = pts.map((s) => ({ x: Date.parse(s.date) / 86400000, y: s.value }));
-  const n = d.length;
-  let sx = 0, sy = 0, sxy = 0, sx2 = 0;
-  for (const p of d) { sx += p.x; sy += p.y; sxy += p.x * p.y; sx2 += p.x * p.x; }
-  const slope = (n * sxy - sx * sy) / (n * sx2 - sx * sx);
-  if (slope <= 0 || !isFinite(slope)) return null;
-  const intercept = (sy - slope * sx) / n;
-  const tx = (goal - intercept) / slope;
-  if (!isFinite(tx)) return null;
-  const td = new Date(tx * 86400000);
-  if (td.getTime() < Date.now() || td.getFullYear() > new Date().getFullYear() + 50) return null;
-  return td;
+/**
+ * ETA under the compound forecast — the same walk the /forecast page draws,
+ * so the card and the page can never name different dates. Replaces a
+ * straight-line regression through recent snapshots, which ignored
+ * compounding entirely and read intraday noise as a trend.
+ */
+function computeProjection(
+  netWorth: number,
+  goal: number,
+  monthlySaving: number | null,
+  returnPct: number,
+  contributionGrowthPct: number,
+): { date: Date; months: number } | null {
+  if (monthlySaving == null) return null;
+  const months = monthsToReach(
+    { netWorth, monthlySaving, annualReturnPct: returnPct, contributionGrowthPct },
+    goal,
+  );
+  if (months == null || months <= 0) return null;
+  const date = new Date();
+  date.setMonth(date.getMonth() + months);
+  return { date, months };
 }
 
 function getProgressColor(pct: number): { bar: string; text: string; bg: string } {
@@ -138,7 +160,7 @@ function ActiveGoalRow({
   g,
   pct,
   netWorth,
-  snapshots,
+  pace,
   format,
   rank,
   onEdit,
@@ -147,7 +169,7 @@ function ActiveGoalRow({
   g: Goal;
   pct: number;
   netWorth: number;
-  snapshots: { date: string; value: number }[];
+  pace: Pace;
   format: GoalSectionProps["format"];
   rank: number;
   onEdit: (data: Omit<Goal, "id" | "setAt" | "achievedAt">) => void;
@@ -156,7 +178,7 @@ function ActiveGoalRow({
   const { convert } = useCurrency();
   const gVal = convert(g.amount, g.currency);
   const remaining = Math.max(0, gVal - netWorth);
-  const projected = computeProjection(snapshots, gVal);
+  const projected = computeProjection(netWorth, gVal, pace.monthlySaving, pace.returnPct, pace.contributionGrowthPct);
   const colors = getProgressColor(pct);
 
   return (
@@ -204,10 +226,16 @@ function ActiveGoalRow({
           </span>
         </div>
         {projected && (
-          <span className="flex items-center gap-1 tabular-nums">
+          <Link
+            href="/forecast"
+            onClick={(e) => e.stopPropagation()}
+            className="flex items-center gap-1 tabular-nums hover:text-foreground transition-colors"
+            title={`${describeMonths(projected.months)} at ${pace.returnPct.toFixed(1)}%/yr — open the forecast`}
+          >
             <TrendingUp className="h-3 w-3 opacity-50" />
-            {projected.toLocaleDateString("en-AU", { month: "short", year: "numeric" })}
-          </span>
+            {projected.date.toLocaleDateString("en-AU", { month: "short", year: "numeric" })}
+            <span className="opacity-60">· {describeMonths(projected.months)}</span>
+          </Link>
         )}
       </div>
     </div>
@@ -224,7 +252,7 @@ function ManageGoalsDialog({
   active,
   achieved,
   netWorth,
-  snapshots,
+  pace,
   format,
   onAdd,
   onEdit,
@@ -235,7 +263,7 @@ function ManageGoalsDialog({
   active: { goal: Goal; pct: number }[];
   achieved: { goal: Goal; pct: number }[];
   netWorth: number;
-  snapshots: { date: string; value: number }[];
+  pace: Pace;
   format: GoalSectionProps["format"];
   onAdd: (data: Omit<Goal, "id" | "setAt" | "achievedAt">) => void;
   onEdit: (goalId: string, data: Omit<Goal, "id" | "setAt" | "achievedAt">) => void;
@@ -273,7 +301,7 @@ function ManageGoalsDialog({
                     g={g}
                     pct={pct}
                     netWorth={netWorth}
-                    snapshots={snapshots}
+                    pace={pace}
                     format={format}
                     rank={i + 1}
                     onEdit={(d) => onEdit(g.id, d)}
@@ -364,9 +392,26 @@ export function GoalSection({ netWorth, format }: GoalSectionProps) {
     setOldGoal(null);
   }
 
-  const [snapshots] = useCloudStorage<{ date: string; value: number }[]>("networth_snapshots", []);
   const [manageOpen, setManageOpen] = useState(false);
   const { convert } = useCurrency();
+
+  // The compound pace, same inputs the /forecast page uses: measured monthly
+  // saving from the ledgers unless overridden, and the synced return
+  // assumption (balanced 7% until the user picks something).
+  const [assumptions] = useCloudStorage<ForecastAssumptions>("forecast_assumptions", DEFAULT_ASSUMPTIONS);
+  const [incomeEntries] = useCloudStorage<IncomeEntry[]>("income_entries", []);
+  const [expenseEntries] = useCloudStorage<ExpenseEntry[]>("expense_entries", []);
+  const pace: Pace = useMemo(() => {
+    const monthly = getLastNMonthKeys(7).slice(0, 6).map((mk) => ({
+      income: incomeEntries.filter((e) => getMonthKey(e.date) === mk).reduce((s, e) => s + convert(e.amount, e.currency), 0),
+      expenses: expenseEntries.filter((e) => getMonthKey(e.date) === mk).reduce((s, e) => s + convert(e.amount, e.currency), 0),
+    }));
+    return {
+      monthlySaving: assumptions.monthlySaving ?? measuredMonthlySaving(monthly),
+      returnPct: assumptions.annualReturnPct ?? FALLBACK_RETURN_PCT,
+      contributionGrowthPct: assumptions.contributionGrowthPct,
+    };
+  }, [assumptions, incomeEntries, expenseEntries, convert]);
 
   // Auto-mark achieved goals when netWorth changes
   useEffect(() => {
@@ -465,7 +510,7 @@ export function GoalSection({ netWorth, format }: GoalSectionProps) {
               g={next.goal}
               pct={next.pct}
               netWorth={netWorth}
-              snapshots={snapshots}
+              pace={pace}
               format={format}
               rank={1}
               onEdit={(d) => editGoal(next.goal.id, d)}
@@ -504,7 +549,7 @@ export function GoalSection({ netWorth, format }: GoalSectionProps) {
         active={sortedGoals.active}
         achieved={sortedGoals.achieved}
         netWorth={netWorth}
-        snapshots={snapshots}
+        pace={pace}
         format={format}
         onAdd={addGoal}
         onEdit={editGoal}
