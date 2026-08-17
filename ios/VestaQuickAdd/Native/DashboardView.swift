@@ -6,6 +6,7 @@ struct DashboardView: View {
 
     var body: some View {
         NavigationStack {
+            ScrollViewReader { proxy in
             ScrollView {
                 VStack(spacing: 16) {
                     HistoryChartCard(
@@ -23,10 +24,10 @@ struct DashboardView: View {
                     monthlyGrowthCard.entranceTransition()
                     freedomCard.entranceTransition()
                     if let goal = activeGoal { goalCard(goal).entranceTransition() }
-                    assetBreakdownCard.entranceTransition()
-                    monthFlowCard.entranceTransition()
-                    if !upcoming.isEmpty { upcomingCard.entranceTransition() }
-                    recentActivityCard.entranceTransition()
+                    assetBreakdownCard.entranceTransition().id("assets")
+                    monthFlowCard.entranceTransition().id("flow")
+                    if !upcoming.isEmpty { upcomingCard.entranceTransition().id("upcoming") }
+                    recentActivityCard.entranceTransition().id("recent")
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 110)
@@ -37,6 +38,15 @@ struct DashboardView: View {
                 ProcessInfo.processInfo.environment["VESTA_SCROLL_BOTTOM"] != nil
                     ? .bottom : .top
             )
+            // …or jump straight to one card by id, which the bottom anchor
+            // can't reach on a page this long (VESTA_SCROLL_TO=assets).
+            .task {
+                guard let target = ProcessInfo.processInfo.environment["VESTA_SCROLL_TO"]
+                else { return }
+                try? await Task.sleep(for: .seconds(1))
+                withAnimation { proxy.scrollTo(target, anchor: .top) }
+            }
+            }
             .background(Ledger.background)
             .navigationTitle("Dashboard")
             .navigationBarTitleDisplayMode(.large)
@@ -267,15 +277,29 @@ struct DashboardView: View {
 
     private var assetBreakdownCard: some View {
         // Same hues as the chart overlays — one entity, one color.
-        let rows: [(String, Double, Color)] = [
+        let assetRows: [(String, Double, Color)] = [
             ("Stocks & Funds", store.stocksValueVisible, Ledger.seriesStocks),
             ("Crypto", store.cryptoValue, Ledger.seriesCrypto),
-            ("Debts (net)", store.debtNet, Ledger.seriesDebt),
         ]
+        // What you OWN, before anything you owe — the web's "Total Assets"
+        // tile. Net worth answers a different question and is one line down.
+        let portfolioTotal = assetRows.reduce(0) { $0 + $1.1 }
+        let rows = assetRows + [("Debts (net)", store.debtNet, Ledger.seriesDebt)]
         let total = max(1, rows.reduce(0) { $0 + abs($1.1) })
 
         return VStack(alignment: .leading, spacing: 12) {
-            Text("Assets").labelMono()
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Total Portfolio").labelMono()
+                Text(store.format(portfolioTotal))
+                    .font(.system(.title2, design: .rounded, weight: .bold))
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+                    .animation(.snappy(duration: 0.4), value: portfolioTotal)
+                Text("everything you own · debts excluded")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+            }
+
             ForEach(rows, id: \.0) { row in
                 VStack(spacing: 5) {
                     HStack {
@@ -295,6 +319,16 @@ struct DashboardView: View {
                     .frame(height: 5)
                     .background(Capsule().fill(.primary.opacity(0.06)))
                 }
+            }
+
+            // The reconciliation, so the two headline numbers never look like
+            // they disagree: portfolio − what you owe = net worth.
+            Divider().opacity(0.5)
+            HStack {
+                Text("Net worth").font(.subheadline.weight(.medium))
+                Spacer()
+                Text(store.format(store.netWorth))
+                    .font(.system(.footnote, design: .monospaced, weight: .semibold))
             }
         }
         .padding(16)

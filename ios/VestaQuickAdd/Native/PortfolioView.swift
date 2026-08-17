@@ -17,6 +17,13 @@ struct InvestView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
+                // Both pots as one number. The pager below only ever shows
+                // one at a time, so without this the tab never answers
+                // "what is the whole portfolio worth?".
+                totalStrip
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 10)
+
                 Picker("Pot", selection: $pot.animation(.snappy(duration: 0.25))) {
                     Text("Stocks").tag(0)
                     Text("Crypto").tag(1)
@@ -68,6 +75,67 @@ struct InvestView: View {
                     }
                 }
             }
+        }
+    }
+
+    /// Stocks + crypto as one figure, with each pot's share underneath.
+    /// Follows the Invest tab's super toggle (stocksValueVisible), so the
+    /// number always matches the pot pages below it.
+    private var totalStrip: some View {
+        let stocks = store.stocksValueVisible
+        let crypto = store.cryptoValue
+        let total = stocks + crypto
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Total Portfolio").labelMono()
+                    Text(store.format(total))
+                        .font(.system(.title2, design: .rounded, weight: .bold))
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
+                        .animation(.snappy(duration: 0.4), value: total)
+                }
+                Spacer()
+                if !store.includeSuperStocks {
+                    Text("ex-super")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+
+            // One bar, two pots — the split reads faster than two numbers.
+            if total > 0 {
+                GeometryReader { geo in
+                    HStack(spacing: 2) {
+                        Capsule().fill(Ledger.seriesStocks)
+                            .frame(width: max(3, (geo.size.width - 2) * stocks / total))
+                        Capsule().fill(Ledger.seriesCrypto)
+                    }
+                    .animation(.spring(duration: 0.7), value: stocks / total)
+                }
+                .frame(height: 6)
+
+                HStack(spacing: 12) {
+                    potLegend("Stocks", stocks, total, Ledger.seriesStocks)
+                    potLegend("Crypto", crypto, total, Ledger.seriesCrypto)
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+        .padding(14)
+        .financeCard()
+    }
+
+    private func potLegend(_ label: String, _ value: Double, _ total: Double, _ tint: Color) -> some View {
+        HStack(spacing: 5) {
+            Circle().fill(tint).frame(width: 7, height: 7)
+            Text(label).font(.caption2).foregroundStyle(.secondary)
+            Text(store.format(value, compact: true))
+                .font(.system(.caption2, design: .monospaced, weight: .medium))
+            Text(String(format: "%.0f%%", total > 0 ? value / total * 100 : 0))
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(.tertiary)
         }
     }
 }
