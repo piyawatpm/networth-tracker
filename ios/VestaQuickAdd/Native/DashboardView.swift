@@ -3,6 +3,8 @@ import Charts
 
 struct DashboardView: View {
     @Environment(DataStore.self) private var store
+    /// True once the hero number has scrolled away — floats the live pill.
+    @State private var scrolledPastHero = false
 
     var body: some View {
         NavigationStack {
@@ -46,6 +48,25 @@ struct DashboardView: View {
                 try? await Task.sleep(for: .seconds(1))
                 withAnimation { proxy.scrollTo(target, anchor: .top) }
             }
+            }
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.contentOffset.y + geometry.contentInsets.top > 200
+            } action: { _, scrolled in
+                withAnimation(.snappy(duration: 0.25)) { scrolledPastHero = scrolled }
+            }
+            .overlay(alignment: .top) {
+                // The number this whole app exists for, kept in sight while
+                // the rest of the dashboard scrolls by — still live-ticking.
+                if scrolledPastHero {
+                    FloatingScopePill(
+                        title: store.includeSuperStocks ? "Net Worth" : "Net Worth · ex-super",
+                        total: store.format(store.netWorth),
+                        tint: Ledger.income,
+                        isFiltered: false
+                    ) {}
+                    .padding(.top, 4)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
             }
             .background(Ledger.background)
             .navigationTitle("Dashboard")

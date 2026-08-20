@@ -393,6 +393,40 @@ struct MonthScopeStrip: View {
     }
 }
 
+/// The context that floats over the ledger once the hero has scrolled away:
+/// which window the page is showing and its total, with a one-tap clear.
+struct FloatingScopePill: View {
+    let title: String
+    let total: String
+    let tint: Color
+    let isFiltered: Bool
+    let onClear: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Circle().fill(tint).frame(width: 7, height: 7)
+            Text(title)
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+            Text(total)
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .foregroundStyle(tint)
+            if isFiltered {
+                Button(action: onClear) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial, in: .capsule)
+        .overlay(Capsule().strokeBorder(tint.opacity(0.35), lineWidth: 1))
+        .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
+    }
+}
+
 // MARK: - Insights
 
 /// One plain-language finding. The research is blunt about this: numbers on
@@ -653,20 +687,32 @@ struct MonthTrendCard: View {
         }
         .padding(16)
         .financeCard()
-        .sensoryFeedback(.selection, trigger: selectedLabel)
+        .sensoryFeedback(.selection, trigger: scope?.wrappedValue ?? selectedLabel)
+        // ONE tap does it: touching a bar scopes the page to that month —
+        // touching the already-scoped bar clears back to All. (The old
+        // touch-then-tap-Filter needed two hands on a phone.)
+        .onChange(of: selectedLabel) { _, newLabel in
+            guard let scope, let newLabel,
+                  let flow = flows.first(where: { $0.label == newLabel }) else { return }
+            withAnimation(.snappy(duration: 0.25)) {
+                scope.wrappedValue = scope.wrappedValue == flow.key ? nil : flow.key
+            }
+        }
     }
 
-    /// The touched month, in numbers: total, vs the month before, its top
-    /// category — and the button that filters the page to it. Reserved
-    /// height so the card never jumps under the finger.
+    /// The month the page is scoped to (or the bar under the finger), in
+    /// numbers: total, vs the month before, top category. Reserved height so
+    /// the card never jumps under the finger.
     private var readout: some View {
-        HStack(spacing: 8) {
-            if let sel = selectedFlow {
+        let shown = selectedFlow
+            ?? scope?.wrappedValue.flatMap { key in flows.first { $0.key == key } }
+        return HStack(spacing: 8) {
+            if let sel = shown {
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 6) {
                         Text("\(sel.label) · \(format(sel.total))\(sel.isCurrent ? " so far" : "")")
                             .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                        if let prev = previousFlow, prev.total > 0.01, !sel.isCurrent {
+                        if let prev = flowBefore(sel), prev.total > 0.01, !sel.isCurrent {
                             let pct = (sel.total - prev.total) / prev.total * 100
                             Text("\(pct >= 0 ? "↑" : "↓")\(String(format: "%.0f", abs(pct)))% vs \(prev.label)")
                                 .font(.system(size: 9, design: .monospaced))
@@ -680,20 +726,24 @@ struct MonthTrendCard: View {
                     }
                 }
                 Spacer()
-                if let scope {
-                    if scope.wrappedValue == sel.key {
-                        readoutButton("Clear filter") {
-                            withAnimation(.snappy(duration: 0.2)) { scope.wrappedValue = nil }
+                if scope?.wrappedValue == sel.key {
+                    Button {
+                        withAnimation(.snappy(duration: 0.2)) { scope?.wrappedValue = nil }
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
+                            Text("filtered").font(.system(size: 10, weight: .semibold, design: .rounded))
                         }
-                    } else {
-                        readoutButton("Filter \(sel.label)") {
-                            withAnimation(.snappy(duration: 0.2)) { scope.wrappedValue = sel.key }
-                        }
+                        .foregroundStyle(Color.black)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(tint, in: .capsule)
                     }
+                    .buttonStyle(.plain)
                 }
             } else {
                 Text(scope != nil
-                     ? "touch a bar to inspect · Filter scopes the page to it"
+                     ? "tap a bar — the whole page follows it · tap again for All"
                      : "touch a bar to inspect")
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundStyle(.tertiary)
@@ -703,16 +753,10 @@ struct MonthTrendCard: View {
         .frame(minHeight: 26)
     }
 
-    private func readoutButton(_ label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(label)
-                .font(.system(size: 10, weight: .semibold, design: .rounded))
-                .foregroundStyle(Color.black)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(tint, in: .capsule)
-        }
-        .buttonStyle(.plain)
+    private func flowBefore(_ flow: MonthFlow) -> MonthFlow? {
+        guard let index = flows.firstIndex(where: { $0.key == flow.key }), index > 0
+        else { return nil }
+        return flows[index - 1]
     }
 
     private func topCategory(_ monthKey: String) -> (String, Double)? {

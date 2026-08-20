@@ -9,6 +9,8 @@ struct IncomeView: View {
     @State private var selectedAngle: Double?
     /// Which month the record list shows; nil = every record.
     @State private var scope: String? = SydneyTime.currentMonthKey()
+    /// True once the hero has scrolled away — floats the scope pill.
+    @State private var scrolledPastHero = false
     /// Tapping a donut slice or legend row narrows the record list to it.
     @State private var categoryFilter: String?
 
@@ -274,6 +276,27 @@ struct IncomeView: View {
             }
             .listStyle(.insetGrouped)
             .listSectionSpacing(8)
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.contentOffset.y + geometry.contentInsets.top > 320
+            } action: { _, scrolled in
+                withAnimation(.snappy(duration: 0.25)) { scrolledPastHero = scrolled }
+            }
+            .overlay(alignment: .top) {
+                // The page's context, kept in sight once the hero is gone —
+                // which window you're reading and its total, clear in one tap.
+                if scrolledPastHero, !vestaListOnly {
+                    FloatingScopePill(
+                        title: scopeTitle,
+                        total: store.format(scopedTotal, compact: true),
+                        tint: Ledger.income,
+                        isFiltered: scope != nil
+                    ) {
+                        withAnimation(.snappy(duration: 0.25)) { scope = nil }
+                    }
+                    .padding(.top, 4)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
             .scrollContentBackground(.hidden)
             .background(Ledger.background)
             .searchable(text: $search, prompt: "Search income or a date")
