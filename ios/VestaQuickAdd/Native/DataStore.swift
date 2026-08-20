@@ -184,6 +184,9 @@ final class DataStore {
     private(set) var derivedRealizedIncome: [IncomeEntry] = []
     private(set) var allIncome: [IncomeEntry] = []
     private(set) var monthlyGrowth: [(key: String, label: String, deltaUsd: Double, partial: Bool)] = []
+    /// Crypto deposits/withdrawals (external, arrival-valued, USD), cached —
+    /// nearestPrices over the whole CSV is not per-frame work.
+    private(set) var cryptoExternalEvents: [(month: String, date: String, token: String, usd: Double)] = []
     private(set) var freedom: (passive: Double, expenses: Double, coverage: Double) = (0, 0, 0)
     /// Stocks overlay with the super delta already removed when the toggle is
     /// off — the dashboard was re-mapping 20k rows on every render to do this.
@@ -194,6 +197,7 @@ final class DataStore {
         derivedRealizedIncome = computeDerivedRealizedIncome()
         allIncome = income + derivedRealizedIncome
         monthlyGrowth = computeMonthlyGrowth()
+        cryptoExternalEvents = CryptoSplit.externalFlowEvents(txs: cryptoTxs, tags: stablecoinTags)
         freedom = computeFreedom()
         overlayStocksAdjusted = overlayPortfolio.map { point in
             guard !includeSuperStocks, let delta = overlaySuperDelta[point.date] else { return point }
@@ -1062,6 +1066,31 @@ final class DataStore {
 
     /// Honors the app-wide super toggle — dashboard, goal and chart all agree.
     var netWorth: Double { stocksValueVisible + cryptoValue + debtNet }
+
+    /// Transactions whose holding still exists. Deleting a holding is how a
+    /// mistaken entry gets erased in this app, but its transactions linger in
+    /// the blob — 9 such orphans (3 ghost A$4,300 super-cash buys, old test
+    /// rows) would otherwise pollute the invested-per-month split.
+    var livePortfolioTxs: [PortfolioTransaction] {
+        let ids = Set(holdings.map(\.id))
+        return portfolioTxs.filter { ids.contains($0.holdingId) }
+    }
+
+    /// External money into the tracked pots in one month, display currency:
+    /// stock & super net buys (sell proceeds leave to untracked broker cash)
+    /// + crypto deposits − withdrawals. Coin buys/sells inside the crypto
+    /// pot are conversions of money already counted, so they don't appear.
+    func investedInMonth(_ key: String) -> Double {
+        let stocks = livePortfolioTxs
+            .filter { SydneyTime.monthKey($0.date) == key }
+            .reduce(0.0) { sum, tx in
+                sum + convert(tx.type == "buy" ? tx.totalAmount : -tx.totalAmount, from: tx.currency)
+            }
+        let crypto = cryptoExternalEvents
+            .filter { $0.month == key }
+            .reduce(0.0) { $0 + convert($1.usd, from: "USD") }
+        return stocks + crypto
+    }
 
     /// Deployable cash, the web dashboard's "Dry Powder": cash-tagged crypto
     /// plus any holding flagged cash/savings. CASHH carries isCash=false by

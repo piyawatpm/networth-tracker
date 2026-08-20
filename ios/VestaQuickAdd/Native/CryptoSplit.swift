@@ -283,6 +283,32 @@ enum CryptoSplit {
     /// Every earn transfer — USDT payouts AND in-kind coin rewards — valued
     /// at arrival, newest first. The bot/Earn pay history. Pre-era rows
     /// (the CMC transferIn habit) and marked rows alike, one shared rule.
+    /// EVERY transfer in/out, valued at arrival (stables $1, coins nearest
+    /// logged price) — the external funding of the crypto pot. Venue-move
+    /// pairs cancel in any monthly sum by construction. Distinct from earn:
+    /// this is capital movement, no marker semantics at all.
+    static func externalFlowEvents(
+        txs: [CryptoTransaction],
+        tags: [String: Bool]
+    ) -> [(month: String, date: String, token: String, usd: Double)] {
+        let arrivalPrice = nearestPrices(txs)
+        var events: [(String, String, String, Double)] = []
+        for tx in txs where tx.type == "transferIn" || tx.type == "transferOut" {
+            let value: Double
+            if CryptoMath.isCashLike(tx.token, tags: tags) {
+                value = stableValue(tx)
+            } else if let px = arrivalPrice(tx.token, tx.date) {
+                value = tx.amount * px
+            } else {
+                continue
+            }
+            let day = String(tx.date.prefix(10))
+            events.append((String(day.prefix(7)), day, tx.token,
+                           tx.type == "transferIn" ? value : -value))
+        }
+        return events
+    }
+
     static func yieldEvents(
         txs: [CryptoTransaction],
         tags: [String: Bool],

@@ -33,7 +33,7 @@ struct DashboardView: View {
                     )
                     .id(store.includeSuperStocks)
                     .entranceTransition()
-                    monthlyGrowthCard.entranceTransition()
+                    monthlyGrowthCard.entranceTransition().id("growth")
                     assetBreakdownCard.entranceTransition().id("assets")
                     monthFlowCard.entranceTransition().id("flow")
                     if let goal = activeGoal { goalCard(goal).entranceTransition() }
@@ -58,6 +58,7 @@ struct DashboardView: View {
                 withAnimation { proxy.scrollTo(target, anchor: .top) }
             }
             }
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
             .onScrollGeometryChange(for: Bool.self) { geometry in
                 geometry.contentOffset.y + geometry.contentInsets.top > 200
             } action: { _, scrolled in
@@ -157,16 +158,20 @@ struct DashboardView: View {
 
     private var growthSplits: [GrowthSplit] {
         store.monthlyGrowth.map { row in
-            let earned = store.monthTotal(store.allIncome, month: row.key)
-            let spent = store.monthTotalExpenses(month: row.key)
-            // A month with income but no logged expenses predates expense
-            // tracking — a split there would paint the untracked spending as
-            // "market loss". Those months stay total-only.
-            let deposits: Double? = (earned > 0 && spent > 0) ? earned - spent : nil
+            // "Invested" = external money INTO the tracked pots: stock/super
+            // net buys + crypto deposits − withdrawals. NOT income — salary
+            // sitting in a bank account isn't in net worth until deployed.
+            // April 2026 is the seeding month: positions were entered as
+            // buy transactions but the snapshot series already held them at
+            // its first reading, so a split there would call the seeds
+            // "invested" against a delta that never saw them arrive. Splits
+            // start with the first fully-tracked month.
+            let invested = store.investedInMonth(row.key)
+            let hasTx = row.key >= "2026-05"
             return GrowthSplit(
                 key: row.key, label: row.label,
                 delta: store.convert(row.deltaUsd, from: "USD"),
-                deposits: deposits, partial: row.partial
+                deposits: hasTx ? invested : nil, partial: row.partial
             )
         }
     }
@@ -195,7 +200,7 @@ struct DashboardView: View {
 
             HStack(spacing: 6) {
                 // Tappable: show one component alone, or both stacked.
-                growthToggle("new money", Ledger.seriesStocks, on: growthShowMoney) {
+                growthToggle("invested", Ledger.seriesStocks, on: growthShowMoney) {
                     if growthShowMoney && !growthShowMarket { growthShowMarket = true }
                     growthShowMoney.toggle()
                 }
@@ -211,26 +216,15 @@ struct DashboardView: View {
             HStack(spacing: 8) {
                 if let sel = selected {
                     if let deposits = sel.deposits, let market = sel.market {
-                        Text("\(sel.label)\(sel.partial ? " so far" : "") · \(store.format(deposits, compact: true)) in · \(market >= 0 ? "+" : "")\(store.format(market, compact: true)) market · = \(sel.delta >= 0 ? "+" : "")\(store.format(sel.delta, compact: true))")
+                        Text("\(sel.label)\(sel.partial ? " so far" : "") · \(store.format(deposits, compact: true)) invested · \(market >= 0 ? "+" : "")\(store.format(market, compact: true)) market · = \(sel.delta >= 0 ? "+" : "")\(store.format(sel.delta, compact: true))")
                             .font(.system(size: 10, weight: .semibold, design: .monospaced))
                             .foregroundStyle(.secondary)
                     } else {
-                        Text("\(sel.label) · \(sel.delta >= 0 ? "+" : "")\(store.format(sel.delta, compact: true)) — expenses untracked, no split")
+                        Text("\(sel.label) · \(sel.delta >= 0 ? "+" : "")\(store.format(sel.delta, compact: true)) — before transaction tracking, no split")
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundStyle(.tertiary)
                     }
                     Spacer()
-                    Button {
-                        growthDetail = sel
-                    } label: {
-                        HStack(spacing: 2) {
-                            Text("Details")
-                            Image(systemName: "chevron.right").font(.system(size: 7, weight: .bold))
-                        }
-                        .font(.system(size: 10, weight: .semibold, design: .rounded))
-                        .foregroundStyle(Ledger.income)
-                    }
-                    .buttonStyle(.plain)
                 }
             }
             .frame(minHeight: 13, alignment: .leading)
@@ -294,7 +288,10 @@ struct DashboardView: View {
                         y: .value("Top", stackTop)
                     )
                     .symbolSize(0)
-                    .annotation(position: .top, spacing: 2) {
+                    .annotation(
+                        position: .top, spacing: 2,
+                        overflowResolution: .init(x: .fit(to: .chart), y: .disabled)
+                    ) {
                         if splits.count <= 8 || split.partial || split.key == maxKey {
                             Text(store.format(labelValue, compact: true))
                                 .font(.system(size: 8, weight: .semibold, design: .monospaced))
@@ -315,10 +312,12 @@ struct DashboardView: View {
                 .frame(height: 160)
 
                 // The window's aggregate — "what did the whole year do?".
-                let sumIn = splits.compactMap(\.deposits).reduce(0, +)
-                let sumMarket = splits.compactMap(\.market).reduce(0, +)
-                let sumDelta = splits.reduce(0) { $0 + $1.delta }
-                Text("Σ \(splits.first?.label ?? "")–\(splits.last?.label ?? "") · \(store.format(sumIn, compact: true)) in · \(sumMarket >= 0 ? "+" : "")\(store.format(sumMarket, compact: true)) market · Δ \(sumDelta >= 0 ? "+" : "")\(store.format(sumDelta, compact: true))")
+                // Only months WITH a split, so invested + market = Δ holds.
+                let splitMonths = splits.filter { $0.deposits != nil }
+                let sumIn = splitMonths.compactMap(\.deposits).reduce(0, +)
+                let sumMarket = splitMonths.compactMap(\.market).reduce(0, +)
+                let sumDelta = splitMonths.reduce(0) { $0 + $1.delta }
+                Text("Σ \(splitMonths.first?.label ?? "")–\(splitMonths.last?.label ?? "") · \(store.format(sumIn, compact: true)) invested · \(sumMarket >= 0 ? "+" : "")\(store.format(sumMarket, compact: true)) market · Δ \(sumDelta >= 0 ? "+" : "")\(store.format(sumDelta, compact: true))")
                     .font(.system(size: 9, weight: .semibold, design: .monospaced))
                     .foregroundStyle(.secondary)
                 Text("net-worth change per month · tap a legend chip to isolate one component · touch a bar for numbers · faded = this month so far")
@@ -331,6 +330,20 @@ struct DashboardView: View {
         .sheet(item: $growthDetail) { split in
             GrowthMonthSheet(split: split)
                 .presentationDetents([.medium, .large])
+        }
+        // One touch = the month's breakdown. Selection sets on touch and
+        // clears on release; opening on the CLEAR means a scrub opens only
+        // the bar the finger lifted from.
+        .onChange(of: growthSelection) { old, new in
+            if new == nil, let old, let split = growthSplits.first(where: { $0.label == old }) {
+                growthDetail = split
+            }
+        }
+        // Screenshot hook: open one month's sheet (VESTA_GROWTH_DETAIL=2026-07).
+        .task {
+            guard let key = ProcessInfo.processInfo.environment["VESTA_GROWTH_DETAIL"] else { return }
+            try? await Task.sleep(for: .seconds(2))
+            growthDetail = growthSplits.first { $0.key == key }
         }
     }
 
@@ -972,31 +985,32 @@ struct GrowthMonthSheet: View {
     @Environment(DataStore.self) private var store
     let split: DashboardView.GrowthSplit
 
-    private var incomeRows: [(id: String, label: String, sub: String, value: Double)] {
-        store.allIncome
-            .filter { SydneyTime.monthKey($0.date) == split.key }
-            .map { entry in
-                let label = entry.description.isEmpty
-                    ? (entry.source.isEmpty ? store.incomeLabel(entry.type) : entry.source)
-                    : entry.description
-                return (entry.id, label, SydneyTime.shortLabel(entry.date),
-                        store.convert(entry.amount, from: entry.currency))
-            }
-            .sorted { $0.value > $1.value }
-    }
-
-    private var expenseGroups: [(label: String, value: Double)] {
-        var byType: [String: Double] = [:]
-        for entry in store.expenses where SydneyTime.monthKey(entry.date) == split.key {
-            byType[store.expenseLabel(entry.type), default: 0]
-                += store.convert(entry.amount, from: entry.currency)
+    /// Every external flow into (or out of) the pots that month: stock and
+    /// super trades + crypto deposits/withdrawals, newest first.
+    private var flowRows: [(id: String, label: String, sub: String, value: Double)] {
+        var rows: [(String, String, String, Double)] = []
+        for tx in store.livePortfolioTxs where SydneyTime.monthKey(tx.date) == split.key {
+            let value = store.convert(tx.totalAmount, from: tx.currency)
+            rows.append((
+                tx.id,
+                "\(tx.type == "buy" ? "Buy" : "Sell") \(tx.holdingName)",
+                SydneyTime.shortLabel(tx.date),
+                tx.type == "buy" ? value : -value
+            ))
         }
-        return byType.map { ($0.key, $0.value) }.sorted { $0.value > $1.value }
+        for event in store.cryptoExternalEvents where event.month == split.key {
+            rows.append((
+                "c-\(event.date)-\(event.token)-\(event.usd)",
+                "\(event.usd >= 0 ? "Deposit" : "Withdraw") \(event.token)",
+                SydneyTime.shortLabel(event.date) + " · crypto",
+                store.convert(event.usd, from: "USD")
+            ))
+        }
+        return rows.sorted { abs($0.3) > abs($1.3) }
     }
 
     var body: some View {
-        let earned = incomeRows.reduce(0) { $0 + $1.value }
-        let spent = expenseGroups.reduce(0) { $0 + $1.value }
+        let invested = flowRows.reduce(0) { $0 + $1.value }
 
         NavigationStack {
             List {
@@ -1005,8 +1019,11 @@ struct GrowthMonthSheet: View {
                         Text("\(FlowMath.fullMonthName(Int(split.key.suffix(2)) ?? 1)) \(split.key.prefix(4))\(split.partial ? " · so far" : "")")
                             .labelMono()
                         HStack(spacing: 8) {
-                            StatChip(label: "In", value: "+" + store.format(earned, compact: true), tint: Ledger.income)
-                            StatChip(label: "Spent", value: "−" + store.format(spent, compact: true), tint: Ledger.expense)
+                            StatChip(
+                                label: "Invested",
+                                value: "\(invested >= 0 ? "+" : "")" + store.format(invested, compact: true),
+                                tint: Ledger.seriesStocks
+                            )
                             if let market = split.market {
                                 StatChip(
                                     label: "Market",
@@ -1022,44 +1039,28 @@ struct GrowthMonthSheet: View {
                     .listRowSeparator(.hidden)
                 }
 
-                Section("New money · \(incomeRows.count) payments") {
-                    ForEach(incomeRows, id: \.id) { row in
+                Section("Into the pots · \(flowRows.count) moves") {
+                    ForEach(flowRows, id: \.id) { row in
                         HStack {
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(row.label).font(.subheadline).lineLimit(1)
                                 Text(row.sub).font(.caption2).foregroundStyle(.tertiary)
                             }
                             Spacer()
-                            Text("+" + store.format(row.value, compact: true))
+                            Text("\(row.value >= 0 ? "+" : "")" + store.format(row.value, compact: true))
                                 .font(.system(.footnote, design: .monospaced, weight: .medium))
-                                .foregroundStyle(Ledger.income)
+                                .foregroundStyle(row.value >= 0 ? Ledger.income : Ledger.expense)
                         }
                     }
-                    if incomeRows.isEmpty {
-                        Text("No income recorded this month.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-
-                Section("Spending · by category") {
-                    ForEach(expenseGroups, id: \.label) { group in
-                        HStack {
-                            Text(group.label).font(.subheadline)
-                            Spacer()
-                            Text("−" + store.format(group.value, compact: true))
-                                .font(.system(.footnote, design: .monospaced, weight: .medium))
-                                .foregroundStyle(Ledger.expense)
-                        }
-                    }
-                    if expenseGroups.isEmpty {
-                        Text("No expenses recorded this month\(split.deposits == nil ? " — that's why this bar has no split" : "").")
+                    if flowRows.isEmpty {
+                        Text("No investment flows recorded this month.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
 
                 if split.market != nil {
                     Section {
-                        Text("Market = the month's net-worth change minus the money you added — what the assets themselves did.")
+                        Text("Invested = stock & super buys − sells + crypto deposits − withdrawals. Market = the month's net-worth change minus that — what the assets themselves did (debt moves land here too).")
                             .font(.system(size: 9, design: .monospaced))
                             .foregroundStyle(.tertiary)
                             .listRowBackground(Color.clear)
