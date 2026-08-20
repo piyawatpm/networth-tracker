@@ -309,6 +309,23 @@ struct DashboardView: View {
                             .foregroundStyle(.tertiary)
                     }
                 }
+                // Instant single tap → that month's sheet. A plain TapGesture
+                // claims only taps, so hold-and-scrub still reaches the
+                // selection readout underneath.
+                .chartOverlay { proxy in
+                    GeometryReader { geo in
+                        Rectangle().fill(Color.clear)
+                            .contentShape(Rectangle())
+                            .onTapGesture { location in
+                                guard let plotFrame = proxy.plotFrame else { return }
+                                let x = location.x - geo[plotFrame].origin.x
+                                if let label = proxy.value(atX: x, as: String.self),
+                                   let split = splits.first(where: { $0.label == label }) {
+                                    growthDetail = split
+                                }
+                            }
+                    }
+                }
                 .frame(height: 160)
 
                 // The window's aggregate — "what did the whole year do?".
@@ -320,7 +337,7 @@ struct DashboardView: View {
                 Text("Σ \(splitMonths.first?.label ?? "")–\(splitMonths.last?.label ?? "") · \(store.format(sumIn, compact: true)) invested · \(sumMarket >= 0 ? "+" : "")\(store.format(sumMarket, compact: true)) market · Δ \(sumDelta >= 0 ? "+" : "")\(store.format(sumDelta, compact: true))")
                     .font(.system(size: 9, weight: .semibold, design: .monospaced))
                     .foregroundStyle(.secondary)
-                Text("net-worth change per month · tap a legend chip to isolate one component · touch a bar for numbers · faded = this month so far")
+                Text("net-worth change per month · tap a bar for its detail · tap a legend chip to isolate one component · faded = this month so far")
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundStyle(.tertiary)
             }
@@ -329,15 +346,11 @@ struct DashboardView: View {
         .financeCard()
         .sheet(item: $growthDetail) { split in
             GrowthMonthSheet(split: split)
-                .presentationDetents([.medium, .large])
-        }
-        // One touch = the month's breakdown. Selection sets on touch and
-        // clears on release; opening on the CLEAR means a scrub opens only
-        // the bar the finger lifted from.
-        .onChange(of: growthSelection) { old, new in
-            if new == nil, let old, let split = growthSplits.first(where: { $0.label == old }) {
-                growthDetail = split
-            }
+                .presentationDetents(
+                    // Screenshot runs open full-height so the fold hides nothing.
+                    ProcessInfo.processInfo.environment["VESTA_GROWTH_DETAIL"] != nil
+                        ? [.large] : [.medium, .large]
+                )
         }
         // Screenshot hook: open one month's sheet (VESTA_GROWTH_DETAIL=2026-07).
         .task {
@@ -984,75 +997,127 @@ struct CashPickerSheet: View {
 struct GrowthMonthSheet: View {
     @Environment(DataStore.self) private var store
     let split: DashboardView.GrowthSplit
+    @State private var showDust = false
 
-    /// Every external flow into (or out of) the pots that month: stock and
-    /// super trades + crypto deposits/withdrawals, newest first.
-    private var flowRows: [(id: String, label: String, sub: String, value: Double)] {
-        var rows: [(String, String, String, Double)] = []
-        for tx in store.livePortfolioTxs where SydneyTime.monthKey(tx.date) == split.key {
-            let value = store.convert(tx.totalAmount, from: tx.currency)
-            rows.append((
-                tx.id,
-                "\(tx.type == "buy" ? "Buy" : "Sell") \(tx.holdingName)",
-                SydneyTime.shortLabel(tx.date),
-                tx.type == "buy" ? value : -value
-            ))
-        }
-        for event in store.cryptoExternalEvents where event.month == split.key {
-            rows.append((
-                "c-\(event.date)-\(event.token)-\(event.usd)",
-                "\(event.usd >= 0 ? "Deposit" : "Withdraw") \(event.token)",
-                SydneyTime.shortLabel(event.date) + " · crypto",
-                store.convert(event.usd, from: "USD")
-            ))
-        }
-        return rows.sorted { abs($0.3) > abs($1.3) }
+    struct FlowRow: Identifiable {
+        let id: String
+        let label: String
+        let sub: String
+        let value: Double
+    }
+
+    /// Stock/super trades that month, biggest first. Super is what the
+    /// holding says it is (accountType), same rule as the Invest toggle.
+    private func stockRows(superFund: Bool) -> [FlowRow] {
+        let superIds = Set(store.holdings.filter { $0.accountType == "super" }.map(\.id))
+        return store.livePortfolioTxs
+            .filter {
+                SydneyTime.monthKey($0.date) == split.key
+                    && superIds.contains($0.holdingId) == superFund
+            }
+            .map { tx in
+                let value = store.convert(tx.totalAmount, from: tx.currency)
+                return FlowRow(
+                    id: tx.id,
+                    label: "\(tx.type == "buy" ? "Buy" : "Sell") \(tx.holdingName)",
+                    sub: SydneyTime.shortLabel(tx.date),
+                    value: tx.type == "buy" ? value : -value
+                )
+            }
+            .sorted { abs($0.value) > abs($1.value) }
+    }
+
+    private var cryptoRows: [FlowRow] {
+        store.cryptoExternalEvents
+            .filter { $0.month == split.key }
+            .map { event in
+                FlowRow(
+                    id: "c-\(event.date)-\(event.token)-\(event.usd)",
+                    label: "\(event.usd >= 0 ? "Deposit" : "Withdraw") \(event.token)",
+                    sub: SydneyTime.shortLabel(event.date),
+                    value: store.convert(event.usd, from: "USD")
+                )
+            }
+            .sorted { abs($0.value) > abs($1.value) }
     }
 
     var body: some View {
-        let invested = flowRows.reduce(0) { $0 + $1.value }
+        let portfolio = stockRows(superFund: false)
+        let superRows = stockRows(superFund: true)
+        let crypto = cryptoRows
+        // Bot payouts arrive in $1–$8 pieces; below ~$25 they collapse into
+        // one expandable line so the moves that matter stay readable.
+        let dustLimit = store.convert(25, from: "USD")
+        let bigCrypto = crypto.filter { abs($0.value) >= dustLimit }
+        let dust = crypto.filter { abs($0.value) < dustLimit }
+        let invested = (portfolio + superRows + crypto).reduce(0) { $0 + $1.value }
 
         NavigationStack {
             List {
                 Section {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("\(FlowMath.fullMonthName(Int(split.key.suffix(2)) ?? 1)) \(split.key.prefix(4))\(split.partial ? " · so far" : "")")
-                            .labelMono()
-                        HStack(spacing: 8) {
+                    HStack(spacing: 8) {
+                        StatChip(
+                            label: "Invested",
+                            value: "\(invested >= 0 ? "+" : "")" + store.format(invested, compact: true),
+                            tint: Ledger.seriesStocks
+                        )
+                        if let market = split.market {
                             StatChip(
-                                label: "Invested",
-                                value: "\(invested >= 0 ? "+" : "")" + store.format(invested, compact: true),
-                                tint: Ledger.seriesStocks
+                                label: "Market",
+                                value: "\(market >= 0 ? "+" : "")\(store.format(market, compact: true))",
+                                tint: market >= 0 ? Ledger.income : Ledger.expense
                             )
-                            if let market = split.market {
-                                StatChip(
-                                    label: "Market",
-                                    value: "\(market >= 0 ? "+" : "")\(store.format(market, compact: true))",
-                                    tint: market >= 0 ? Ledger.income : Ledger.expense
-                                )
-                            }
-                            StatChip(label: "Δ NW", value: "\(split.delta >= 0 ? "+" : "")\(store.format(split.delta, compact: true))")
                         }
+                        StatChip(label: "Δ NW", value: "\(split.delta >= 0 ? "+" : "")\(store.format(split.delta, compact: true))")
                     }
                     .listRowBackground(Color.clear)
                     .listRowInsets(EdgeInsets(top: 4, leading: 4, bottom: 4, trailing: 4))
                     .listRowSeparator(.hidden)
                 }
 
-                Section("Into the pots · \(flowRows.count) moves") {
-                    ForEach(flowRows, id: \.id) { row in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(row.label).font(.subheadline).lineLimit(1)
-                                Text(row.sub).font(.caption2).foregroundStyle(.tertiary)
+                potSection("Portfolio", icon: "chart.line.uptrend.xyaxis",
+                           tint: Ledger.seriesStocks, rows: portfolio)
+                potSection("Super", icon: "building.columns",
+                           tint: Ledger.seriesDebt, rows: superRows)
+
+                if !crypto.isEmpty {
+                    Section {
+                        ForEach(bigCrypto) { flowRow($0) }
+                        if !dust.isEmpty {
+                            let dustNet = dust.reduce(0) { $0 + $1.value }
+                            Button {
+                                withAnimation(.snappy(duration: 0.2)) { showDust.toggle() }
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .foregroundStyle(.tertiary)
+                                        .rotationEffect(.degrees(showDust ? 90 : 0))
+                                        .frame(width: 22)
+                                    Text("\(dust.count) small moves")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                    Spacer()
+                                    Text("\(dustNet >= 0 ? "+" : "")" + store.format(dustNet, compact: true))
+                                        .font(.system(.footnote, design: .monospaced, weight: .medium))
+                                        .foregroundStyle(.secondary)
+                                }
                             }
-                            Spacer()
-                            Text("\(row.value >= 0 ? "+" : "")" + store.format(row.value, compact: true))
-                                .font(.system(.footnote, design: .monospaced, weight: .medium))
-                                .foregroundStyle(row.value >= 0 ? Ledger.income : Ledger.expense)
+                            .buttonStyle(.plain)
+                            if showDust {
+                                ForEach(dust) { flowRow($0) }
+                            }
                         }
+                    } header: {
+                        sectionHeader("Crypto", icon: "bitcoinsign.circle",
+                                      tint: Ledger.seriesCrypto,
+                                      net: crypto.reduce(0) { $0 + $1.value },
+                                      count: crypto.count)
                     }
-                    if flowRows.isEmpty {
+                }
+
+                if portfolio.isEmpty && superRows.isEmpty && crypto.isEmpty {
+                    Section {
                         Text("No investment flows recorded this month.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
@@ -1069,8 +1134,57 @@ struct GrowthMonthSheet: View {
             }
             .scrollContentBackground(.hidden)
             .background(Ledger.background)
-            .navigationTitle("Growth detail")
+            .contentMargins(.top, 6, for: .scrollContent)
+            .navigationTitle("\(FlowMath.fullMonthName(Int(split.key.suffix(2)) ?? 1)) \(split.key.prefix(4))\(split.partial ? " · so far" : "")")
             .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+
+    @ViewBuilder
+    private func potSection(_ title: String, icon: String, tint: Color, rows: [FlowRow]) -> some View {
+        if !rows.isEmpty {
+            Section {
+                ForEach(rows) { flowRow($0) }
+            } header: {
+                sectionHeader(title, icon: icon, tint: tint,
+                              net: rows.reduce(0) { $0 + $1.value }, count: rows.count)
+            }
+        }
+    }
+
+    private func sectionHeader(
+        _ title: String, icon: String, tint: Color, net: Double, count: Int
+    ) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(tint)
+            Text("\(title) · \(count)")
+            Spacer()
+            Text("net \(net >= 0 ? "+" : "")\(store.format(net, compact: true))")
+                .foregroundStyle(net >= 0 ? Ledger.income : Ledger.expense)
+        }
+        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+        .textCase(nil)
+    }
+
+    private func flowRow(_ row: FlowRow) -> some View {
+        let inbound = row.value >= 0
+        let tint = inbound ? Ledger.income : Ledger.expense
+        return HStack(spacing: 10) {
+            Image(systemName: inbound ? "arrow.down.left" : "arrow.up.right")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(tint)
+                .frame(width: 22, height: 22)
+                .background(Circle().fill(tint.opacity(0.12)))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(row.label).font(.subheadline).lineLimit(1)
+                Text(row.sub).font(.caption2).foregroundStyle(.tertiary)
+            }
+            Spacer()
+            Text("\(inbound ? "+" : "")" + store.format(row.value, compact: true))
+                .font(.system(.footnote, design: .monospaced, weight: .medium))
+                .foregroundStyle(tint)
         }
     }
 }
