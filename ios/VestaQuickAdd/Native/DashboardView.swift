@@ -12,6 +12,8 @@ struct DashboardView: View {
     /// Which growth components are drawn — either alone, or both stacked.
     @State private var growthShowMoney = true
     @State private var growthShowMarket = true
+    /// Months of history on the growth chart (6 or 12, + the live month).
+    @State private var growthWindow = 12
 
     var body: some View {
         NavigationStack {
@@ -168,25 +170,38 @@ struct DashboardView: View {
     }
 
     private var monthlyGrowthCard: some View {
-        let splits = growthSplits
+        // Window: last N complete months + the live one.
+        let splits = Array(growthSplits.suffix(growthWindow + 1))
         let selected = splits.first { $0.label == growthSelection }
             ?? splits.last
+        // With a year on screen, per-bar labels collide — keep only the
+        // biggest month and the live one; touch reads the rest.
+        let maxKey = splits.filter { !$0.partial }
+            .max { abs($0.delta) < abs($1.delta) }?.key
 
         return VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("Monthly Growth").labelMono()
                 Spacer()
-                HStack(spacing: 6) {
-                    // Tappable: show one component alone, or both stacked.
-                    growthToggle("new money", Ledger.seriesStocks, on: growthShowMoney) {
-                        if growthShowMoney && !growthShowMarket { growthShowMarket = true }
-                        growthShowMoney.toggle()
-                    }
-                    growthToggle("market", Ledger.income, on: growthShowMarket) {
-                        if growthShowMarket && !growthShowMoney { growthShowMoney = true }
-                        growthShowMarket.toggle()
-                    }
+                Picker("", selection: $growthWindow.animation(.snappy(duration: 0.25))) {
+                    Text("6M").tag(6)
+                    Text("1Y").tag(12)
                 }
+                .pickerStyle(.segmented)
+                .frame(width: 100)
+            }
+
+            HStack(spacing: 6) {
+                // Tappable: show one component alone, or both stacked.
+                growthToggle("new money", Ledger.seriesStocks, on: growthShowMoney) {
+                    if growthShowMoney && !growthShowMarket { growthShowMarket = true }
+                    growthShowMoney.toggle()
+                }
+                growthToggle("market", Ledger.income, on: growthShowMarket) {
+                    if growthShowMarket && !growthShowMoney { growthShowMoney = true }
+                    growthShowMarket.toggle()
+                }
+                Spacer()
             }
 
             // Readout: the touched month (else the latest), decomposed.
@@ -265,9 +280,11 @@ struct DashboardView: View {
                     )
                     .symbolSize(0)
                     .annotation(position: .top, spacing: 2) {
-                        Text(store.format(labelValue, compact: true))
-                            .font(.system(size: 8, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(split.partial ? .tertiary : .secondary)
+                        if splits.count <= 8 || split.partial || split.key == maxKey {
+                            Text(store.format(labelValue, compact: true))
+                                .font(.system(size: 8, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(split.partial ? .tertiary : .secondary)
+                        }
                     }
                 }
                 .chartXSelection(value: $growthSelection)
@@ -282,6 +299,13 @@ struct DashboardView: View {
                 }
                 .frame(height: 160)
 
+                // The window's aggregate — "what did the whole year do?".
+                let sumIn = splits.compactMap(\.deposits).reduce(0, +)
+                let sumMarket = splits.compactMap(\.market).reduce(0, +)
+                let sumDelta = splits.reduce(0) { $0 + $1.delta }
+                Text("Σ \(splits.first?.label ?? "")–\(splits.last?.label ?? "") · \(store.format(sumIn, compact: true)) in · \(sumMarket >= 0 ? "+" : "")\(store.format(sumMarket, compact: true)) market · Δ \(sumDelta >= 0 ? "+" : "")\(store.format(sumDelta, compact: true))")
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.secondary)
                 Text("net-worth change per month · tap a legend chip to isolate one component · touch a bar for numbers · faded = this month so far")
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundStyle(.tertiary)
