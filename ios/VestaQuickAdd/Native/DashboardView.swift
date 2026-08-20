@@ -7,6 +7,8 @@ struct DashboardView: View {
     @State private var scrolledPastHero = false
     /// Which distribution segment's members are being inspected.
     @State private var segmentDetail: SegmentDetail?
+    /// Touched month in the growth chart.
+    @State private var growthSelection: String?
 
     var body: some View {
         NavigationStack {
@@ -133,45 +135,104 @@ struct DashboardView: View {
     /// exaggerates small differences, and at ฿1.2M–1.7M every bar looked the
     /// same anyway. Change bars are zero-based and honest, and "how much did I
     /// gain in June" is the question actually being asked.
-    private var monthlyGrowthCard: some View {
-        let rows = store.monthlyGrowth.map {
-            (label: $0.label, value: store.convert($0.deltaUsd, from: "USD"), partial: $0.partial)
+    /// One month of net-worth growth, split the way the perf page splits it:
+    /// what was DEPOSITED (income − expenses, the ledgers) vs what the assets
+    /// DID (Δ net worth minus those deposits).
+    private struct GrowthSplit: Identifiable {
+        let key: String
+        let label: String
+        let delta: Double
+        let deposits: Double?   // nil = ledgers incomplete, no honest split
+        let partial: Bool
+        var market: Double? { deposits.map { delta - $0 } }
+        var id: String { key }
+    }
+
+    private var growthSplits: [GrowthSplit] {
+        store.monthlyGrowth.map { row in
+            let earned = store.monthTotal(store.allIncome, month: row.key)
+            let spent = store.monthTotalExpenses(month: row.key)
+            // A month with income but no logged expenses predates expense
+            // tracking — a split there would paint the untracked spending as
+            // "market loss". Those months stay total-only.
+            let deposits: Double? = (earned > 0 && spent > 0) ? earned - spent : nil
+            return GrowthSplit(
+                key: row.key, label: row.label,
+                delta: store.convert(row.deltaUsd, from: "USD"),
+                deposits: deposits, partial: row.partial
+            )
         }
-        let best = rows.filter { !$0.partial }.max { $0.value < $1.value }
+    }
+
+    private var monthlyGrowthCard: some View {
+        let splits = growthSplits
+        let selected = splits.first { $0.label == growthSelection }
+            ?? splits.last
 
         return VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("Monthly Growth").labelMono()
                 Spacer()
-                if let best {
-                    Text("best \(best.label) \(store.format(best.value, compact: true))")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                HStack(spacing: 10) {
+                    legendDot("new money", Ledger.seriesStocks)
+                    legendDot("market", Ledger.income)
                 }
             }
 
-            if rows.count < 2 {
+            // Readout: the touched month (else the latest), decomposed.
+            Group {
+                if let sel = selected {
+                    if let deposits = sel.deposits, let market = sel.market {
+                        Text("\(sel.label)\(sel.partial ? " so far" : "") · \(store.format(deposits, compact: true)) in · \(market >= 0 ? "+" : "")\(store.format(market, compact: true)) market · = \(sel.delta >= 0 ? "+" : "")\(store.format(sel.delta, compact: true))")
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("\(sel.label) · \(sel.delta >= 0 ? "+" : "")\(store.format(sel.delta, compact: true)) — expenses untracked, no split")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+            .frame(minHeight: 13, alignment: .leading)
+
+            if splits.count < 2 {
                 Text("Needs two months of snapshots to compare.")
                     .font(.footnote).foregroundStyle(.secondary)
             } else {
-                Chart(Array(rows.enumerated()), id: \.offset) { _, row in
-                    BarMark(
-                        x: .value("Month", row.label),
-                        y: .value("Change", row.value)
-                    )
-                    .cornerRadius(5)
-                    .foregroundStyle(
-                        row.value >= 0
-                            ? Ledger.income.opacity(row.partial ? 0.45 : 1)
-                            : Ledger.expense.opacity(row.partial ? 0.45 : 1)
-                    )
-                    .annotation(position: row.value >= 0 ? .top : .bottom, spacing: 3) {
-                        Text(Money.format(row.value, currency: store.displayCurrency, compact: true))
-                            .font(.system(size: 8, design: .monospaced))
-                            .foregroundStyle(.secondary)
+                Chart(splits) { split in
+                    if let deposits = split.deposits, let market = split.market {
+                        // Two stacked components: negatives hang below zero,
+                        // so a pink market bar under a blue deposits bar
+                        // reads as exactly what happened.
+                        BarMark(
+                            x: .value("Month", split.label),
+                            y: .value("New money", deposits)
+                        )
+                        .cornerRadius(3)
+                        .foregroundStyle(Ledger.seriesStocks.opacity(split.partial ? 0.5 : 0.95))
+                        BarMark(
+                            x: .value("Month", split.label),
+                            y: .value("Market", market)
+                        )
+                        .cornerRadius(3)
+                        .foregroundStyle(
+                            (market >= 0 ? Ledger.income : Ledger.expense)
+                                .opacity(split.partial ? 0.5 : 0.95)
+                        )
+                    } else {
+                        BarMark(
+                            x: .value("Month", split.label),
+                            y: .value("Change", split.delta)
+                        )
+                        .cornerRadius(5)
+                        .foregroundStyle(
+                            (split.delta >= 0 ? Ledger.income : Ledger.expense)
+                                .opacity(split.partial ? 0.45 : 0.55)
+                        )
                     }
                 }
-                .chartXScale(domain: rows.map(\.label))
+                .chartXSelection(value: $growthSelection)
+                .chartXScale(domain: splits.map(\.label))
                 .chartYAxis(.hidden)
                 .chartXAxis {
                     AxisMarks { _ in
@@ -182,13 +243,20 @@ struct DashboardView: View {
                 }
                 .frame(height: 160)
 
-                Text("change per month · faded bar is this month so far")
+                Text("net-worth change per month, split into deposits vs what the assets did · touch a bar · faded = this month so far")
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundStyle(.tertiary)
             }
         }
         .padding(16)
         .financeCard()
+    }
+
+    private func legendDot(_ label: String, _ color: Color) -> some View {
+        HStack(spacing: 4) {
+            Circle().fill(color).frame(width: 6, height: 6)
+            Text(label).font(.system(size: 9, design: .monospaced)).foregroundStyle(.tertiary)
+        }
     }
 
     // MARK: Financial freedom
@@ -303,9 +371,10 @@ struct DashboardView: View {
     // MARK: Assets
 
     private var assetBreakdownCard: some View {
-        // The web's Asset Distribution: Traditional / Super / Crypto shares
-        // of everything owned — toggle-independent, because the split itself
-        // is the point.
+        // The web's Asset Distribution — and it follows the super toggle:
+        // super OFF drops the Super segment AND any super-held cash, so
+        // every number on screen describes the same pot.
+        let includeSuper = store.includeSuperStocks
         let traditional = store.holdings
             .filter { $0.accountType != "super" }
             .reduce(0) { $0 + store.convert(store.holdingLiveValue($1), from: $1.currency) }
@@ -313,18 +382,25 @@ struct DashboardView: View {
             .filter { $0.accountType == "super" }
             .reduce(0) { $0 + store.convert(store.holdingLiveValue($1), from: $1.currency) }
         let crypto = store.cryptoValue
-        let portfolioTotal = traditional + superTotal + crypto
-        let segments: [(String, Double, Color)] = [
+        var segments: [(String, Double, Color)] = [
             ("Traditional", traditional, Ledger.seriesStocks),
             ("Crypto", crypto, Ledger.seriesCrypto),
-            ("Super", superTotal, Ledger.chartColor(1)),
         ]
-        let cash = store.dryPowder
+        if includeSuper { segments.append(("Super", superTotal, Ledger.chartColor(1))) }
+        let portfolioTotal = segments.reduce(0) { $0 + $1.1 }
+        let cash = store.dryPowder(includeSuper: includeSuper)
         let cashPct = portfolioTotal > 0 ? cash / portfolioTotal * 100 : 0
 
         return VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                Text("Asset Distribution").labelMono()
+                HStack {
+                    Text("Asset Distribution").labelMono()
+                    if !includeSuper {
+                        Text("ex-super")
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
                 Text(store.format(portfolioTotal))
                     .font(.system(.title2, design: .rounded, weight: .bold))
                     .monospacedDigit()
@@ -611,12 +687,14 @@ extension DashboardView {
             ) }
         case "Cash":
             // The dry-powder roster: cash-TAGGED crypto (the user's list,
-            // BTC included) + any holding flagged cash/savings.
+            // BTC included) + any holding flagged cash/savings — super-held
+            // cash only while the toggle includes super.
             rows = store.cryptoCsvHoldings
                 .filter { store.cryptoCashTags[$0.token] == true }
                 .map { ($0.token, "crypto", store.convert(store.csvHoldingValueUsd($0), from: "USD")) }
             rows += store.holdings
-                .filter { $0.isCash == true || $0.type == "savings" }
+                .filter { ($0.isCash == true || $0.type == "savings")
+                    && (store.includeSuperStocks || $0.accountType != "super") }
                 .map { ($0.name, $0.broker.isEmpty ? "account" : $0.broker,
                         store.convert(store.holdingLiveValue($0), from: $0.currency)) }
         default: break
@@ -632,6 +710,7 @@ extension DashboardView {
 struct SegmentDetailSheet: View {
     @Environment(DataStore.self) private var store
     let detail: SegmentDetail
+    @State private var editingCash = false
 
     var body: some View {
         NavigationStack {
@@ -684,6 +763,108 @@ struct SegmentDetailSheet: View {
             .background(Ledger.background)
             .navigationTitle("\(detail.title) allocation")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                if detail.title == "Cash" {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Edit") { editingCash = true }
+                    }
+                }
+            }
+            .sheet(isPresented: $editingCash) { CashPickerSheet() }
+        }
+    }
+}
+
+/// "Which of my assets count as cash?" — every crypto token and holding,
+/// each with a checkmark. Tokens write crypto_cash_tags (the same blob the
+/// web's Cash dialog edits); holdings flip their isCash flag.
+struct CashPickerSheet: View {
+    @Environment(DataStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+
+    private struct PickRow: Identifiable {
+        let id: String
+        let name: String
+        let value: String
+        let on: Bool
+        let locked: Bool
+        let toggle: () -> Void
+    }
+
+    private var tokenRows: [PickRow] {
+        store.cryptoCsvHoldings
+            .sorted { store.csvHoldingValueUsd($0) > store.csvHoldingValueUsd($1) }
+            .map { holding in
+                let on = store.cryptoCashTags[holding.token] == true
+                let value = store.convert(store.csvHoldingValueUsd(holding), from: "USD")
+                return PickRow(
+                    id: "t-" + holding.token,
+                    name: holding.token,
+                    value: store.format(value, compact: true),
+                    on: on,
+                    locked: false
+                ) { Task { await store.setCryptoCash(holding.token, !on) } }
+            }
+    }
+
+    private var holdingRows: [PickRow] {
+        store.holdings.map { holding in
+            let flagged = holding.isCash == true
+            let value = store.convert(store.holdingLiveValue(holding), from: holding.currency)
+            return PickRow(
+                id: "h-" + holding.id,
+                name: holding.ticker.isEmpty ? holding.name : holding.ticker,
+                value: store.format(value, compact: true),
+                on: flagged || holding.type == "savings",
+                locked: holding.type == "savings" // savings ARE cash
+            ) { Task { await store.setHoldingCash(holding.id, !flagged) } }
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Crypto tokens") {
+                    ForEach(tokenRows) { row in
+                        Button(action: row.toggle) {
+                            cashRow(row.name, row.value, on: row.on)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                Section {
+                    ForEach(holdingRows) { row in
+                        Button(action: row.toggle) {
+                            cashRow(row.name, row.value, on: row.on)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(row.locked)
+                    }
+                } header: {
+                    Text("Holdings")
+                } footer: {
+                    Text("Synced with the web's Cash tags. Savings-type accounts always count.")
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(Ledger.background)
+            .navigationTitle("What counts as cash")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+            }
+        }
+    }
+
+    private func cashRow(_ name: String, _ value: String, on: Bool) -> some View {
+        HStack {
+            Text(name).font(.subheadline.weight(.medium))
+            Spacer()
+            Text(value)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.secondary)
+            Image(systemName: on ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(on ? Ledger.income : Color.secondary)
         }
     }
 }

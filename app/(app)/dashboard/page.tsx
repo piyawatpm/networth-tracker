@@ -74,7 +74,6 @@ import { DailyPnlStrip } from "./_components/daily-pnl-strip";
 import { MoneyFlowCard } from "./_components/money-flow-card";
 import { EmergencyFundCard } from "./_components/emergency-fund-card";
 import { KeyNumbersCard } from "./_components/key-numbers-card";
-import { FinancialFreedomCard } from "./_components/financial-freedom-card";
 import { InvestedVsCashCard } from "./_components/invested-vs-cash-card";
 import {
   FinancialHealthSection,
@@ -755,17 +754,6 @@ export default function DashboardPage() {
         currentValue={netWorth}
         format={format}
         delay={D * 0.15}
-      />
-
-      {/* 2. FINANCIAL FREEDOM: passive income vs expenses for selected period */}
-      <FinancialFreedomCard
-        period={period}
-        passiveIncome={passiveIncome}
-        expenses={periodRecurringExpenseTotal}
-        passiveAnnualised={passiveAnnualized}
-        expensesAnnualised={annualizedExpenses}
-        format={format}
-        delay={D * 0.25}
       />
 
       {/* 3a. ASSET DISTRIBUTION (full width) */}

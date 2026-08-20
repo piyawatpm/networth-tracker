@@ -183,7 +183,7 @@ final class DataStore {
     // so they're computed once per data change instead.
     private(set) var derivedRealizedIncome: [IncomeEntry] = []
     private(set) var allIncome: [IncomeEntry] = []
-    private(set) var monthlyGrowth: [(label: String, deltaUsd: Double, partial: Bool)] = []
+    private(set) var monthlyGrowth: [(key: String, label: String, deltaUsd: Double, partial: Bool)] = []
     private(set) var freedom: (passive: Double, expenses: Double, coverage: Double) = (0, 0, 0)
     /// Stocks overlay with the super delta already removed when the toggle is
     /// off — the dashboard was re-mapping 20k rows on every render to do this.
@@ -692,6 +692,22 @@ final class DataStore {
         try await persist("portfolio_transactions", portfolioTxs)
     }
 
+    /// Flip one crypto token in/out of the dry-powder set (crypto_cash_tags,
+    /// the same blob the web crypto page's Cash dialog writes).
+    func setCryptoCash(_ token: String, _ isCash: Bool) async {
+        cryptoCashTags[token] = isCash
+        do { try await persist("crypto_cash_tags", cryptoCashTags) }
+        catch { loadError = error.localizedDescription }
+    }
+
+    /// Flip a holding's cash flag and persist the holdings blob.
+    func setHoldingCash(_ holdingId: String, _ isCash: Bool) async {
+        guard let index = holdings.firstIndex(where: { $0.id == holdingId }) else { return }
+        holdings[index].isCash = isCash
+        do { try await persist("portfolio_holdings", holdings) }
+        catch { loadError = error.localizedDescription }
+    }
+
     /// Replace the group list and persist — small blob, whole-list writes.
     func savePortfolioGroups(_ groups: [PortfolioGroup]) async {
         portfolioGroups = groups
@@ -1050,19 +1066,22 @@ final class DataStore {
     /// Deployable cash, the web dashboard's "Dry Powder": cash-tagged crypto
     /// plus any holding flagged cash/savings. CASHH carries isCash=false by
     /// the user's own hand — respected, not second-guessed.
-    var dryPowder: Double {
+    var dryPowder: Double { dryPowder(includeSuper: true) }
+
+    func dryPowder(includeSuper: Bool) -> Double {
         let cryptoCashUsd = cryptoCsvHoldings
             .filter { cryptoCashTags[$0.token] == true }
             .reduce(0) { $0 + csvHoldingValueUsd($1) }
         let holdingCash = holdings
-            .filter { $0.isCash == true || $0.type == "savings" }
+            .filter { ($0.isCash == true || $0.type == "savings")
+                && (includeSuper || $0.accountType != "super") }
             .reduce(0) { $0 + convert(holdingLiveValue($1), from: $1.currency) }
         return convert(cryptoCashUsd, from: "USD") + holdingCash
     }
 
     /// Month-over-month net-worth CHANGE, USD, oldest first. The last entry
     /// is the current (partial) month, flagged so the UI can say so.
-    private func computeMonthlyGrowth() -> [(label: String, deltaUsd: Double, partial: Bool)] {
+    private func computeMonthlyGrowth() -> [(key: String, label: String, deltaUsd: Double, partial: Bool)] {
         var firstPerMonth: [String: SnapshotPoint] = [:]
         for row in networthHistory {
             let month = String(row.date.prefix(7))
@@ -1078,7 +1097,7 @@ final class DataStore {
         labeler.locale = Locale(identifier: "en_US_POSIX")
         labeler.dateFormat = "MMM"
 
-        var out: [(String, Double, Bool)] = []
+        var out: [(String, String, Double, Bool)] = []
         let list = Array(months)
         for index in 1..<list.count {
             guard let prev = firstPerMonth[list[index - 1]],
@@ -1090,7 +1109,7 @@ final class DataStore {
                let date = DateComponents(calendar: .current, year: Int(parts[0]), month: m).date {
                 label = labeler.string(from: date)
             }
-            out.append((label, value(curr) - value(prev), false))
+            out.append((list[index - 1], label, value(curr) - value(prev), false))
         }
         // Current month so far: its opening reading vs live net worth.
         if let lastMonth = list.last, let opening = firstPerMonth[lastMonth] {
@@ -1101,7 +1120,7 @@ final class DataStore {
                 label = labeler.string(from: date)
             }
             let live = Money.convert(netWorth, from: displayCurrency, to: "USD")
-            out.append((label, live - value(opening), true))
+            out.append((lastMonth, label, live - value(opening), true))
         }
         return out
     }

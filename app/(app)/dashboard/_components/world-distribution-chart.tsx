@@ -6,6 +6,8 @@ import { useTheme } from "next-themes";
 import { Eye, EyeOff, Maximize2, Wallet } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BlurFade } from "@/components/ui/blur-fade";
+import { useCloudStorage } from "@/components/providers/data-provider";
+import type { PortfolioHolding } from "@/lib/utils/types";
 import { getPieBaseOption } from "@/lib/utils/echarts";
 import { useCurrency } from "@/components/providers/currency-provider";
 import {
@@ -84,6 +86,11 @@ export function WorldDistributionChart({
   cashTotal = 0,
   cashAllocations = [],
 }: WorldDistributionChartProps) {
+  // Cash membership editor — the same blobs the crypto page's Cash dialog
+  // and the iOS picker write, so every surface agrees on "what is cash".
+  const [cashTags, setCashTags] = useCloudStorage<Record<string, boolean>>("crypto_cash_tags", {});
+  const [allHoldings, setAllHoldings] = useCloudStorage<PortfolioHolding[]>("portfolio_holdings", []);
+  const [cashEditorOpen, setCashEditorOpen] = useState(false);
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
   const { symbol } = useCurrency();
@@ -432,6 +439,36 @@ export function WorldDistributionChart({
                 </p>
               </div>
 
+              {/* Cash cuts ACROSS the three worlds, so it's a row, not a
+                  segment — the share of everything that's deployable now. */}
+              {cashTotal > 0 && (
+                <div
+                  className="rounded-lg border border-border/60 px-3 py-3"
+                  style={{ borderLeftWidth: 3, borderLeftColor: "#2ea598" }}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-semibold">
+                      Cash · Dry Powder
+                      <button
+                        onClick={() => setCashEditorOpen(true)}
+                        className="ml-2 text-[10px] font-mono text-muted-foreground underline hover:text-foreground"
+                      >
+                        edit
+                      </button>
+                    </span>
+                    <div className="flex items-baseline gap-2 font-mono tabular-nums">
+                      <span className="text-base font-semibold">{format(cashTotal)}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {grandTotal > 0 ? ((cashTotal / grandTotal) * 100).toFixed(1) : 0}%
+                      </span>
+                    </div>
+                  </div>
+                  <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+                    Everything tagged as deployable cash, across all three worlds.
+                  </p>
+                </div>
+              )}
+
               {segments.map((seg) => {
                 const pct = grandTotal > 0 ? (seg.value / grandTotal) * 100 : 0;
                 const items = (breakdowns?.[seg.key] ?? [])
@@ -499,6 +536,82 @@ export function WorldDistributionChart({
           </DialogContent>
         </Dialog>
       </div>
+
+      {/* Cash membership editor */}
+      {cashEditorOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setCashEditorOpen(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-xl border border-border bg-background p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="text-base font-semibold">What counts as cash</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Tick anything you consider deployable. Synced with the phone and the Crypto page.
+            </p>
+            <div className="mt-3 max-h-72 space-y-4 overflow-y-auto">
+              <div>
+                <p className="mb-1.5 text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Crypto tokens</p>
+                <div className="divide-y divide-border/40 rounded-lg border border-border/60">
+                  {(breakdowns?.crypto ?? []).slice().sort((a, b) => b.value - a.value).map((item) => {
+                    const on = cashTags[item.label] === true;
+                    return (
+                      <button
+                        key={item.label}
+                        onClick={() => setCashTags((prev) => ({ ...prev, [item.label]: !on }))}
+                        className="flex w-full items-center justify-between px-3 py-2 text-sm hover:bg-secondary/40"
+                      >
+                        <span className="font-medium">{item.label}</span>
+                        <span className="flex items-center gap-2 font-mono text-xs tabular-nums text-muted-foreground">
+                          {format(item.value)}
+                          <span className={on ? "text-income" : "opacity-40"}>{on ? "✓" : "○"}</span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div>
+                <p className="mb-1.5 text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Holdings</p>
+                <div className="divide-y divide-border/40 rounded-lg border border-border/60">
+                  {allHoldings.map((h) => {
+                    const locked = h.type === "savings";
+                    const on = locked || h.isCash === true;
+                    return (
+                      <button
+                        key={h.id}
+                        disabled={locked}
+                        onClick={() =>
+                          setAllHoldings((prev) =>
+                            prev.map((x) => (x.id === h.id ? { ...x, isCash: !(x.isCash === true) } : x)),
+                          )
+                        }
+                        className="flex w-full items-center justify-between px-3 py-2 text-sm hover:bg-secondary/40 disabled:opacity-60"
+                      >
+                        <span className="font-medium">{h.ticker || h.name}</span>
+                        <span className="flex items-center gap-2 font-mono text-xs tabular-nums text-muted-foreground">
+                          {locked && <span className="text-[9px]">savings</span>}
+                          <span className={on ? "text-income" : "opacity-40"}>{on ? "✓" : "○"}</span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+            <div className="mt-4 flex justify-end">
+              <button
+                onClick={() => setCashEditorOpen(false)}
+                className="rounded-full bg-secondary px-4 py-1.5 text-sm font-medium hover:bg-secondary/80"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </BlurFade>
   );
 }
