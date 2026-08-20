@@ -9,6 +9,9 @@ struct DashboardView: View {
     @State private var segmentDetail: SegmentDetail?
     /// Touched month in the growth chart.
     @State private var growthSelection: String?
+    /// Which growth components are drawn — either alone, or both stacked.
+    @State private var growthShowMoney = true
+    @State private var growthShowMarket = true
 
     var body: some View {
         NavigationStack {
@@ -173,9 +176,16 @@ struct DashboardView: View {
             HStack {
                 Text("Monthly Growth").labelMono()
                 Spacer()
-                HStack(spacing: 10) {
-                    legendDot("new money", Ledger.seriesStocks)
-                    legendDot("market", Ledger.income)
+                HStack(spacing: 6) {
+                    // Tappable: show one component alone, or both stacked.
+                    growthToggle("new money", Ledger.seriesStocks, on: growthShowMoney) {
+                        if growthShowMoney && !growthShowMarket { growthShowMarket = true }
+                        growthShowMoney.toggle()
+                    }
+                    growthToggle("market", Ledger.income, on: growthShowMarket) {
+                        if growthShowMarket && !growthShowMoney { growthShowMoney = true }
+                        growthShowMarket.toggle()
+                    }
                 }
             }
 
@@ -201,24 +211,28 @@ struct DashboardView: View {
             } else {
                 Chart(splits) { split in
                     if let deposits = split.deposits, let market = split.market {
-                        // Two stacked components: negatives hang below zero,
-                        // so a pink market bar under a blue deposits bar
-                        // reads as exactly what happened.
-                        BarMark(
-                            x: .value("Month", split.label),
-                            y: .value("New money", deposits)
-                        )
-                        .cornerRadius(3)
-                        .foregroundStyle(Ledger.seriesStocks.opacity(split.partial ? 0.5 : 0.95))
-                        BarMark(
-                            x: .value("Month", split.label),
-                            y: .value("Market", market)
-                        )
-                        .cornerRadius(3)
-                        .foregroundStyle(
-                            (market >= 0 ? Ledger.income : Ledger.expense)
-                                .opacity(split.partial ? 0.5 : 0.95)
-                        )
+                        // One component alone, or both stacked (negatives
+                        // hang below zero, so a pink market bar under a blue
+                        // deposits bar reads as exactly what happened).
+                        if growthShowMoney {
+                            BarMark(
+                                x: .value("Month", split.label),
+                                y: .value("New money", deposits)
+                            )
+                            .cornerRadius(3)
+                            .foregroundStyle(Ledger.seriesStocks.opacity(split.partial ? 0.5 : 0.95))
+                        }
+                        if growthShowMarket {
+                            BarMark(
+                                x: .value("Month", split.label),
+                                y: .value("Market", market)
+                            )
+                            .cornerRadius(3)
+                            .foregroundStyle(
+                                (market >= 0 ? Ledger.income : Ledger.expense)
+                                    .opacity(split.partial ? 0.5 : 0.95)
+                            )
+                        }
                     } else {
                         BarMark(
                             x: .value("Month", split.label),
@@ -243,7 +257,7 @@ struct DashboardView: View {
                 }
                 .frame(height: 160)
 
-                Text("net-worth change per month, split into deposits vs what the assets did · touch a bar · faded = this month so far")
+                Text("net-worth change per month · tap a legend chip to isolate one component · touch a bar for numbers · faded = this month so far")
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundStyle(.tertiary)
             }
@@ -252,11 +266,24 @@ struct DashboardView: View {
         .financeCard()
     }
 
-    private func legendDot(_ label: String, _ color: Color) -> some View {
-        HStack(spacing: 4) {
-            Circle().fill(color).frame(width: 6, height: 6)
-            Text(label).font(.system(size: 9, design: .monospaced)).foregroundStyle(.tertiary)
+    private func growthToggle(
+        _ label: String, _ color: Color, on: Bool, action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            withAnimation(.snappy(duration: 0.25)) { action() }
+        } label: {
+            HStack(spacing: 4) {
+                Circle().fill(on ? color : Color.secondary.opacity(0.4))
+                    .frame(width: 6, height: 6)
+                Text(label)
+                    .font(.system(size: 9, weight: on ? .semibold : .regular, design: .monospaced))
+                    .foregroundStyle(on ? .secondary : .tertiary)
+            }
+            .padding(.horizontal, 7)
+            .padding(.vertical, 4)
+            .background(on ? color.opacity(0.14) : Color.primary.opacity(0.04), in: .capsule)
         }
+        .buttonStyle(.plain)
     }
 
     // MARK: Financial freedom
