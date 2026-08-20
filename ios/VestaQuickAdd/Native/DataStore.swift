@@ -114,6 +114,9 @@ final class DataStore {
     var stablecoinTags: [String: Bool] = [:]
     /// token → exchange name, hand-set on the web crypto page.
     var exchangeOverrides: [String: String] = [:]
+    /// The web's Dry Powder definition — cash-TAGGED tokens (the user's list
+    /// includes BTC on purpose). Never re-infer this from stablecoin-ness.
+    var cryptoCashTags: [String: Bool] = [:]
     /// Earn events the user manually removed ("this arrival wasn't income")
     /// — keys are CryptoSplit's date|token|amount, synced via app_data so
     /// they survive CSV re-uploads and reinstalls.
@@ -122,6 +125,8 @@ final class DataStore {
     /// the visible log of the daily Hostplus repricing.
     var hostplusPriceHistory: [String: [String: Double]] = [:]
     var goals: [NetworthGoal] = []
+    /// User-defined holding baskets ("Quantum", ...), see PortfolioGroup.
+    var portfolioGroups: [PortfolioGroup] = []
     /// Forecast levers, synced with the web (see Forecast.swift).
     var forecastAssumptions: ForecastAssumptions = .default
     /// display-name → CoinGecko image URL (maintained by the web app).
@@ -581,9 +586,11 @@ final class DataStore {
         tickerMappings = blob("crypto_ticker_mappings", [String: String].self) ?? [:]
         stablecoinTags = blob("crypto_stablecoin_tags", [String: Bool].self) ?? [:]
         exchangeOverrides = blob("crypto_exchange_overrides", [String: String].self) ?? [:]
+        cryptoCashTags = blob("crypto_cash_tags", [String: Bool].self) ?? [:]
         earnExclusions = Set(blob("earn_exclusions", [String].self) ?? [])
         hostplusPriceHistory = blob("hostplus_price_history", [String: [String: Double]].self) ?? [:]
         goals = blob("networth_goals", [NetworthGoal].self) ?? []
+        portfolioGroups = blob("portfolio_groups", [PortfolioGroup].self) ?? []
         forecastAssumptions = blob("forecast_assumptions", ForecastAssumptions.self) ?? .default
         coinImages = blob("crypto_coin_images", [String: String].self) ?? [:]
         stockLogos = blob("portfolio_stock_logos", [String: String].self) ?? [:]
@@ -683,6 +690,13 @@ final class DataStore {
 
         recomputeDerived()
         try await persist("portfolio_transactions", portfolioTxs)
+    }
+
+    /// Replace the group list and persist — small blob, whole-list writes.
+    func savePortfolioGroups(_ groups: [PortfolioGroup]) async {
+        portfolioGroups = groups
+        do { try await persist("portfolio_groups", groups) }
+        catch { loadError = error.localizedDescription }
     }
 
     /// Upsert a net-worth goal — same blob the web's GoalSection edits.
@@ -1032,6 +1046,19 @@ final class DataStore {
 
     /// Honors the app-wide super toggle — dashboard, goal and chart all agree.
     var netWorth: Double { stocksValueVisible + cryptoValue + debtNet }
+
+    /// Deployable cash, the web dashboard's "Dry Powder": cash-tagged crypto
+    /// plus any holding flagged cash/savings. CASHH carries isCash=false by
+    /// the user's own hand — respected, not second-guessed.
+    var dryPowder: Double {
+        let cryptoCashUsd = cryptoCsvHoldings
+            .filter { cryptoCashTags[$0.token] == true }
+            .reduce(0) { $0 + csvHoldingValueUsd($1) }
+        let holdingCash = holdings
+            .filter { $0.isCash == true || $0.type == "savings" }
+            .reduce(0) { $0 + convert(holdingLiveValue($1), from: $1.currency) }
+        return convert(cryptoCashUsd, from: "USD") + holdingCash
+    }
 
     /// Month-over-month net-worth CHANGE, USD, oldest first. The last entry
     /// is the current (partial) month, flagged so the UI can say so.

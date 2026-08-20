@@ -36,6 +36,7 @@ const PerformanceChart = dynamic(
 import { PortfolioCharts } from "./_components/portfolio-charts";
 import { HoldingsTable } from "./_components/holdings-table";
 import { PriceUpdateStatus } from "./_components/price-update-status";
+import { HoldingGroups } from "./_components/holding-groups";
 import { RealizedPnl, type RealizedHoldingRow } from "./_components/realized-pnl";
 import {
   type SortKey,
@@ -749,6 +750,9 @@ export default function PortfolioPage() {
         convert={convert}
         baseDelay={DELAY}
       />
+
+      {/* ── Custom theme groups ("Quantum", …) — synced with the phone ── */}
+      <HoldingGroups holdings={filteredHoldings} format={format} convert={convert} delay={DELAY} />
 
       {/* ── Filters + Holdings List ── */}
       <HoldingsTable

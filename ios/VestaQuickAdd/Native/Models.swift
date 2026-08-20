@@ -312,6 +312,32 @@ struct NetworthGoal: Identifiable, Codable, Equatable {
     }
 }
 
+/// A user-defined basket of holdings — "Quantum", "AI", "Dividends" —
+/// synced via app_data `portfolio_groups`. Ticker-keyed on purpose: holdings
+/// get deleted and re-created (imports), tickers persist.
+struct PortfolioGroup: Identifiable, Codable, Equatable {
+    var id: String
+    var name: String
+    var tickers: [String]
+    var createdAt: Double
+
+    init(id: String = UUID().uuidString, name: String, tickers: [String],
+         createdAt: Double = Date().timeIntervalSince1970 * 1000) {
+        self.id = id
+        self.name = name
+        self.tickers = tickers
+        self.createdAt = createdAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
+        tickers = try c.decodeIfPresent([String].self, forKey: .tickers) ?? []
+        createdAt = try c.decodeIfPresent(Double.self, forKey: .createdAt) ?? 0
+    }
+}
+
 /// Synced forecast levers (app_data `forecast_assumptions`); nil means
 /// "use the measured value". Mirrors lib/utils/forecast.ts.
 struct ForecastAssumptions: Codable, Equatable {

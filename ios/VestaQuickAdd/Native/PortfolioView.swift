@@ -34,6 +34,7 @@ struct InvestView: View {
 
                 // Real pager: swipe between pots, picker stays in sync.
                 TabView(selection: $pot) {
+                    ScrollViewReader { proxy in
                     ScrollView {
                         PortfolioSection(zoom: zoom)
                             .padding(.horizontal, 16)
@@ -42,6 +43,14 @@ struct InvestView: View {
                     .refreshable {
                         await store.refresh()
                         await store.refreshHostplus()
+                    }
+                    // Screenshot hook: jump to a card id (VESTA_SCROLL_TO).
+                    .task {
+                        guard let target = ProcessInfo.processInfo.environment["VESTA_SCROLL_TO"]
+                        else { return }
+                        try? await Task.sleep(for: .seconds(1.5))
+                        withAnimation { proxy.scrollTo(target, anchor: .top) }
+                    }
                     }
                     .tag(0)
 
@@ -333,6 +342,11 @@ private struct PortfolioSection: View {
                 )
                 .entranceTransition()
             }
+
+            // Theme baskets — "how big is the quantum bet?".
+            HoldingGroupsCard(holdings: rows.map(\.holding))
+                .entranceTransition()
+                .id("groups")
 
             // The web's Realized P&L card: gains locked in by sells, replayed
             // from the transaction log at average cost.
