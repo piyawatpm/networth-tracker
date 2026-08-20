@@ -277,20 +277,28 @@ struct DashboardView: View {
     // MARK: Assets
 
     private var assetBreakdownCard: some View {
-        // Same hues as the chart overlays — one entity, one color.
-        let assetRows: [(String, Double, Color)] = [
-            ("Stocks & Funds", store.stocksValueVisible, Ledger.seriesStocks),
-            ("Crypto", store.cryptoValue, Ledger.seriesCrypto),
+        // The web's Asset Distribution: Traditional / Super / Crypto shares
+        // of everything owned — toggle-independent, because the split itself
+        // is the point.
+        let traditional = store.holdings
+            .filter { $0.accountType != "super" }
+            .reduce(0) { $0 + store.convert(store.holdingLiveValue($1), from: $1.currency) }
+        let superTotal = store.holdings
+            .filter { $0.accountType == "super" }
+            .reduce(0) { $0 + store.convert(store.holdingLiveValue($1), from: $1.currency) }
+        let crypto = store.cryptoValue
+        let portfolioTotal = traditional + superTotal + crypto
+        let segments: [(String, Double, Color)] = [
+            ("Traditional", traditional, Ledger.seriesStocks),
+            ("Crypto", crypto, Ledger.seriesCrypto),
+            ("Super", superTotal, Ledger.chartColor(1)),
         ]
-        // What you OWN, before anything you owe — the web's "Total Assets"
-        // tile. Net worth answers a different question and is one line down.
-        let portfolioTotal = assetRows.reduce(0) { $0 + $1.1 }
-        let rows = assetRows + [("Debts (net)", store.debtNet, Ledger.seriesDebt)]
-        let total = max(1, rows.reduce(0) { $0 + abs($1.1) })
+        let cash = store.dryPowder
+        let cashPct = portfolioTotal > 0 ? cash / portfolioTotal * 100 : 0
 
         return VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                Text("Total Portfolio").labelMono()
+                Text("Asset Distribution").labelMono()
                 Text(store.format(portfolioTotal))
                     .font(.system(.title2, design: .rounded, weight: .bold))
                     .monospacedDigit()
@@ -301,25 +309,58 @@ struct DashboardView: View {
                     .foregroundStyle(.tertiary)
             }
 
-            ForEach(rows, id: \.0) { row in
-                VStack(spacing: 5) {
-                    HStack {
-                        Circle().fill(row.2).frame(width: 8, height: 8)
-                        Text(row.0).font(.subheadline)
-                        Spacer()
-                        Text(store.format(row.1))
-                            .font(.system(.footnote, design: .monospaced))
-                            .foregroundStyle(.secondary)
+            // One stacked bar — the three shares at a glance.
+            if portfolioTotal > 0 {
+                GeometryReader { geo in
+                    HStack(spacing: 2) {
+                        ForEach(segments, id: \.0) { seg in
+                            Capsule().fill(seg.2)
+                                .frame(width: max(3, (geo.size.width - 4) * seg.1 / portfolioTotal))
+                        }
                     }
-                    GeometryReader { geo in
-                        Capsule()
-                            .fill(row.2.opacity(0.85))
-                            .frame(width: max(3, geo.size.width * abs(row.1) / total))
-                            .animation(.spring(duration: 0.7), value: row.1)
-                    }
-                    .frame(height: 5)
-                    .background(Capsule().fill(.primary.opacity(0.06)))
+                    .animation(.spring(duration: 0.7), value: portfolioTotal)
                 }
+                .frame(height: 6)
+            }
+
+            ForEach(segments, id: \.0) { seg in
+                HStack {
+                    Circle().fill(seg.2).frame(width: 8, height: 8)
+                    Text(seg.0).font(.subheadline)
+                    Spacer()
+                    Text(store.format(seg.1))
+                        .font(.system(.footnote, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                    Text(String(format: "%.1f%%", portfolioTotal > 0 ? seg.1 / portfolioTotal * 100 : 0))
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .frame(width: 46, alignment: .trailing)
+                }
+            }
+
+            // Deployable cash across the whole portfolio — the web's Dry
+            // Powder (cash-TAGGED crypto; BTC is on the user's list, CASHH
+            // deliberately off it).
+            Divider().opacity(0.5)
+            HStack {
+                Image(systemName: "banknote")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Ledger.income)
+                Text("Cash · dry powder").font(.subheadline)
+                Spacer()
+                Text(store.format(cash))
+                    .font(.system(.footnote, design: .monospaced, weight: .semibold))
+                Text(String(format: "%.1f%%", cashPct))
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(Ledger.income)
+                    .frame(width: 46, alignment: .trailing)
+            }
+            HStack {
+                Text("Debts (net)").font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(store.format(store.debtNet))
+                    .font(.system(.footnote, design: .monospaced))
+                    .foregroundStyle(.secondary)
             }
 
             // The reconciliation, so the two headline numbers never look like
