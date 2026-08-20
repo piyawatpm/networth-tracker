@@ -227,7 +227,8 @@ struct ExpensesView: View {
                             format: { store.format($0, compact: true) },
                             slices: categoryFlows.slices,
                             order: categoryFlows.order,
-                            color: { store.expenseColorForLabel($0) }
+                            color: { store.expenseColorForLabel($0) },
+                            scope: $scope
                         )
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
@@ -281,7 +282,7 @@ struct ExpensesView: View {
 
                 if search.isEmpty {
                     Section {
-                        MonthScopeStrip(months: flows, selection: $scope, tint: Ledger.expense)
+                        MonthScopeStrip(months: flows, selection: $scope, tint: Ledger.expense, format: { store.format($0, compact: true) })
                             .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)

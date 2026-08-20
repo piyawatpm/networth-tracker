@@ -338,33 +338,56 @@ struct MonthScopeStrip: View {
     let months: [MonthFlow]
     @Binding var selection: String?   // nil = All
     let tint: Color
+    /// With a formatter, each month chip carries its total — pick a month by
+    /// its number, not by remembering which month was which.
+    var format: ((Double) -> String)? = nil
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
+                // "All" leads: it's the reset, and the strip opens on it.
+                chip(title: "All", subtitle: nil, value: nil)
                 ForEach(months.reversed()) { flow in
-                    chip(title: flow.label, value: flow.key)
+                    chip(
+                        title: flow.label,
+                        subtitle: format.map { fmt in
+                            flow.isCurrent ? "\(fmt(flow.total)) …" : fmt(flow.total)
+                        },
+                        value: flow.key
+                    )
                 }
-                chip(title: "All", value: nil)
             }
             .padding(.horizontal, 2)
         }
+        .sensoryFeedback(.selection, trigger: selection)
     }
 
-    private func chip(title: String, value: String?) -> some View {
+    private func chip(title: String, subtitle: String?, value: String?) -> some View {
         let active = selection == value
         return Button {
             withAnimation(.snappy(duration: 0.2)) { selection = value }
         } label: {
-            Text(title)
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
-                .foregroundStyle(active ? Color.black : Color.primary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(
-                    active ? AnyShapeStyle(tint) : AnyShapeStyle(Color.white.opacity(0.07)),
-                    in: .capsule
+            VStack(spacing: 1) {
+                Text(title)
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.system(size: 8, design: .monospaced))
+                        .opacity(0.75)
+                }
+            }
+            .foregroundStyle(active ? Color.black : Color.primary)
+            .padding(.horizontal, 11)
+            .padding(.vertical, subtitle == nil ? 8 : 4)
+            .background(
+                active ? AnyShapeStyle(tint) : AnyShapeStyle(Color.white.opacity(0.07)),
+                in: .capsule
+            )
+            .overlay(
+                Capsule().strokeBorder(
+                    active ? Color.clear : tint.opacity(0.0), lineWidth: 1
                 )
+            )
         }
         .buttonStyle(.plain)
     }
@@ -442,6 +465,13 @@ struct WeekdayPatternCard: View {
         return series.firstIndex(of: max)
     }
 
+    /// Bar under the finger (or last touched) — the readout's subject.
+    @State private var selectedDay: String?
+    private var selectedIndex: Int? {
+        guard let selectedDay else { return nil }
+        return (0..<7).first { FlowMath.weekdayName($0) == selectedDay }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -454,13 +484,24 @@ struct WeekdayPatternCard: View {
                 .pickerStyle(.segmented)
                 .frame(width: 110)
             }
-            if let peak {
-                Text(showAverage
-                     ? "\(FlowMath.weekdayName(peak)) costs the most on average"
-                     : "Most spent on \(FlowMath.weekdayName(peak))")
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(.tertiary)
+            // One line, two jobs: the touched bar's numbers, else the peak
+            // finding. Reserved so the card doesn't jump under the finger.
+            Group {
+                if let index = selectedIndex {
+                    let count = occurrences.indices.contains(index) ? occurrences[index] : 0
+                    let avg = count > 0 ? totals[index] / Double(count) : 0
+                    Text("\(FlowMath.weekdayName(index)) · avg \(format(avg)) · total \(format(totals[index])) · \(count) day\(count == 1 ? "" : "s")")
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                } else if let peak {
+                    Text(showAverage
+                         ? "\(FlowMath.weekdayName(peak)) costs the most on average · touch a bar"
+                         : "Most spent on \(FlowMath.weekdayName(peak)) · touch a bar")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                }
             }
+            .frame(minHeight: 12, alignment: .leading)
             Chart(Array(values.enumerated()), id: \.offset) { index, total in
                 BarMark(
                     x: .value("Day", FlowMath.weekdayName(index)),
@@ -468,17 +509,21 @@ struct WeekdayPatternCard: View {
                     width: .ratio(0.5)
                 )
                 .cornerRadius(3)
-                // Emphasis, not category: the peak is the finding, the rest
-                // is context, so only two weights of the same hue.
-                .foregroundStyle(tint.opacity(index == peak ? 0.95 : 0.32))
+                // Emphasis, not category: the touched bar (else the peak) is
+                // the finding, the rest is context — two weights, one hue.
+                .foregroundStyle(tint.opacity(
+                    selectedIndex.map { $0 == index ? 0.95 : 0.28 }
+                        ?? (index == peak ? 0.95 : 0.32)
+                ))
                 .annotation(position: .top, spacing: 2) {
-                    if index == peak, total > 0 {
+                    if index == (selectedIndex ?? peak), total > 0 {
                         Text(format(total))
                             .font(.system(size: 8, design: .monospaced))
                             .foregroundStyle(.secondary)
                     }
                 }
             }
+            .chartXSelection(value: $selectedDay)
             .chartXScale(domain: (0..<7).map { FlowMath.weekdayName($0) })
             .chartYAxis(.hidden)
             .chartXAxis {
@@ -557,13 +602,28 @@ struct MonthTrendCard: View {
     var slices: [CategorySlice] = []
     var order: [String] = []
     var color: (String) -> Color = { _ in .gray }
+    /// The page's month filter. When present, touching a bar offers "Filter"
+    /// — the chart becomes the month picker, not just a picture of one.
+    var scope: Binding<String?>? = nil
 
     // Screenshot runs can open straight into the stacked view.
     @State private var showCategories =
         ProcessInfo.processInfo.environment["VESTA_TREND_CATEGORY"] != nil
+    @State private var selectedLabel: String?
 
     private var maxFlow: MonthFlow? {
         flows.filter { !$0.isCurrent }.max { $0.total < $1.total }
+    }
+
+    private var selectedFlow: MonthFlow? {
+        flows.first { $0.label == selectedLabel }
+    }
+    /// The month before the touched one, for the delta line.
+    private var previousFlow: MonthFlow? {
+        guard let sel = selectedFlow,
+              let index = flows.firstIndex(where: { $0.key == sel.key }),
+              index > 0 else { return nil }
+        return flows[index - 1]
     }
 
     var body: some View {
@@ -583,6 +643,8 @@ struct MonthTrendCard: View {
                 }
             }
 
+            readout
+
             if showCategories {
                 categoryChart
             } else {
@@ -591,6 +653,85 @@ struct MonthTrendCard: View {
         }
         .padding(16)
         .financeCard()
+        .sensoryFeedback(.selection, trigger: selectedLabel)
+    }
+
+    /// The touched month, in numbers: total, vs the month before, its top
+    /// category — and the button that filters the page to it. Reserved
+    /// height so the card never jumps under the finger.
+    private var readout: some View {
+        HStack(spacing: 8) {
+            if let sel = selectedFlow {
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 6) {
+                        Text("\(sel.label) · \(format(sel.total))\(sel.isCurrent ? " so far" : "")")
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        if let prev = previousFlow, prev.total > 0.01, !sel.isCurrent {
+                            let pct = (sel.total - prev.total) / prev.total * 100
+                            Text("\(pct >= 0 ? "↑" : "↓")\(String(format: "%.0f", abs(pct)))% vs \(prev.label)")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(pct >= 0 ? Ledger.income : Ledger.expense)
+                        }
+                    }
+                    if let top = topCategory(sel.key) {
+                        Text("top: \(top.0) \(format(top.1))")
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                Spacer()
+                if let scope {
+                    if scope.wrappedValue == sel.key {
+                        readoutButton("Clear filter") {
+                            withAnimation(.snappy(duration: 0.2)) { scope.wrappedValue = nil }
+                        }
+                    } else {
+                        readoutButton("Filter \(sel.label)") {
+                            withAnimation(.snappy(duration: 0.2)) { scope.wrappedValue = sel.key }
+                        }
+                    }
+                }
+            } else {
+                Text(scope != nil
+                     ? "touch a bar to inspect · Filter scopes the page to it"
+                     : "touch a bar to inspect")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                Spacer()
+            }
+        }
+        .frame(minHeight: 26)
+    }
+
+    private func readoutButton(_ label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .foregroundStyle(Color.black)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(tint, in: .capsule)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func topCategory(_ monthKey: String) -> (String, Double)? {
+        slices
+            .filter { $0.monthKey == monthKey && $0.category != FlowMath.otherCategory }
+            .max { $0.total < $1.total }
+            .map { ($0.category, $0.total) }
+    }
+
+    /// Emphasis for one bar: the touched one wins, else the page's scoped
+    /// month, else the resting look (live month dimmed).
+    private func barOpacity(_ flow: MonthFlow, resting: Double) -> Double {
+        if let selectedLabel {
+            return flow.label == selectedLabel ? 0.95 : 0.28
+        }
+        if let scoped = scope?.wrappedValue {
+            return flow.key == scoped ? 0.95 : 0.28
+        }
+        return resting
     }
 
     /// Stacked composition: bar height is still the month's total, and each
@@ -605,8 +746,12 @@ struct MonthTrendCard: View {
             )
             .foregroundStyle(by: .value("Category", slice.category))
             // The live month is real but unfinished — dimmed, same as the
-            // total view, rather than posing as a complete bar.
-            .opacity(slice.isCurrent ? 0.45 : 1)
+            // total view, rather than posing as a complete bar. Touch and
+            // scope emphasis stack on top of that.
+            .opacity((slice.isCurrent ? 0.45 : 1) * barOpacity(
+                MonthFlow(key: slice.monthKey, label: slice.monthLabel, total: 0, isCurrent: slice.isCurrent),
+                resting: 1
+            ))
             .cornerRadius(2)
             .annotation(position: .top, spacing: 3) {
                 if slice.isTop {
@@ -614,6 +759,7 @@ struct MonthTrendCard: View {
                 }
             }
         }
+        .chartXSelection(value: $selectedLabel)
         .chartForegroundStyleScale(
             domain: order,
             range: order.map { $0 == FlowMath.otherCategory ? Color.gray.opacity(0.55) : color($0) }
@@ -656,9 +802,9 @@ struct MonthTrendCard: View {
                 )
                 .cornerRadius(4)
                 .foregroundStyle(
-                    flow.isCurrent
-                        ? AnyShapeStyle(tint.opacity(0.38))
-                        : AnyShapeStyle(tint.opacity(0.9))
+                    AnyShapeStyle(tint.opacity(
+                        barOpacity(flow, resting: flow.isCurrent ? 0.38 : 0.9)
+                    ))
                 )
                 .annotation(position: .top, spacing: 3) {
                     // Selective: the benchmark month and the live one.
@@ -678,6 +824,7 @@ struct MonthTrendCard: View {
                     }
                 }
             }
+        .chartXSelection(value: $selectedLabel)
         .chartXScale(domain: flows.map(\.label))
         .chartYAxis(.hidden)
         .chartXAxis {
