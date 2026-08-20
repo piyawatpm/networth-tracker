@@ -244,6 +244,31 @@ struct DashboardView: View {
                                 .opacity(split.partial ? 0.45 : 0.55)
                         )
                     }
+
+                    // Always-visible value per month — the net of whatever is
+                    // drawn — riding an invisible point at the stack's top so
+                    // it clears mixed-sign stacks.
+                    let shown: [Double] = {
+                        guard let deposits = split.deposits, let market = split.market else {
+                            return [split.delta]
+                        }
+                        var parts: [Double] = []
+                        if growthShowMoney { parts.append(deposits) }
+                        if growthShowMarket { parts.append(market) }
+                        return parts
+                    }()
+                    let labelValue = shown.reduce(0, +)
+                    let stackTop = max(0, shown.filter { $0 > 0 }.reduce(0, +))
+                    PointMark(
+                        x: .value("Month", split.label),
+                        y: .value("Top", stackTop)
+                    )
+                    .symbolSize(0)
+                    .annotation(position: .top, spacing: 2) {
+                        Text(store.format(labelValue, compact: true))
+                            .font(.system(size: 8, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(split.partial ? .tertiary : .secondary)
+                    }
                 }
                 .chartXSelection(value: $growthSelection)
                 .chartXScale(domain: splits.map(\.label))
