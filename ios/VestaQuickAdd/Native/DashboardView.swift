@@ -5,6 +5,8 @@ struct DashboardView: View {
     @Environment(DataStore.self) private var store
     /// True once the hero number has scrolled away — floats the live pill.
     @State private var scrolledPastHero = false
+    /// Which distribution segment's members are being inspected.
+    @State private var segmentDetail: SegmentDetail?
 
     var body: some View {
         NavigationStack {
@@ -22,12 +24,10 @@ struct DashboardView: View {
                     )
                     .id(store.includeSuperStocks)
                     .entranceTransition()
-                    superToggleCard.entranceTransition()
                     monthlyGrowthCard.entranceTransition()
-                    freedomCard.entranceTransition()
-                    if let goal = activeGoal { goalCard(goal).entranceTransition() }
                     assetBreakdownCard.entranceTransition().id("assets")
                     monthFlowCard.entranceTransition().id("flow")
+                    if let goal = activeGoal { goalCard(goal).entranceTransition() }
                     if !upcoming.isEmpty { upcomingCard.entranceTransition().id("upcoming") }
                     recentActivityCard.entranceTransition().id("recent")
                 }
@@ -68,11 +68,16 @@ struct DashboardView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
+            .sheet(item: $segmentDetail) { detail in
+                SegmentDetailSheet(detail: detail)
+                    .presentationDetents([.medium, .large])
+            }
             .background(Ledger.background)
             .navigationTitle("Dashboard")
             .navigationBarTitleDisplayMode(.large)
             .refreshable { await store.refresh() }
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) { SuperChip() }
                 ToolbarItem(placement: .topBarTrailing) { FxChip() }
             }
         }
@@ -345,36 +350,52 @@ struct DashboardView: View {
             }
 
             ForEach(segments, id: \.0) { seg in
-                HStack {
-                    Circle().fill(seg.2).frame(width: 8, height: 8)
-                    Text(seg.0).font(.subheadline)
-                    Spacer()
-                    Text(store.format(seg.1))
-                        .font(.system(.footnote, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                    Text(String(format: "%.1f%%", portfolioTotal > 0 ? seg.1 / portfolioTotal * 100 : 0))
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                        .frame(width: 46, alignment: .trailing)
+                Button {
+                    segmentDetail = segmentMembers(seg.0, tint: seg.2)
+                } label: {
+                    HStack {
+                        Circle().fill(seg.2).frame(width: 8, height: 8)
+                        Text(seg.0).font(.subheadline)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                        Spacer()
+                        Text(store.format(seg.1))
+                            .font(.system(.footnote, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                        Text(String(format: "%.1f%%", portfolioTotal > 0 ? seg.1 / portfolioTotal * 100 : 0))
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .frame(width: 46, alignment: .trailing)
+                    }
                 }
+                .buttonStyle(.plain)
             }
 
             // Deployable cash across the whole portfolio — the web's Dry
             // Powder (cash-TAGGED crypto; BTC is on the user's list, CASHH
             // deliberately off it).
             Divider().opacity(0.5)
-            HStack {
-                Image(systemName: "banknote")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Ledger.income)
-                Text("Cash · dry powder").font(.subheadline)
-                Spacer()
-                Text(store.format(cash))
-                    .font(.system(.footnote, design: .monospaced, weight: .semibold))
-                Text(String(format: "%.1f%%", cashPct))
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(Ledger.income)
-                    .frame(width: 46, alignment: .trailing)
+            Button {
+                segmentDetail = segmentMembers("Cash", tint: Ledger.income)
+            } label: {
+                HStack {
+                    Image(systemName: "banknote")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Ledger.income)
+                    Text("Cash · dry powder").font(.subheadline)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                    Spacer()
+                    Text(store.format(cash))
+                        .font(.system(.footnote, design: .monospaced, weight: .semibold))
+                    Text(String(format: "%.1f%%", cashPct))
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(Ledger.income)
+                        .frame(width: 46, alignment: .trailing)
+                }
             }
+            .buttonStyle(.plain)
             HStack {
                 Text("Debts (net)").font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -545,5 +566,124 @@ struct DashboardView: View {
         }
         .padding(16)
         .financeCard()
+    }
+}
+
+
+// MARK: - Distribution detail
+
+/// One distribution segment, opened as a modal: every member with its value
+/// and share of the segment.
+struct SegmentDetail: Identifiable {
+    let title: String
+    let tint: Color
+    let rows: [(name: String, sub: String?, value: Double)]
+    var id: String { title }
+    var total: Double { rows.reduce(0) { $0 + $1.value } }
+}
+
+extension DashboardView {
+    /// Members of a distribution segment, display currency, biggest first.
+    func segmentMembers(_ segment: String, tint: Color) -> SegmentDetail {
+        var rows: [(String, String?, Double)] = []
+        switch segment {
+        case "Traditional":
+            rows = store.holdings
+                .filter { $0.accountType != "super" }
+                .map { (
+                    $0.ticker.isEmpty ? $0.name : $0.ticker,
+                    $0.ticker.isEmpty ? ($0.broker.isEmpty ? nil : $0.broker) : $0.name,
+                    store.convert(store.holdingLiveValue($0), from: $0.currency)
+                ) }
+        case "Super":
+            rows = store.holdings
+                .filter { $0.accountType == "super" }
+                .map { (
+                    $0.ticker.isEmpty ? $0.name : $0.ticker,
+                    $0.name,
+                    store.convert(store.holdingLiveValue($0), from: $0.currency)
+                ) }
+        case "Crypto":
+            rows = store.cryptoDisplayRows.map { (
+                $0.token,
+                $0.isCash ? "cash" : nil,
+                store.convert($0.valueUsd, from: "USD")
+            ) }
+        case "Cash":
+            // The dry-powder roster: cash-TAGGED crypto (the user's list,
+            // BTC included) + any holding flagged cash/savings.
+            rows = store.cryptoCsvHoldings
+                .filter { store.cryptoCashTags[$0.token] == true }
+                .map { ($0.token, "crypto", store.convert(store.csvHoldingValueUsd($0), from: "USD")) }
+            rows += store.holdings
+                .filter { $0.isCash == true || $0.type == "savings" }
+                .map { ($0.name, $0.broker.isEmpty ? "account" : $0.broker,
+                        store.convert(store.holdingLiveValue($0), from: $0.currency)) }
+        default: break
+        }
+        return SegmentDetail(
+            title: segment,
+            tint: tint,
+            rows: rows.filter { $0.2 > 0.005 }.sorted { $0.2 > $1.2 }
+        )
+    }
+}
+
+struct SegmentDetailSheet: View {
+    @Environment(DataStore.self) private var store
+    let detail: SegmentDetail
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    HStack {
+                        Circle().fill(detail.tint).frame(width: 9, height: 9)
+                        Text(store.format(detail.total))
+                            .font(.system(.title3, design: .rounded, weight: .bold))
+                            .monospacedDigit()
+                        Spacer()
+                        Text("\(detail.rows.count) position\(detail.rows.count == 1 ? "" : "s")")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                    .listRowBackground(Color.clear)
+                }
+                Section {
+                    ForEach(Array(detail.rows.enumerated()), id: \.offset) { _, row in
+                        VStack(spacing: 5) {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(row.name).font(.subheadline.weight(.medium))
+                                    if let sub = row.sub, sub != row.name {
+                                        Text(sub).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                                    }
+                                }
+                                Spacer()
+                                Text(store.format(row.value, compact: true))
+                                    .font(.system(.footnote, design: .monospaced, weight: .semibold))
+                                Text(String(format: "%.1f%%", detail.total > 0 ? row.value / detail.total * 100 : 0))
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundStyle(.tertiary)
+                                    .frame(width: 44, alignment: .trailing)
+                            }
+                            GeometryReader { geo in
+                                ZStack(alignment: .leading) {
+                                    Capsule().fill(.primary.opacity(0.06))
+                                    Capsule().fill(detail.tint.opacity(0.85))
+                                        .frame(width: max(2, geo.size.width * (detail.total > 0 ? row.value / detail.total : 0)))
+                                }
+                            }
+                            .frame(height: 4)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(Ledger.background)
+            .navigationTitle("\(detail.title) allocation")
+            .navigationBarTitleDisplayMode(.inline)
+        }
     }
 }

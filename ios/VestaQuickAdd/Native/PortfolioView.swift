@@ -67,6 +67,7 @@ struct InvestView: View {
             .background(Ledger.background)
             .navigationTitle("Invest")
             .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { SuperChip() }
                 ToolbarItem(placement: .topBarTrailing) { FxChip() }
                 if hasHostplus {
                     ToolbarItem(placement: .topBarLeading) {
@@ -295,19 +296,6 @@ private struct PortfolioSection: View {
             .id(store.includeSuperStocks) // rebuild points when the series swaps
             .entranceTransition()
 
-            // Super toggle, same semantics as the web's "Super: in/out" pill.
-            HStack {
-                Text("Include super").font(.subheadline)
-                Spacer()
-                Toggle("", isOn: $store.includeSuperStocks.animation(.spring(duration: 0.4)))
-                    .labelsHidden()
-                    .tint(Ledger.income)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .financeCard()
-            .entranceTransition()
-
             // Invested vs unrealized over the visible scope — the totals the
             // web's summary row carries, so realized (card below) and
             // unrealized are both on the page.
@@ -424,7 +412,7 @@ private struct HoldingCard: View {
                     }
                     if units > 0 {
                         // The web row's "…/u" — what one unit trades at now.
-                        Text("\(Money.format(liveValue / units, currency: holding.currency, compact: true))/u")
+                        Text("\(store.format(store.convert(liveValue / units, from: holding.currency), compact: true))/u")
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundStyle(.secondary)
                     }
@@ -432,10 +420,12 @@ private struct HoldingCard: View {
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 3) {
-                Text(Money.format(liveValue, currency: holding.currency))
+                // Display currency, not the holding's own — the FX chip must
+                // move every number on this page, row values included.
+                Text(store.format(store.convert(liveValue, from: holding.currency)))
                     .font(.system(.footnote, design: .monospaced, weight: .semibold))
                 // Web parity: absolute P&L beside the percent, not % alone.
-                Text("\(gain >= 0 ? "+" : "")\(Money.format(gain, currency: holding.currency, compact: true)) (\(gain >= 0 ? "+" : "")\(String(format: "%.1f", pct))%)")
+                Text("\(gain >= 0 ? "+" : "")\(store.format(store.convert(gain, from: holding.currency), compact: true)) (\(gain >= 0 ? "+" : "")\(String(format: "%.1f", pct))%)")
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .foregroundStyle(gain >= 0 ? Ledger.income : Ledger.expense)
             }
@@ -559,7 +549,10 @@ struct HoldingDetailView: View {
         ScrollView {
             VStack(spacing: 16) {
                 VStack(spacing: 12) {
-                    MoneyText(amount: holding.currentValue, currency: holding.currency)
+                    MoneyText(
+                        amount: store.convert(holding.currentValue, from: holding.currency),
+                        currency: store.displayCurrency
+                    )
                     let units = position.units > 0 ? position.units : holding.units
                     let cost = position.costBasis > 0 ? position.costBasis : holding.amountInvested
                     let unrealized = holding.currentValue - cost
@@ -567,22 +560,22 @@ struct HoldingDetailView: View {
                         statTile("Units", String(format: "%.4g", units))
                         Divider().padding(.vertical, 4)
                         statTile("Price / u", units > 0
-                            ? Money.format(holding.currentValue / units, currency: holding.currency, compact: true)
+                            ? store.format(store.convert(holding.currentValue / units, from: holding.currency), compact: true)
                             : "—")
                         Divider().padding(.vertical, 4)
-                        statTile("Cost", Money.format(cost, currency: holding.currency, compact: true))
+                        statTile("Cost", store.format(store.convert(cost, from: holding.currency), compact: true))
                     }
                     Divider()
                     HStack(spacing: 0) {
                         statTile(
                             "Realized",
-                            Money.format(position.realizedPnl, currency: holding.currency, compact: true),
+                            store.format(store.convert(position.realizedPnl, from: holding.currency), compact: true),
                             tint: position.realizedPnl >= 0 ? Ledger.income : Ledger.expense
                         )
                         Divider().padding(.vertical, 4)
                         statTile(
                             "Unrealized",
-                            Money.format(unrealized, currency: holding.currency, compact: true),
+                            store.format(store.convert(unrealized, from: holding.currency), compact: true),
                             tint: unrealized >= 0 ? Ledger.income : Ledger.expense
                         )
                     }
@@ -640,7 +633,7 @@ struct HoldingDetailView: View {
                                     .font(.caption2).foregroundStyle(.secondary)
                             }
                             Spacer()
-                            Text(Money.format(tx.totalAmount, currency: tx.currency))
+                            Text(store.format(store.convert(tx.totalAmount, from: tx.currency)))
                                 .font(.system(.footnote, design: .monospaced))
                         }
                     }

@@ -77,6 +77,39 @@ struct FinanceCard: ViewModifier {
 
 /// The currency cycle chip (AUD → USD → THB), shared by every page's
 /// toolbar. Writes through preferred_currency so the web app follows.
+/// Toolbar-sized super toggle — same rank as the FX chip, so the choice is
+/// always in reach without a card burning vertical space.
+struct SuperChip: View {
+    @Environment(DataStore.self) private var store
+
+    var body: some View {
+        Button {
+            withAnimation(.spring(duration: 0.4)) {
+                store.includeSuperStocks.toggle()
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: store.includeSuperStocks
+                      ? "checkmark.circle.fill" : "slash.circle")
+                    .font(.system(size: 11, weight: .bold))
+                Text("Super")
+                    .font(.system(.subheadline, design: .rounded, weight: .semibold))
+            }
+            .foregroundStyle(store.includeSuperStocks ? Ledger.income : .secondary)
+            .fixedSize() // the toolbar would otherwise squeeze the label away
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(Ledger.card, in: .capsule)
+            .overlay(Capsule().strokeBorder(
+                store.includeSuperStocks ? Ledger.income.opacity(0.35) : Color.white.opacity(0.08)
+            ))
+            .contentShape(.capsule)
+        }
+        .buttonStyle(.plain)
+        .sensoryFeedback(.impact(weight: .light), trigger: store.includeSuperStocks)
+    }
+}
+
 struct FxChip: View {
     @Environment(DataStore.self) private var store
 
@@ -152,11 +185,18 @@ extension View {
 
     /// Cards drift up + fade as they enter, the native cousin of BlurFade.
     func entranceTransition() -> some View {
-        scrollTransition(.animated(.spring(duration: 0.4))) { content, phase in
+        // Entrance ONLY. The symmetric version also faded cards at the TOP
+        // edge — hiding a section the reader was mid-way through. Leaving
+        // the viewport upward keeps full opacity; arriving from the bottom
+        // gets the rise-and-sharpen.
+        scrollTransition(
+            topLeading: .identity,
+            bottomTrailing: .animated(.spring(duration: 0.4))
+        ) { content, phase in
             content
-                .opacity(phase.isIdentity ? 1 : 0)
-                .offset(y: phase.isIdentity ? 0 : 14)
-                .blur(radius: phase.isIdentity ? 0 : 3)
+                .opacity(phase == .bottomTrailing ? 0 : 1)
+                .offset(y: phase == .bottomTrailing ? 14 : 0)
+                .blur(radius: phase == .bottomTrailing ? 3 : 0)
         }
     }
 }

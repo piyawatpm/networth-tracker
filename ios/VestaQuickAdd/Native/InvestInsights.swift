@@ -184,7 +184,7 @@ struct RecentTradesCard: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Text(Money.format(tx.totalAmount, currency: tx.currency, compact: true))
+                    Text(store.format(store.convert(tx.totalAmount, from: tx.currency), compact: true))
                         .font(.system(.caption, design: .monospaced, weight: .semibold))
                         .foregroundStyle(tx.type == "buy" ? .primary : Ledger.income)
                 }
