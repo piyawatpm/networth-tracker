@@ -14,6 +14,8 @@ struct DashboardView: View {
     @State private var growthShowMarket = true
     /// Months of history on the growth chart (6 or 12, + the live month).
     @State private var growthWindow = 12
+    /// Month opened for the entry-level breakdown sheet.
+    @State private var growthDetail: GrowthSplit?
 
     var body: some View {
         NavigationStack {
@@ -143,7 +145,7 @@ struct DashboardView: View {
     /// One month of net-worth growth, split the way the perf page splits it:
     /// what was DEPOSITED (income − expenses, the ledgers) vs what the assets
     /// DID (Δ net worth minus those deposits).
-    private struct GrowthSplit: Identifiable {
+    struct GrowthSplit: Identifiable {
         let key: String
         let label: String
         let delta: Double
@@ -204,8 +206,9 @@ struct DashboardView: View {
                 Spacer()
             }
 
-            // Readout: the touched month (else the latest), decomposed.
-            Group {
+            // Readout: the touched month (else the latest), decomposed —
+            // Details opens the entry-level list behind the bar.
+            HStack(spacing: 8) {
                 if let sel = selected {
                     if let deposits = sel.deposits, let market = sel.market {
                         Text("\(sel.label)\(sel.partial ? " so far" : "") · \(store.format(deposits, compact: true)) in · \(market >= 0 ? "+" : "")\(store.format(market, compact: true)) market · = \(sel.delta >= 0 ? "+" : "")\(store.format(sel.delta, compact: true))")
@@ -216,6 +219,18 @@ struct DashboardView: View {
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundStyle(.tertiary)
                     }
+                    Spacer()
+                    Button {
+                        growthDetail = sel
+                    } label: {
+                        HStack(spacing: 2) {
+                            Text("Details")
+                            Image(systemName: "chevron.right").font(.system(size: 7, weight: .bold))
+                        }
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .foregroundStyle(Ledger.income)
+                    }
+                    .buttonStyle(.plain)
                 }
             }
             .frame(minHeight: 13, alignment: .leading)
@@ -313,6 +328,10 @@ struct DashboardView: View {
         }
         .padding(16)
         .financeCard()
+        .sheet(item: $growthDetail) { split in
+            GrowthMonthSheet(split: split)
+                .presentationDetents([.medium, .large])
+        }
     }
 
     private func growthToggle(
@@ -941,6 +960,116 @@ struct CashPickerSheet: View {
                 .foregroundStyle(.secondary)
             Image(systemName: on ? "checkmark.circle.fill" : "circle")
                 .foregroundStyle(on ? Ledger.income : Color.secondary)
+        }
+    }
+}
+
+
+/// The month behind a growth bar, entry by entry: every income row (the
+/// "new money"), spending grouped by category, and the market remainder —
+/// the three lines that sum to the bar.
+struct GrowthMonthSheet: View {
+    @Environment(DataStore.self) private var store
+    let split: DashboardView.GrowthSplit
+
+    private var incomeRows: [(id: String, label: String, sub: String, value: Double)] {
+        store.allIncome
+            .filter { SydneyTime.monthKey($0.date) == split.key }
+            .map { entry in
+                let label = entry.description.isEmpty
+                    ? (entry.source.isEmpty ? store.incomeLabel(entry.type) : entry.source)
+                    : entry.description
+                return (entry.id, label, SydneyTime.shortLabel(entry.date),
+                        store.convert(entry.amount, from: entry.currency))
+            }
+            .sorted { $0.value > $1.value }
+    }
+
+    private var expenseGroups: [(label: String, value: Double)] {
+        var byType: [String: Double] = [:]
+        for entry in store.expenses where SydneyTime.monthKey(entry.date) == split.key {
+            byType[store.expenseLabel(entry.type), default: 0]
+                += store.convert(entry.amount, from: entry.currency)
+        }
+        return byType.map { ($0.key, $0.value) }.sorted { $0.value > $1.value }
+    }
+
+    var body: some View {
+        let earned = incomeRows.reduce(0) { $0 + $1.value }
+        let spent = expenseGroups.reduce(0) { $0 + $1.value }
+
+        NavigationStack {
+            List {
+                Section {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("\(FlowMath.fullMonthName(Int(split.key.suffix(2)) ?? 1)) \(split.key.prefix(4))\(split.partial ? " · so far" : "")")
+                            .labelMono()
+                        HStack(spacing: 8) {
+                            StatChip(label: "In", value: "+" + store.format(earned, compact: true), tint: Ledger.income)
+                            StatChip(label: "Spent", value: "−" + store.format(spent, compact: true), tint: Ledger.expense)
+                            if let market = split.market {
+                                StatChip(
+                                    label: "Market",
+                                    value: "\(market >= 0 ? "+" : "")\(store.format(market, compact: true))",
+                                    tint: market >= 0 ? Ledger.income : Ledger.expense
+                                )
+                            }
+                            StatChip(label: "Δ NW", value: "\(split.delta >= 0 ? "+" : "")\(store.format(split.delta, compact: true))")
+                        }
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 4, leading: 4, bottom: 4, trailing: 4))
+                    .listRowSeparator(.hidden)
+                }
+
+                Section("New money · \(incomeRows.count) payments") {
+                    ForEach(incomeRows, id: \.id) { row in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(row.label).font(.subheadline).lineLimit(1)
+                                Text(row.sub).font(.caption2).foregroundStyle(.tertiary)
+                            }
+                            Spacer()
+                            Text("+" + store.format(row.value, compact: true))
+                                .font(.system(.footnote, design: .monospaced, weight: .medium))
+                                .foregroundStyle(Ledger.income)
+                        }
+                    }
+                    if incomeRows.isEmpty {
+                        Text("No income recorded this month.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("Spending · by category") {
+                    ForEach(expenseGroups, id: \.label) { group in
+                        HStack {
+                            Text(group.label).font(.subheadline)
+                            Spacer()
+                            Text("−" + store.format(group.value, compact: true))
+                                .font(.system(.footnote, design: .monospaced, weight: .medium))
+                                .foregroundStyle(Ledger.expense)
+                        }
+                    }
+                    if expenseGroups.isEmpty {
+                        Text("No expenses recorded this month\(split.deposits == nil ? " — that's why this bar has no split" : "").")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+
+                if split.market != nil {
+                    Section {
+                        Text("Market = the month's net-worth change minus the money you added — what the assets themselves did.")
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                            .listRowBackground(Color.clear)
+                    }
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(Ledger.background)
+            .navigationTitle("Growth detail")
+            .navigationBarTitleDisplayMode(.inline)
         }
     }
 }
