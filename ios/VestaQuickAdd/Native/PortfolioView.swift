@@ -55,12 +55,22 @@ struct InvestView: View {
                     }
                     .tag(0)
 
+                    ScrollViewReader { cryptoProxy in
                     ScrollView {
                         CryptoSection()
                             .padding(.horizontal, 16)
                             .padding(.bottom, 110)
                     }
                     .refreshable { await store.refresh() }
+                    // Screenshot hook: jump to a crypto card id (VESTA_SCROLL_TO).
+                    .task {
+                        guard pot == 1,
+                              let target = ProcessInfo.processInfo.environment["VESTA_SCROLL_TO"]
+                        else { return }
+                        try? await Task.sleep(for: .seconds(8))
+                        withAnimation { cryptoProxy.scrollTo(target, anchor: .top) }
+                    }
+                    }
                     .tag(1)
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
