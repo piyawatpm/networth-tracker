@@ -6,7 +6,7 @@ import { useCurrency } from "@/components/providers/currency-provider";
 import type { CryptoHolding } from "@/lib/utils/types";
 import { ECHARTS_COLORS } from "@/lib/utils/echarts";
 import { BlurFade } from "@/components/ui/blur-fade";
-import { Bitcoin, ArrowUpDown, X, Tags, Shield, Wallet } from "lucide-react";
+import { ArrowUpDown, X, Tags, Shield, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -365,21 +365,17 @@ export function HoldingsBreakdown({
                                 loading="lazy"
                               />
                             ) : (
+                              // Alpha on the FILL only — node-level opacity
+                              // faded the glyph to near-invisible. The token's
+                              // initial reads better than a generic coin mark.
                               <div
-                                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full"
+                                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-bold"
                                 style={{
-                                  backgroundColor:
-                                    ECHARTS_COLORS[i % ECHARTS_COLORS.length],
-                                  opacity: 0.15,
+                                  backgroundColor: `${ECHARTS_COLORS[i % ECHARTS_COLORS.length]}26`,
+                                  color: ECHARTS_COLORS[i % ECHARTS_COLORS.length],
                                 }}
                               >
-                                <Bitcoin
-                                  className="h-3 w-3"
-                                  style={{
-                                    color:
-                                      ECHARTS_COLORS[i % ECHARTS_COLORS.length],
-                                  }}
-                                />
+                                {h.token.slice(0, 1).toUpperCase()}
                               </div>
                             )}
                             <span className="font-medium">{h.token}</span>
@@ -479,20 +475,13 @@ export function HoldingsBreakdown({
                           />
                         ) : (
                           <div
-                            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full"
+                            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-bold"
                             style={{
-                              backgroundColor:
-                                ECHARTS_COLORS[i % ECHARTS_COLORS.length],
-                              opacity: 0.15,
+                              backgroundColor: `${ECHARTS_COLORS[i % ECHARTS_COLORS.length]}26`,
+                              color: ECHARTS_COLORS[i % ECHARTS_COLORS.length],
                             }}
                           >
-                            <Bitcoin
-                              className="h-3.5 w-3.5"
-                              style={{
-                                color:
-                                  ECHARTS_COLORS[i % ECHARTS_COLORS.length],
-                              }}
-                            />
+                            {h.token.slice(0, 1).toUpperCase()}
                           </div>
                         )}
                         <div className="min-w-0 flex-1">
