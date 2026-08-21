@@ -136,6 +136,35 @@ enum CryptoMath {
         return byToken.values.sorted { $0.valueUsd > $1.valueUsd }
     }
 
+    /// Does this CSV look like the CoinStats Portfolio Overview export (as
+    /// opposed to a transaction history)? Mirrors the web's detectFormat.
+    static func isOverviewCsv(_ csvText: String) -> Bool {
+        let head = csvText.prefix(200).lowercased()
+        if head.contains("last updated") && head.contains("total value") { return true }
+        return csvText.contains("\nAssets\n") || csvText.contains("\nAssets\r\n")
+    }
+
+    /// The portfolio slot accepts EITHER export: the overview (an "Assets"
+    /// section) or a plain transaction history, which the web replays into
+    /// holdings via computeHoldings — so the phone must too. (2026-08-21: a
+    /// tx-format upload landed in crypto_csv_text and iOS showed zero crypto.)
+    /// Tx-derived rows carry cost as their stored value — stables at the $1
+    /// peg, coins at avg buy — and the live feeds reprice from there, exactly
+    /// like the web.
+    static func holdingsFromCsv(_ csvText: String) -> [CryptoCsvHolding] {
+        if isOverviewCsv(csvText) { return parsePortfolioOverview(csvText) }
+        let txs = parseTransactions(csvText)
+        guard !txs.isEmpty else { return parsePortfolioOverview(csvText) }
+        return computeHoldings(txs)
+            .map {
+                CryptoCsvHolding(
+                    token: $0.token, amount: $0.amount,
+                    valueUsd: $0.totalCostUsd, costUsd: $0.totalCostUsd
+                )
+            }
+            .sorted { $0.valueUsd > $1.valueUsd }
+    }
+
     // MARK: Stablecoin / cash classification (constants.ts + crypto-performance.ts)
 
     private static let stablecoins: Set<String> = [

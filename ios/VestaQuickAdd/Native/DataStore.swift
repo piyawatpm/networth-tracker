@@ -23,8 +23,11 @@ struct DiskCache: Codable {
     /// truncated history in place forever (first point stuck at Aug 3).
     /// v3: adds the portfolio + crypto series. v4: portfolio rows carry
     /// value_with_super. v5: networth rows carry value_no_super +
-    /// portfolio/crypto components for the overlay lines.
-    static let currentVersion = 5
+    /// portfolio/crypto components for the overlay lines. v6: cache purge —
+    /// history merges are append-only, so rows deleted server-side (the
+    /// 2026-08-21 mid-swap dip) linger in cached history until a version
+    /// bump forces a clean refetch.
+    static let currentVersion = 6
 
     var version: Int // decoding a versionless v1 cache fails → treated as empty
     var blobs: [String: String]
@@ -610,7 +613,16 @@ final class DataStore {
             cryptoTxs = []
         }
         if let csv = blob("crypto_csv_text", String.self), !csv.isEmpty {
-            cryptoCsvHoldings = CryptoMath.parsePortfolioOverview(csv)
+            cryptoCsvHoldings = CryptoMath.holdingsFromCsv(csv)
+            // The two slots carry the same ledger uploaded at different
+            // times. When the portfolio slot holds the FRESHER transaction
+            // file (more rows), realized/earn/splits replay that one instead
+            // of yesterday's — otherwise a sale shows in holdings but not in
+            // realized P&L.
+            if !CryptoMath.isOverviewCsv(csv) {
+                let alt = CryptoMath.parseTransactions(csv)
+                if alt.count > cryptoTxs.count { cryptoTxs = alt }
+            }
         } else {
             cryptoCsvHoldings = []
         }
@@ -1282,7 +1294,7 @@ enum BackgroundRefresher {
             .flatMap { $0.data(using: .utf8) }
             .flatMap { try? JSONDecoder().decode([String: String].self, from: $0) } ?? [:]
         let tokens = blobString("crypto_csv_text")
-            .map(CryptoMath.parsePortfolioOverview)?
+            .map(CryptoMath.holdingsFromCsv)?
             .filter { !CryptoMath.isCashLike($0.token, tags: tags) }
             .map(\.token) ?? []
         let live = await api.fetchBinancePrices(tokens: tokens, mappings: mappings)

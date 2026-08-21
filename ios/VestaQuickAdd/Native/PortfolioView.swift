@@ -5,7 +5,8 @@ import SwiftUI
 /// five items.
 struct InvestView: View {
     @Environment(DataStore.self) private var store
-    @State private var pot = 0
+    // Screenshot hook: VESTA_POT=1 starts on the Crypto page.
+    @State private var pot = Int(ProcessInfo.processInfo.environment["VESTA_POT"] ?? "") ?? 0
     @Namespace private var zoom
 
     private var hasHostplus: Bool {
