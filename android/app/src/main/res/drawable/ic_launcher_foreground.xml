@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Vesta monogram: gold flame-diamond over obsidian -->
+    <path
+        android:fillColor="#D4AF6A"
+        android:pathData="M54,26 L74,46 L54,82 L34,46 Z" />
+    <path
+        android:fillColor="#0A0A0C"
+        android:pathData="M54,38 L64,47 L54,66 L44,47 Z" />
+    <path
+        android:fillColor="#3FB68B"
+        android:pathData="M54,44 L59,48.5 L54,58 L49,48.5 Z" />
+</vector>
