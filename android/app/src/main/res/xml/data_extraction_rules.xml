@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The session token and quick-add token are write credentials for the
+     ledger — keep them out of cloud backups and device transfers, the same
+     reasoning that put them in the iOS Keychain. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="vesta-session.json" />
+        <exclude domain="sharedpref" path="vesta-settings.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="vesta-session.json" />
+        <exclude domain="sharedpref" path="vesta-settings.xml" />
+    </device-transfer>
+</data-extraction-rules>
