@@ -439,28 +439,32 @@ class VestaStore(private val context: Context) {
             }
         }
         if (prepared != null) {
-            val p = prepared
-            rawBlobs = HashMap(p.cache.blobs)
-            blobsSyncedAt = p.cache.blobsSyncedAt
-            if (p.cache.fxRates.isNotEmpty()) {
-                Money.rates = p.cache.fxRates
-                fxLoaded = true
-                fxEpoch += 1
+            // Blob decode + overlays + derived sums stay off the main thread
+            // too — snapshot state writes are thread-safe.
+            withContext(Dispatchers.Default) {
+                val p = prepared
+                rawBlobs = HashMap(p.cache.blobs)
+                blobsSyncedAt = p.cache.blobsSyncedAt
+                if (p.cache.fxRates.isNotEmpty()) {
+                    Money.rates = p.cache.fxRates
+                    fxLoaded = true
+                    fxEpoch += 1
+                }
+                livePrices = p.cache.livePrices
+                lastRefreshed = p.cache.savedAt
+                // decode FIRST: rebuildOverlays needs `debts`/`debtTxs`.
+                decode(p.cache.blobs)
+                networthHistory = p.cache.networthHistory
+                networthParsed = p.networthParsed
+                networthParsedNoSuper = p.networthParsedNoSuper
+                portfolioHistory = p.cache.portfolioHistory
+                portfolioParsed = p.portfolioParsed
+                portfolioParsedWithSuper = p.portfolioParsedWithSuper
+                cryptoHistory = p.cache.cryptoHistory
+                cryptoParsed = p.cryptoParsed
+                rebuildOverlays()
+                recomputeDerived()
             }
-            livePrices = p.cache.livePrices
-            lastRefreshed = p.cache.savedAt
-            // decode FIRST: rebuildOverlays needs `debts`/`debtTxs`.
-            decode(p.cache.blobs)
-            networthHistory = p.cache.networthHistory
-            networthParsed = p.networthParsed
-            networthParsedNoSuper = p.networthParsedNoSuper
-            portfolioHistory = p.cache.portfolioHistory
-            portfolioParsed = p.portfolioParsed
-            portfolioParsedWithSuper = p.portfolioParsedWithSuper
-            cryptoHistory = p.cache.cryptoHistory
-            cryptoParsed = p.cryptoParsed
-            rebuildOverlays()
-            recomputeDerived()
         }
 
         // 2. Session: disk restore, else silent owner sign-in. The login
@@ -518,6 +522,10 @@ class VestaStore(private val context: Context) {
         try {
             isLoading = rawBlobs.isEmpty() // skeletons only when there's no cache
             loadError = null
+            // The whole fetch+decode pass runs off the main thread — Compose
+            // snapshot state is safe to write from any thread, and the 6MB
+            // blob decode on main was the exact jank the iOS boot fixed.
+            withContext(Dispatchers.Default) {
             try {
                 // Delta fetch: only blobs whose updated_at moved since last sync.
                 val (changed, stamp) = api.fetchAppData(since = blobsSyncedAt)
@@ -570,6 +578,7 @@ class VestaStore(private val context: Context) {
                 scope.launch(Dispatchers.IO) { cacheSnapshot.save(context) }
             } catch (e: Exception) {
                 loadError = e.message
+            }
             }
             isLoading = false
         } finally {
