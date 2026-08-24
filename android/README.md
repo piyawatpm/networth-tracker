@@ -5,6 +5,13 @@ Compose twin of the iOS app (`ios/VestaQuickAdd`), talking to the same
 Supabase `app_data` blobs, the same snapshot table, and the same live price
 feeds, so all three clients stay in lockstep.
 
+```
+Compose screens ──REST──▶ Supabase  (app_data blobs · snapshots · GoTrue auth)
+Live prices     ──WS────▶ Binance · Gate.io · Alpaca (iex)
+Benchmarks      ──GET───▶ {web deployment}/api/benchmark   (SPY/BTC closes)
+More → web      ──loads─▶ the deployed web app (pages not yet native)
+```
+
 ## What's inside
 
 | Tab | Parity |
@@ -26,37 +33,144 @@ The iOS FoundationModels features (blurbs, tap categorisation, Ask) run on
 deterministic on-device rules here — same contract: the narrator only ever
 repeats precomputed numbers.
 
-## Build
+---
 
-Requires JDK 17 and the Android SDK (platform 36, build-tools 36).
+## 1 · Install the toolchain
+
+You need **JDK 17** and the **Android SDK** (platform 36, build-tools 36).
+Android Studio gives you both; the command-line-only route on macOS is:
+
+```sh
+brew install openjdk@17
+brew install --cask android-commandlinetools
+
+export JAVA_HOME=/opt/homebrew/opt/openjdk@17
+export ANDROID_HOME="$HOME/Library/Android/sdk"
+
+yes | sdkmanager --sdk_root="$ANDROID_HOME" --licenses
+sdkmanager --sdk_root="$ANDROID_HOME" \
+  "platform-tools" "platforms;android-36" "build-tools;36.0.0" \
+  "cmdline-tools;latest"
+```
+
+Then tell Gradle where the SDK is (skip if `ANDROID_HOME` is exported):
 
 ```sh
 cd android
-./gradlew :app:assembleDebug     # → app/build/outputs/apk/debug/app-debug.apk
-./gradlew :app:assembleRelease   # minified, debug-signed for sideloading
+echo "sdk.dir=$HOME/Library/Android/sdk" > local.properties
 ```
 
-Point `local.properties` at your SDK (`sdk.dir=…`) if Gradle doesn't find it.
+> **Why compileSdk is pinned to 36:** Compose 1.12+, lifecycle 2.11+ and
+> OkHttp 5.5's Android artifact all demand compileSdk 37, which has no
+> released platform yet. The version catalog pins Compose BOM 2026.06.01 /
+> lifecycle 2.10 / OkHttp 4.12 accordingly — bump them together with
+> compileSdk when 37 ships.
 
-## Install
+## 2 · Build
 
 ```sh
+cd android
+JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew :app:assembleDebug
+#  → app/build/outputs/apk/debug/app-debug.apk
+
+./gradlew :app:testDebugUnitTest    # math-parity suite (ports of the web's vitest tests)
+./gradlew :app:assembleRelease      # minified, debug-signed — fine for sideloading
+```
+
+## 3 · Install on a phone
+
+1. On the phone: **Settings → About → tap "Build number" 7×** to unlock
+   Developer options, then enable **USB debugging**.
+2. Plug in over USB (accept the RSA prompt) and:
+
+```sh
+adb devices                       # phone should be listed as "device"
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-## Automation quick-add
+No cable? `adb pair <ip:port>` / `adb connect <ip:port>` (Wireless
+debugging on the phone) works the same, or just AirDrop-equivalent the APK
+over and open it (allow "install unknown apps").
 
-Any automation app can log an expense with a deep link:
+First launch: the app signs in silently as the owner account, paints from
+cache, then syncs. If credentials don't match your Supabase project you'll
+see the sign-in screen instead — see the next section.
+
+### Emulator (optional)
+
+```sh
+sdkmanager --sdk_root="$ANDROID_HOME" "emulator" "system-images;android-36;google_apis;arm64-v8a"
+"$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd -n vesta \
+  -k "system-images;android-36;google_apis;arm64-v8a" -d "pixel_7"
+"$ANDROID_HOME/emulator/emulator" -avd vesta &
+adb wait-for-device
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+## 4 · Connect to Supabase
+
+All backend config lives in **one place**:
 
 ```
-vesta://add?amount=14.50&merchant=7-Eleven
-vesta://tap?amount=…&merchant=…   # inspect-only, shows what arrived
+app/src/main/java/com/piyawatpm/vesta/data/SupabaseApi.kt   →  object SupabaseConfig
 ```
 
-Amount parsing is forgiving (currency symbols, comma decimals); the currency
-is read from the text (`฿`, `A$`, 3-letter codes) or falls back to the
-default; the merchant is categorised on-device against the real category
-list.
+| Constant | What it is |
+|---|---|
+| `URL` | your Supabase project URL (`https://xxxx.supabase.co`) |
+| `PUBLISHABLE_KEY` | the anon/publishable key (`sb_publishable_…`). Public by design — it already ships in the web bundle; once RLS is applied it can do nothing without a signed-in session |
+| `OWNER_EMAIL` / `OWNER_PASSWORD` | the single auth account the app signs in as, silently, on every launch. Single-user app on the owner's own device — the phone's lock screen is the real gate. If the password ever changes, the app falls back to the sign-in screen instead of bricking |
+
+**Point the app at your own Supabase project:**
+
+1. Do the backend setup in the root `README.md` §1 (create the `app_data`
+   table, run `lib/supabase/migration.sql`, create the auth user with
+   `node scripts/create-auth-user.mjs you@example.com`).
+2. Edit `SupabaseConfig` with your URL, publishable key and account —
+   or leave the credentials blank-ish and just sign in manually on the
+   fallback screen; the session persists either way.
+3. Rebuild and install.
+
+**What the app does with the connection** (mirrors the iOS client exactly):
+
+- **Auth**: GoTrue password grant → access/refresh tokens stored in
+  app-private `files/vesta-session.json` (excluded from OS backups via
+  `res/xml/data_extraction_rules.xml` — the Android stand-in for the iOS
+  Keychain). Tokens auto-refresh 60 s before expiry.
+- **Reads**: all `app_data` rows via REST, then *delta* fetches using an
+  `updated_at` watermark — a quiet app-open costs a few KB, not the
+  multi-hundred-KB CSV blobs. `snapshots` is paged newest-first (1000/page)
+  and merged append-only into the on-device cache
+  (`files/vesta-cache.json`, versioned — bump `DiskCache.CURRENT_VERSION`
+  together with iOS when cached semantics change).
+- **Writes**: whole-blob read-modify-write of the same JSON arrays the web
+  app writes (`income_entries`, `expense_entries`, `portfolio_holdings`,
+  `portfolio_transactions`, `debt_records`, `debt_transactions`,
+  `crypto_cash_tags`, `earn_exclusions`, `networth_goals`,
+  `portfolio_groups`, `forecast_assumptions`, `preferred_currency`).
+  Currency choice on the phone follows to the web and vice-versa.
+- **Quick-add** (`vesta://add` deep link and the offline queue) appends to
+  the `expense_entries` blob directly with clientId idempotency — a replay
+  can never double-log.
+
+**Things that use the deployed web app, not Supabase:** the Performance
+page's SPY/BTC closes come from `{base}/api/benchmark`, and the "On the
+web" pages load `{base}` in-place. `{base}` defaults to the production URL
+in `data/Settings.kt` (`PRODUCTION_URL`) and can be changed at runtime in
+**More → Quick add & server** (that screen's `QUICK_ADD_TOKEN` field only
+matters for the legacy `/api/quick-expense` connection test — live writes
+go straight to Supabase).
+
+## 5 · Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `SDK location not found` | write `android/local.properties` with `sdk.dir=…` or export `ANDROID_HOME` |
+| `Unable to locate a Java Runtime` / AGP version errors | run Gradle with `JAVA_HOME=/opt/homebrew/opt/openjdk@17` (JDK 17+) |
+| AAR metadata errors demanding compileSdk 37 | you bumped a library past the pin — see the note in §1 |
+| App opens on the sign-in screen | `SupabaseConfig` credentials don't match an auth user in your project — create one (root README §1.4) or sign in manually |
+| Screens empty after sign-in | RLS is on but the session isn't accepted (wrong project keys), or the `app_data` table is empty — seed data via the web app |
+| Benchmark card says it can't load prices | the web deployment URL in More → Quick add & server isn't reachable |
 
 ## Layout
 
@@ -71,6 +185,7 @@ app/src/main/java/com/piyawatpm/vesta/
   ui/screens Dashboard, Income/Expenses, Invest, More stack, Forecast,
              SignIn, EntryForm, PerfCompare
   work/      BackgroundRefresh (WorkManager)
+app/src/test/  CoreMathTest — parity ports of lib/utils/__tests__
 ```
 
 Kotlin files mirror their Swift counterparts by name where one exists, so
