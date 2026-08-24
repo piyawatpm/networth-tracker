@@ -52,9 +52,11 @@ Free Apple ID = reinstall from Xcode every 7 days; $99/yr = yearly.
 
 ## Prerequisites
 
-- **Auth user** exists already (redacted@example.com — password in your
-  password manager). The native app signs in through Supabase Auth directly,
-  so it works before AND after the RLS lockdown is applied.
+- **Auth user** must exist in the Supabase project (see the root README —
+  `scripts/create-auth-user.mjs`, or Dashboard → Authentication → Add user).
+  Sign in once on the app's sign-in screen; the session persists in the
+  Keychain. The app works before AND after the RLS lockdown is applied. No
+  credentials live in this repo.
 - **Action Button** needs the deployed `/api/quick-expense` + `QUICK_ADD_TOKEN`
   in Vercel env (branch currently undeployed). Everything else works today.
 - FX rates come from open.er-api.com (same source as the web).

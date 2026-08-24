@@ -467,18 +467,23 @@ class VestaStore(private val context: Context) {
             }
         }
 
-        // 2. Session: disk restore, else silent owner sign-in. The login
-        //    screen only exists as a fallback for a changed password.
+        // 2. Session: disk restore, else the OPTIONAL silent owner sign-in
+        //    (personal builds bake credentials via local.properties; shared
+        //    builds have none). Anything else lands on the sign-in screen,
+        //    which can also point the app at a different Supabase project.
         if (api.restoreSession()) {
             isSignedIn = true
-        } else {
+        } else if (SupabaseConfig.isConfigured && SupabaseConfig.hasOwnerCredentials) {
             try {
-                api.signIn(SupabaseConfig.OWNER_EMAIL, SupabaseConfig.OWNER_PASSWORD)
+                api.signIn(SupabaseConfig.ownerEmail, SupabaseConfig.ownerPassword)
                 isSignedIn = true
             } catch (_: Exception) {
                 needsManualSignIn = true
                 return
             }
+        } else {
+            needsManualSignIn = true
+            return
         }
 
         // 3. Fresh data behind the cached paint.

@@ -43,3 +43,7 @@ ios/build/
 *.xcuserdatad/
 ios/**/xcuserdata/
 .playwright-mcp/
+
+# Xcode build output
+ios/build/
+ios/build-sim/

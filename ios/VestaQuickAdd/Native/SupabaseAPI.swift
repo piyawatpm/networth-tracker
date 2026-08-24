@@ -15,12 +15,18 @@ enum SupabaseConfig {
     static let url = URL(string: "https://aqxxshuiyyqbnpscoqxz.supabase.co")!
     static let publishableKey = "sb_publishable_HlxRYJjza0p7nSoS2F7DKg_m7p76xdO"
 
-    // Baked-in owner credentials so the app never shows a login screen.
-    // Single-user app on the owner's own device: the phone's passcode/Face ID
-    // is the real gate. If the password ever changes, the sign-in form
-    // reappears as a fallback rather than bricking the app.
-    static let ownerEmail = "redacted@example.com"
-    static let ownerPassword = "ROTATED-AND-REDACTED"
+    // NO ACCOUNT CREDENTIALS IN SOURCE — this repo is public. Sign in once
+    // on the app's sign-in screen; the session persists in the Keychain and
+    // silently refreshes from then on. For a personal build you may fill
+    // these two locally to restore the silent first sign-in, but NEVER
+    // commit real values (the last committed password had to be rotated).
+    static let ownerEmail = ""
+    static let ownerPassword = ""
+
+    /// True only for a personal build that filled the credentials above.
+    static var hasOwnerCredentials: Bool {
+        !ownerEmail.isEmpty && !ownerPassword.isEmpty
+    }
 }
 
 struct AuthSession: Codable {
@@ -202,10 +208,14 @@ actor SupabaseAPI {
         return try JSONDecoder().decode([Row].self, from: data).first?.value ?? nil
     }
 
-    /// Ensure a usable session: restored from Keychain, else the baked owner
-    /// sign-in. The Action Button path calls this without the UI running.
+    /// Ensure a usable session: restored from Keychain, else the OPTIONAL
+    /// baked owner sign-in (personal builds only — see SupabaseConfig). The
+    /// Action Button path calls this without the UI running.
     func ensureSession() async throws {
         if restoreSession() { return }
+        guard SupabaseConfig.hasOwnerCredentials else {
+            throw SupabaseError.notSignedIn
+        }
         try await signIn(
             email: SupabaseConfig.ownerEmail,
             password: SupabaseConfig.ownerPassword

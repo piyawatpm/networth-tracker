@@ -413,11 +413,13 @@ final class DataStore {
             }
         }
 
-        // 2. Session: keychain restore, else silent owner sign-in. The login
-        //    screen only exists as a fallback for a changed password.
+        // 2. Session: keychain restore, else the OPTIONAL silent owner
+        //    sign-in (personal builds only — credentials never live in the
+        //    public repo). Everyone else signs in once on the sign-in
+        //    screen and the Keychain session persists from there.
         if await api.restoreSession() {
             isSignedIn = true
-        } else {
+        } else if SupabaseConfig.hasOwnerCredentials {
             do {
                 try await api.signIn(
                     email: SupabaseConfig.ownerEmail,
@@ -428,6 +430,9 @@ final class DataStore {
                 needsManualSignIn = true
                 return
             }
+        } else {
+            needsManualSignIn = true
+            return
         }
 
         // Quick-adds (Action Button / Apple Pay automation) write to Supabase
@@ -1258,10 +1263,11 @@ enum BackgroundRefresher {
     static func run() async {
         let api = SupabaseAPI.shared
         if await !api.restoreSession() {
-            guard (try? await api.signIn(
-                email: SupabaseConfig.ownerEmail,
-                password: SupabaseConfig.ownerPassword
-            )) != nil else { return }
+            guard SupabaseConfig.hasOwnerCredentials,
+                  (try? await api.signIn(
+                      email: SupabaseConfig.ownerEmail,
+                      password: SupabaseConfig.ownerPassword
+                  )) != nil else { return }
         }
         let cached = DiskCache.load()
         guard let (changed, stamp) = try? await api.fetchAppData(

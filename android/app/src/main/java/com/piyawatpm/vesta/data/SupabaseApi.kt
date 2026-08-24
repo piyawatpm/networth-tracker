@@ -28,22 +28,31 @@ import java.util.concurrent.TimeUnit
 // needs (password grant, token refresh, app_data reads/writes) don't justify
 // an SDK.
 //
-// The publishable key is public by design — it ships in the web bundle today.
-// Access control comes from the user JWT once RLS is applied; this client
-// already authenticates every data request, so the native app keeps working
-// the day the anon door closes.
+// NO CREDENTIALS LIVE IN THIS FILE. The project URL/key and the optional
+// silent-sign-in account come from the git-ignored local.properties (baked
+// into BuildConfig at compile time) or are entered at runtime on the
+// sign-in screen and stored app-private. The publishable key is safe to
+// bake into a personal build — access control comes from the signed-in
+// user's JWT once RLS is applied — but nothing here ever reaches git.
 
 object SupabaseConfig {
-    const val URL = "https://aqxxshuiyyqbnpscoqxz.supabase.co"
-    const val PUBLISHABLE_KEY = "sb_publishable_HlxRYJjza0p7nSoS2F7DKg_m7p76xdO"
+    /** Project URL: runtime override (sign-in screen) → local.properties → "". */
+    val url: String
+        get() = Settings.supabaseUrl ?: com.piyawatpm.vesta.BuildConfig.VESTA_SUPABASE_URL
 
-    // Baked-in owner credentials so the app never shows a login screen.
-    // Single-user app on the owner's own device: the phone's lock screen is
-    // the real gate. If the password ever changes, the sign-in form
-    // reappears as a fallback rather than bricking the app. (Same convention
-    // as the iOS app — see ios SupabaseAPI.swift.)
-    const val OWNER_EMAIL = "redacted@example.com"
-    const val OWNER_PASSWORD = "ROTATED-AND-REDACTED"
+    /** Publishable (anon) key, same precedence as [url]. */
+    val publishableKey: String
+        get() = Settings.supabaseKey ?: com.piyawatpm.vesta.BuildConfig.VESTA_SUPABASE_KEY
+
+    /** Optional silent-sign-in account for a PERSONAL build (never shared,
+     *  never committed). Blank = the app opens on the sign-in screen and the
+     *  session persists from there. */
+    val ownerEmail: String get() = com.piyawatpm.vesta.BuildConfig.VESTA_OWNER_EMAIL
+    val ownerPassword: String get() = com.piyawatpm.vesta.BuildConfig.VESTA_OWNER_PASSWORD
+
+    val isConfigured: Boolean get() = url.isNotBlank() && publishableKey.isNotBlank()
+    val hasOwnerCredentials: Boolean
+        get() = ownerEmail.isNotBlank() && ownerPassword.isNotBlank()
 }
 
 @Serializable
@@ -123,8 +132,17 @@ class SupabaseApi(private val context: Context) {
 
     // MARK: - Auth
 
+    private fun requireConfigured() {
+        if (!SupabaseConfig.isConfigured) {
+            throw IOException(
+                "Supabase not configured — enter the project URL and publishable key on the sign-in screen."
+            )
+        }
+    }
+
     suspend fun signIn(email: String, password: String) = withContext(Dispatchers.IO) {
-        val url = "${SupabaseConfig.URL}/auth/v1/token".toHttpUrl().newBuilder()
+        requireConfigured()
+        val url = "${SupabaseConfig.url}/auth/v1/token".toHttpUrl().newBuilder()
             .addQueryParameter("grant_type", "password")
             .build()
         val body = buildJsonObject {
@@ -134,7 +152,7 @@ class SupabaseApi(private val context: Context) {
         val request = Request.Builder()
             .url(url)
             .post(body)
-            .header("apikey", SupabaseConfig.PUBLISHABLE_KEY)
+            .header("apikey", SupabaseConfig.publishableKey)
             .header("Content-Type", "application/json")
             .build()
 
@@ -168,7 +186,7 @@ class SupabaseApi(private val context: Context) {
             if (locked.expiresAt - System.currentTimeMillis() / 1000.0 >= 60) return
 
             withContext(Dispatchers.IO) {
-                val url = "${SupabaseConfig.URL}/auth/v1/token".toHttpUrl().newBuilder()
+                val url = "${SupabaseConfig.url}/auth/v1/token".toHttpUrl().newBuilder()
                     .addQueryParameter("grant_type", "refresh_token")
                     .build()
                 val body = buildJsonObject {
@@ -177,7 +195,7 @@ class SupabaseApi(private val context: Context) {
                 val request = Request.Builder()
                     .url(url)
                     .post(body)
-                    .header("apikey", SupabaseConfig.PUBLISHABLE_KEY)
+                    .header("apikey", SupabaseConfig.publishableKey)
                     .header("Content-Type", "application/json")
                     .build()
                 client.newCall(request).execute().use { response ->
@@ -203,16 +221,17 @@ class SupabaseApi(private val context: Context) {
         query: List<Pair<String, String>>,
         body: String? = null,
     ): String {
+        requireConfigured()
         refreshIfNeeded()
         val current = session ?: throw NotSignedInException()
 
         val urlBuilder: HttpUrl.Builder =
-            "${SupabaseConfig.URL}/rest/v1/$path".toHttpUrl().newBuilder()
+            "${SupabaseConfig.url}/rest/v1/$path".toHttpUrl().newBuilder()
         for ((name, value) in query) urlBuilder.addQueryParameter(name, value)
 
         val builder = Request.Builder()
             .url(urlBuilder.build())
-            .header("apikey", SupabaseConfig.PUBLISHABLE_KEY)
+            .header("apikey", SupabaseConfig.publishableKey)
             .header("Authorization", "Bearer ${current.accessToken}")
             .header("Content-Type", "application/json")
             .header("Prefer", "return=representation")
@@ -245,10 +264,12 @@ class SupabaseApi(private val context: Context) {
         return json.decodeFromString<List<Row>>(data).firstOrNull()?.value
     }
 
-    /** Ensure a usable session: restored from disk, else the baked owner sign-in. */
+    /** Ensure a usable session: restored from disk, else the optional baked
+     *  owner sign-in (personal builds only). */
     suspend fun ensureSession() {
         if (session != null || restoreSession()) return
-        signIn(SupabaseConfig.OWNER_EMAIL, SupabaseConfig.OWNER_PASSWORD)
+        if (!SupabaseConfig.hasOwnerCredentials) throw NotSignedInException()
+        signIn(SupabaseConfig.ownerEmail, SupabaseConfig.ownerPassword)
     }
 
     /**

@@ -1,6 +1,7 @@
 package com.piyawatpm.vesta.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,12 +38,26 @@ import com.piyawatpm.vesta.ui.theme.LabelMono
 import com.piyawatpm.vesta.ui.theme.Ledger
 import kotlinx.coroutines.launch
 
-/** Fallback sign-in — only shown when the silent owner sign-in fails.
- *  Port of ios SignInView.swift. */
+/**
+ * Sign-in — shown whenever no session exists and no personal build baked a
+ * silent sign-in. Also the place a fresh install points itself at ANY
+ * Supabase project (URL + publishable key), so setting the app up on a new
+ * backend needs zero code changes. Port of ios SignInView.swift, extended.
+ */
 @Composable
 fun SignInScreen(store: VestaStore) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    var supabaseUrl by remember {
+        mutableStateOf(com.piyawatpm.vesta.data.SupabaseConfig.url)
+    }
+    var supabaseKey by remember {
+        mutableStateOf(com.piyawatpm.vesta.data.SupabaseConfig.publishableKey)
+    }
+    var showProject by remember {
+        // A build with no project baked in NEEDS these fields — open them.
+        mutableStateOf(!com.piyawatpm.vesta.data.SupabaseConfig.isConfigured)
+    }
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -51,6 +66,10 @@ fun SignInScreen(store: VestaStore) {
         if (busy || email.isEmpty() || password.isEmpty()) return
         busy = true
         error = null
+        // Persist any project override BEFORE the attempt, so the sign-in
+        // call targets what's on screen.
+        com.piyawatpm.vesta.data.Settings.supabaseUrl = supabaseUrl
+        com.piyawatpm.vesta.data.Settings.supabaseKey = supabaseKey
         scope.launch {
             try {
                 store.signIn(email.trim(), password)
@@ -133,6 +152,50 @@ fun SignInScreen(store: VestaStore) {
                     text = if (busy) "Signing in…" else "Sign in",
                     enabled = !busy && email.isNotEmpty() && password.isNotEmpty(),
                 ) { submit() }
+
+                // "Supabase project" — collapsed when a project is already
+                // configured, open when the build carries none.
+                Text(
+                    text = if (showProject) "Supabase project ▾" else "Supabase project ▸",
+                    fontSize = 12.sp,
+                    color = Color.White.copy(alpha = 0.55f),
+                    modifier = androidx.compose.ui.Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .clickable { showProject = !showProject }
+                        .padding(top = 6.dp),
+                )
+                if (showProject) {
+                    OutlinedTextField(
+                        value = supabaseUrl,
+                        onValueChange = { supabaseUrl = it },
+                        placeholder = {
+                            Text("https://xxxx.supabase.co", color = Color.White.copy(alpha = 0.4f))
+                        },
+                        label = { Text("Project URL", color = Color.White.copy(alpha = 0.5f)) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                        colors = fieldColors,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = supabaseKey,
+                        onValueChange = { supabaseKey = it },
+                        placeholder = {
+                            Text("sb_publishable_…", color = Color.White.copy(alpha = 0.4f))
+                        },
+                        label = {
+                            Text("Publishable (anon) key", color = Color.White.copy(alpha = 0.5f))
+                        },
+                        singleLine = true,
+                        colors = fieldColors,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        "Point this install at any Supabase project — create one, run the setup SQL from the repo README, add a user under Authentication, then sign in here. Stored on this device only.",
+                        fontSize = 10.sp,
+                        color = Color.White.copy(alpha = 0.4f),
+                    )
+                }
             }
         }
     }

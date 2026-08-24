@@ -43,7 +43,15 @@ async function insertInChunks(
 // Migration handler
 // ---------------------------------------------------------------------------
 
-export async function GET() {
+export async function GET(request: Request) {
+  // This route runs with the service key (bypasses RLS) and reads the whole
+  // ledger — it must NEVER be publicly triggerable. Reuse the quick-add
+  // bearer token as the gate, and fail closed when it isn't configured.
+  const token = process.env.QUICK_ADD_TOKEN;
+  if (!token || request.headers.get("authorization") !== `Bearer ${token}`) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const log: string[] = [];
 
   // 1. Read ALL rows from the legacy KV table

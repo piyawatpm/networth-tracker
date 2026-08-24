@@ -183,9 +183,30 @@ Supabase URL/key live in
   `crypto_tx_csv_text` transaction history) are uploaded on the web app's
   crypto page; both mobile apps parse them with the same quote-aware parser.
 
-## Secrets policy
+## Security & secrets policy
 
-`.env.local` is git-ignored. The publishable key ships in clients by design;
-the **secret key and `QUICK_ADD_TOKEN` must only ever live in `.env.local` /
-Vercel env**. The mobile apps keep their session tokens in app-private
-storage that is excluded from OS backups.
+**No account credentials live anywhere in this repository** (this is a
+public repo). Where things belong:
+
+| Secret | Lives in | Never in |
+|---|---|---|
+| Supabase secret (service-role) key | `.env.local` / Vercel env | git, any client |
+| `QUICK_ADD_TOKEN` | `.env.local` / Vercel env | git, clients (typed into the app at runtime) |
+| Owner account password | your password manager | git — the apps sign in on their sign-in screens and persist the session |
+| Android personal build values | `android/local.properties` (git-ignored) | git |
+| Supabase URL + publishable key | fine in clients **once RLS is applied** — on its own the key then grants nothing | — |
+
+Hard rules:
+
+- **Apply `lib/supabase/rls.sql`** (in the order its header describes).
+  Until it runs, the publishable key alone can read and write every table —
+  RLS is what makes this repo shareable at all.
+- Set **`CRON_SECRET`** in Vercel env so `/api/cron/snapshot` can only be
+  triggered by Vercel's scheduler (the route allows unauthenticated calls
+  when the secret is unset). `/api/migrate` is gated behind
+  `QUICK_ADD_TOKEN` and fails closed.
+- History note (2026-08-24): an owner password that had been committed was
+  rotated (dead) and scrubbed from git history; if you fork an old mirror,
+  the credentials in it do not work.
+- The mobile apps keep their session tokens in app-private storage that is
+  excluded from OS backups.

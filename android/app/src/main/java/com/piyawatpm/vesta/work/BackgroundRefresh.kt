@@ -28,7 +28,13 @@ class BackgroundRefreshWorker(
         val api = SupabaseApi(applicationContext)
         try {
             if (!api.restoreSession()) {
-                api.signIn(SupabaseConfig.OWNER_EMAIL, SupabaseConfig.OWNER_PASSWORD)
+                // No stored session: only a personal build with baked owner
+                // credentials can sign in headlessly. Otherwise wait for the
+                // user to sign in through the UI — nothing to refresh yet.
+                if (!SupabaseConfig.isConfigured || !SupabaseConfig.hasOwnerCredentials) {
+                    return Result.success()
+                }
+                api.signIn(SupabaseConfig.ownerEmail, SupabaseConfig.ownerPassword)
             }
             val cached = DiskCache.load(applicationContext)
             val (changed, stamp) = api.fetchAppData(since = cached?.blobsSyncedAt)

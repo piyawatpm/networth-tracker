@@ -28,10 +28,11 @@ import java.util.concurrent.TimeUnit
  */
 class PriceSocketCenter {
     companion object {
-        // Paper-trading keys — market data only; same convention as the web
-        // bundle and the iOS app (see lib/hooks/use-alpaca-ws.ts).
-        const val ALPACA_KEY = "PK7UABSLFNCFJH2ICVM2YW3A53"
-        const val ALPACA_SECRET = "qSy9wj3hBvbBhMJUR3Kb64n7SRn1KfHAg8ktrEZmVWJ"
+        // Optional Alpaca paper-trading keys for the live US-stock feed, baked
+        // from the git-ignored local.properties (vesta.alpacaKey/-Secret).
+        // Blank simply disables the stock websocket — crypto feeds are keyless.
+        val ALPACA_KEY: String get() = com.piyawatpm.vesta.BuildConfig.VESTA_ALPACA_KEY
+        val ALPACA_SECRET: String get() = com.piyawatpm.vesta.BuildConfig.VESTA_ALPACA_SECRET
     }
 
     private val client = OkHttpClient.Builder()
@@ -215,6 +216,7 @@ class PriceSocketCenter {
     private fun connectAlpaca() {
         val symbols = synchronized(lock) { stockSymbols }
         if (symbols.isEmpty()) return
+        if (ALPACA_KEY.isBlank() || ALPACA_SECRET.isBlank()) return
         open(
             "wss://stream.data.alpaca.markets/v2/iex",
             onOpen = { socket ->

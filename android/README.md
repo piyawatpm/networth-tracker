@@ -109,27 +109,53 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 ## 4 · Connect to Supabase
 
-All backend config lives in **one place**:
+**No credentials live in this repo.** The app resolves its backend in this
+order:
 
+1. **Runtime** — the sign-in screen has a *Supabase project* section (URL +
+   publishable key), stored app-private on the device.
+2. **Build time** — values from the git-ignored `android/local.properties`,
+   baked into `BuildConfig`.
+3. Nothing configured → the app opens on the sign-in screen with the
+   project fields ready to fill.
+
+### Set it up with a fresh Supabase (no code changes — e.g. for a friend)
+
+1. Create a free project at supabase.com.
+2. **SQL Editor** → run the `app_data` DDL from the root `README.md` §1.1,
+   then paste and run all of `lib/supabase/migration.sql`.
+3. **Authentication → Users → Add user** — email + password (this is the
+   account the app signs in with).
+4. Strongly recommended: run `lib/supabase/rls.sql` in the SQL editor so
+   the publishable key alone can't touch the data.
+5. Install the APK. On the sign-in screen open **Supabase project ▸**,
+   paste the Project URL and publishable key (**Project Settings → API**),
+   then sign in with the account from step 3. Done — everything is stored
+   on that device only.
+
+Notes for a fresh backend: data entry works immediately (ledgers, holdings,
+debts, goals). The history *charts* fill in only if the web app + its
+snapshot cron are also deployed for that project (root README §1.3/§2) —
+the app says "Snapshots build this chart as they accumulate" until then.
+
+### Personal build (silent sign-in, optional)
+
+Put your values in `android/local.properties` — git-ignored, never
+committed:
+
+```ini
+vesta.supabaseUrl=https://xxxx.supabase.co
+vesta.supabaseKey=sb_publishable_…
+# optional: skips the sign-in screen on your own phone
+vesta.ownerEmail=you@example.com
+vesta.ownerPassword=…
+# optional: enables the live US-stock websocket (Alpaca paper keys)
+vesta.alpacaKey=…
+vesta.alpacaSecret=…
 ```
-app/src/main/java/com/piyawatpm/vesta/data/SupabaseApi.kt   →  object SupabaseConfig
-```
 
-| Constant | What it is |
-|---|---|
-| `URL` | your Supabase project URL (`https://xxxx.supabase.co`) |
-| `PUBLISHABLE_KEY` | the anon/publishable key (`sb_publishable_…`). Public by design — it already ships in the web bundle; once RLS is applied it can do nothing without a signed-in session |
-| `OWNER_EMAIL` / `OWNER_PASSWORD` | the single auth account the app signs in as, silently, on every launch. Single-user app on the owner's own device — the phone's lock screen is the real gate. If the password ever changes, the app falls back to the sign-in screen instead of bricking |
-
-**Point the app at your own Supabase project:**
-
-1. Do the backend setup in the root `README.md` §1 (create the `app_data`
-   table, run `lib/supabase/migration.sql`, create the auth user with
-   `node scripts/create-auth-user.mjs you@example.com`).
-2. Edit `SupabaseConfig` with your URL, publishable key and account —
-   or leave the credentials blank-ish and just sign in manually on the
-   fallback screen; the session persists either way.
-3. Rebuild and install.
+Rebuild and the app signs in silently; leave the owner lines out of any
+build you share.
 
 **What the app does with the connection** (mirrors the iOS client exactly):
 
