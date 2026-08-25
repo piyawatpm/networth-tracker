@@ -11,7 +11,9 @@ struct RootView: View {
             // No login screen: the app paints cached data immediately and the
             // owner account signs in silently underneath. The form only exists
             // as a fallback for a changed password.
-            if store.needsManualSignIn {
+            if ProcessInfo.processInfo.environment["VESTA_ROLL_DEMO"] != nil {
+                RollDemoView()
+            } else if store.needsManualSignIn {
                 SignInView()
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             } else {

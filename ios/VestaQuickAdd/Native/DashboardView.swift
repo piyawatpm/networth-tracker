@@ -522,11 +522,10 @@ struct DashboardView: View {
                             .foregroundStyle(.tertiary)
                     }
                 }
-                Text(store.format(portfolioTotal))
-                    .font(.system(.title2, design: .rounded, weight: .bold))
-                    .monospacedDigit()
-                    .contentTransition(.numericText())
-                    .animation(.snappy(duration: 0.4), value: portfolioTotal)
+                RollingText(
+                    text: store.format(portfolioTotal), value: portfolioTotal,
+                    font: .system(.title2, design: .rounded, weight: .bold)
+                )
                 Text("everything you own · debts excluded")
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundStyle(.tertiary)

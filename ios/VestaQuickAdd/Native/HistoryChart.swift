@@ -236,7 +236,8 @@ struct HistoryChartCard: View {
             MoneyText(
                 amount: current,
                 currency: store.displayCurrency,
-                font: .system(size: heroSize, weight: .bold, design: .rounded)
+                font: .system(size: heroSize, weight: .bold, design: .rounded),
+                animated: scrubbedPoint == nil
             )
             subtitle(delta: delta, deltaPct: deltaPct)
 

@@ -111,11 +111,10 @@ struct InvestView: View {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Total Portfolio").labelMono()
-                    Text(store.format(total))
-                        .font(.system(.title2, design: .rounded, weight: .bold))
-                        .monospacedDigit()
-                        .contentTransition(.numericText())
-                        .animation(.snappy(duration: 0.4), value: total)
+                    RollingText(
+                        text: store.format(total), value: total,
+                        font: .system(.title2, design: .rounded, weight: .bold)
+                    )
                 }
                 Spacer()
                 if !store.includeSuperStocks {

@@ -201,20 +201,134 @@ extension View {
     }
 }
 
-/// Big money figure. Deliberately NO contentTransition: numericText's
-/// fallback blur-crossfade (which kicks in whenever the string shape changes,
-/// e.g. an FX switch) reads as smearing. Crisp instant updates, like OKX.
+/// Odometer digits. Every glyph sits in its own clipped column; when a
+/// column's glyph changes, the old one slides out and the new one slides in
+/// — upward when the value rose, downward when it fell — like a mechanical
+/// counter. Unchanged glyphs (currency, separators, digits that didn't move)
+/// stay perfectly still. Columns are keyed from the RIGHT so the cents keep
+/// their column when the integer part gains a digit. Replaces numericText,
+/// whose fallback blur-crossfade smeared the whole figure on a shape change.
+struct RollingText: View {
+    let text: String
+    /// The number behind `text`, for roll direction.
+    let value: Double
+    var font: Font
+    var color: Color
+    /// Off while scrubbing a chart: the figure follows the finger frame by
+    /// frame, and a roll per frame would only lag behind it.
+    var animated: Bool
+
+    @State private var shown: String
+    @State private var lastValue: Double
+    @State private var rising = true
+
+    init(
+        text: String, value: Double,
+        font: Font = .system(size: 34, weight: .semibold, design: .rounded),
+        color: Color = .primary, animated: Bool = true
+    ) {
+        self.text = text
+        self.value = value
+        self.font = font
+        self.color = color
+        self.animated = animated
+        _shown = State(initialValue: text)
+        _lastValue = State(initialValue: value)
+    }
+
+    private struct Column: Identifiable {
+        let id: Int
+        let glyph: String
+    }
+
+    private var columns: [Column] {
+        let glyphs = Array(shown)
+        return glyphs.indices.map {
+            Column(id: glyphs.count - 1 - $0, glyph: String(glyphs[$0]))
+        }
+    }
+
+    /// Everything that isn't a digit or a separator — the currency symbol,
+    /// a sign. Same skeleton = a digit roll; different = a currency switch.
+    private static func skeleton(_ s: String) -> String {
+        s.filter { !$0.isNumber && $0 != "," && $0 != "." }
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(columns) { column in
+                ZStack {
+                    Text(column.glyph)
+                        .font(font)
+                        .monospacedDigit()
+                        .foregroundStyle(color)
+                        .id(column.glyph)
+                        .transition(.asymmetric(
+                            insertion: .move(edge: rising ? .bottom : .top).combined(with: .opacity),
+                            removal: .move(edge: rising ? .top : .bottom).combined(with: .opacity)
+                        ))
+                }
+                .clipped()
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(text)
+        .onChange(of: text) { _, new in
+            rising = value >= lastValue
+            lastValue = value
+            // A currency switch changes every column at once; snapping beats
+            // a full-width cascade.
+            if animated && Self.skeleton(new) == Self.skeleton(shown) {
+                withAnimation(.spring(duration: 0.45, bounce: 0.12)) { shown = new }
+            } else {
+                var snap = Transaction()
+                snap.disablesAnimations = true
+                withTransaction(snap) { shown = new }
+            }
+        }
+    }
+}
+
+/// Screenshot hook (VESTA_ROLL_DEMO=1): the odometer on its own, jittering
+/// every 0.9s, so a capture burst can catch a roll without a live session.
+struct RollDemoView: View {
+    @State private var value: Double = 1_982_038.34
+
+    var body: some View {
+        VStack(spacing: 28) {
+            RollingText(
+                text: Money.format(value, currency: "THB"), value: value,
+                font: .system(size: 40, weight: .bold, design: .rounded)
+            )
+            RollingText(
+                text: Money.format(value / 22.7, currency: "AUD"), value: value,
+                font: .system(.title2, design: .rounded, weight: .bold)
+            )
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Ledger.background)
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(0.9))
+                value += Double.random(in: -1500...1500)
+            }
+        }
+    }
+}
+
+/// Big money figure, rolling per digit (see RollingText).
 struct MoneyText: View {
     let amount: Double
     let currency: String
     var font: Font = .system(size: 34, weight: .semibold, design: .rounded)
     var tint: Color? = nil
+    var animated: Bool = true
 
     var body: some View {
-        Text(Money.format(amount, currency: currency))
-            .font(font)
-            .monospacedDigit()
-            .foregroundStyle(tint ?? .primary)
+        RollingText(
+            text: Money.format(amount, currency: currency), value: amount,
+            font: font, color: tint ?? .primary, animated: animated
+        )
     }
 }
 
