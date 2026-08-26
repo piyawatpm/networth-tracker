@@ -221,6 +221,8 @@ struct RollingText: View {
     @State private var shown: String
     @State private var lastValue: Double
     @State private var rising = true
+    /// Carry ripple: per-column start delay, rightmost changed digit first.
+    @State private var delayStep: [Int: Int] = [:]
 
     init(
         text: String, value: Double,
@@ -254,9 +256,33 @@ struct RollingText: View {
         s.filter { !$0.isNumber && $0 != "," && $0 != "." }
     }
 
+    /// Ranks the changed columns right-to-left (key 0 = rightmost glyph):
+    /// rank 0 flips immediately, each next changed place 50ms later, capped
+    /// so a wide change never drags past ~0.3s of stagger.
+    private static func carryDelays(from old: String, to new: String) -> [Int: Int] {
+        let o = Array(old), n = Array(new)
+        var changed: [Int] = []
+        for key in 0..<max(o.count, n.count) {
+            let oi = o.count - 1 - key, ni = n.count - 1 - key
+            let og: Character? = oi >= 0 ? o[oi] : nil
+            let ng: Character? = ni >= 0 ? n[ni] : nil
+            if og != ng { changed.append(key) }
+        }
+        var steps: [Int: Int] = [:]
+        for (rank, key) in changed.sorted().enumerated() {
+            steps[key] = min(rank, 6)
+        }
+        return steps
+    }
+
     var body: some View {
         HStack(spacing: 0) {
             ForEach(columns) { column in
+                // The ripple: a changed column holds its old glyph for its
+                // delay, then flips — so the change runs from the cents up
+                // into the higher places, the way a mechanical odometer
+                // carries. The delay rides on the transition itself.
+                let delay = Double(delayStep[column.id] ?? 0) * 0.05
                 ZStack {
                     Text(column.glyph)
                         .font(font)
@@ -266,7 +292,7 @@ struct RollingText: View {
                         .transition(.asymmetric(
                             insertion: .move(edge: rising ? .bottom : .top).combined(with: .opacity),
                             removal: .move(edge: rising ? .top : .bottom).combined(with: .opacity)
-                        ))
+                        ).animation(.spring(duration: 0.4, bounce: 0.12).delay(delay)))
                 }
                 .clipped()
             }
@@ -279,8 +305,10 @@ struct RollingText: View {
             // A currency switch changes every column at once; snapping beats
             // a full-width cascade.
             if animated && Self.skeleton(new) == Self.skeleton(shown) {
-                withAnimation(.spring(duration: 0.45, bounce: 0.12)) { shown = new }
+                delayStep = Self.carryDelays(from: shown, to: new)
+                withAnimation(.spring(duration: 0.4, bounce: 0.12)) { shown = new }
             } else {
+                delayStep = [:]
                 var snap = Transaction()
                 snap.disablesAnimations = true
                 withTransaction(snap) { shown = new }
