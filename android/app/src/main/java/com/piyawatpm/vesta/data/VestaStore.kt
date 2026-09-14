@@ -45,7 +45,7 @@ data class DiskCache(
          *  history merges are append-only, so rows deleted server-side
          *  linger until a version bump forces a clean refetch. Matches the
          *  iOS numbering so the two caches share one changelog. */
-        const val CURRENT_VERSION = 6
+        const val CURRENT_VERSION = 7 // v7: purge cached $0 net worth rows (failed-read cron, Sep 2026)
 
         fun fileFor(context: Context): File = File(context.filesDir, "vesta-cache.json")
 

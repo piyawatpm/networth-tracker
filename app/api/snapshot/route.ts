@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
     }).replace(",", "");
     const today = sydneyNow;
 
-    const { data: rows } = await supabase
+    const { data: rows, error: readError } = await supabase
       .from("app_data")
       .select("key, value")
       .in("key", [
@@ -57,8 +57,17 @@ export async function POST(request: NextRequest) {
         "preferred_currency",
       ]);
 
+    // A failed read must never look like an empty account — the writes below
+    // would persist it: holdings → [] (with manual updates) and $0 snapshots.
+    if (readError || !rows?.length) {
+      return NextResponse.json(
+        { error: `app_data read failed: ${readError?.message ?? "no rows returned"}` },
+        { status: 503 },
+      );
+    }
+
     const dataMap: Record<string, string> = {};
-    for (const row of rows ?? []) dataMap[row.key] = row.value;
+    for (const row of rows) dataMap[row.key] = row.value;
 
     const parse = <T>(key: string, fallback: T): T => {
       try { return dataMap[key] ? JSON.parse(dataMap[key]) : fallback; } catch { return fallback; }
@@ -163,19 +172,26 @@ export async function POST(request: NextRequest) {
     const updates: { key: string; value: string; updated_at: string }[] = [];
     const now = new Date().toISOString();
 
+    // Only snapshot what was actually valued (mirrors the cron's guards).
+    const hasValuation = portfolioTotal > 0 || cryptoInUsd > 0;
+
     // Portfolio snapshot
-    updates.push({
-      key: "portfolio_snapshots",
-      value: JSON.stringify([...portfolioSnapshots.slice(-89), { date: today, value: portfolioNoSuper, valueWithSuper: portfolioTotal, currency: SNAPSHOT_CURRENCY }]),
-      updated_at: now,
-    });
+    if (portfolioTotal > 0) {
+      updates.push({
+        key: "portfolio_snapshots",
+        value: JSON.stringify([...portfolioSnapshots.slice(-89), { date: today, value: portfolioNoSuper, valueWithSuper: portfolioTotal, currency: SNAPSHOT_CURRENCY }]),
+        updated_at: now,
+      });
+    }
 
     // Net worth snapshot
-    updates.push({
-      key: "networth_snapshots",
-      value: JSON.stringify([...nwSnapshots.slice(-89), { date: today, value: netWorth, valueNoSuper: netWorthNoSuper, currency: SNAPSHOT_CURRENCY, portfolio: portfolioTotal, crypto: cryptoInUsd }]),
-      updated_at: now,
-    });
+    if (hasValuation) {
+      updates.push({
+        key: "networth_snapshots",
+        value: JSON.stringify([...nwSnapshots.slice(-89), { date: today, value: netWorth, valueNoSuper: netWorthNoSuper, currency: SNAPSHOT_CURRENCY, portfolio: portfolioTotal, crypto: cryptoInUsd }]),
+        updated_at: now,
+      });
+    }
 
     // Crypto snapshot
     if (cryptoInUsd > 0) {
@@ -186,20 +202,28 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const { error } = await supabase.from("app_data").upsert(updates, { onConflict: "key" });
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+    if (updates.length > 0) {
+      const { error } = await supabase.from("app_data").upsert(updates, { onConflict: "key" });
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 });
+      }
     }
 
     // Also mirror to relational tables (graceful — tables may not exist)
     try {
       const snapshotInserts: Record<string, unknown>[] = [];
-      snapshotInserts.push({ type: "portfolio", date: today, value: portfolioNoSuper, value_with_super: portfolioTotal, currency: SNAPSHOT_CURRENCY });
-      snapshotInserts.push({ type: "networth", date: today, value: netWorth, value_no_super: netWorthNoSuper, currency: SNAPSHOT_CURRENCY, portfolio: portfolioTotal, crypto: cryptoInUsd });
+      if (portfolioTotal > 0) {
+        snapshotInserts.push({ type: "portfolio", date: today, value: portfolioNoSuper, value_with_super: portfolioTotal, currency: SNAPSHOT_CURRENCY });
+      }
+      if (hasValuation) {
+        snapshotInserts.push({ type: "networth", date: today, value: netWorth, value_no_super: netWorthNoSuper, currency: SNAPSHOT_CURRENCY, portfolio: portfolioTotal, crypto: cryptoInUsd });
+      }
       if (cryptoInUsd > 0) {
         snapshotInserts.push({ type: "crypto", date: today, value: cryptoInUsd, currency: SNAPSHOT_CURRENCY });
       }
-      await supabase.from("snapshots").insert(snapshotInserts);
+      if (snapshotInserts.length > 0) {
+        await supabase.from("snapshots").insert(snapshotInserts);
+      }
 
       // Update holdings that changed
       for (const h of holdings) {

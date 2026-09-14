@@ -26,8 +26,9 @@ struct DiskCache: Codable {
     /// portfolio/crypto components for the overlay lines. v6: cache purge —
     /// history merges are append-only, so rows deleted server-side (the
     /// 2026-08-21 mid-swap dip) linger in cached history until a version
-    /// bump forces a clean refetch.
-    static let currentVersion = 6
+    /// bump forces a clean refetch. v7: purge the $0 net worth rows the
+    /// snapshot cron wrote on failed Supabase reads (Sep 10–14 2026).
+    static let currentVersion = 7
 
     var version: Int // decoding a versionless v1 cache fails → treated as empty
     var blobs: [String: String]

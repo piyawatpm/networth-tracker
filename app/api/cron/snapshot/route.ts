@@ -143,10 +143,19 @@ export async function GET(request: Request) {
       "hostplus_price_history",
     ];
 
-    const { data: rows } = await supabase
+    const { data: rows, error: readError } = await supabase
       .from("app_data")
       .select("key, value")
       .in("key", keys);
+
+    // A failed read must never look like an empty account: every key would
+    // parse to its fallback and the run would append a $0 net worth snapshot
+    // (a cliff in every chart). Supabase gateway timeouts do happen here.
+    if (readError || !rows?.length) {
+      log.push(`Supabase read failed: ${readError?.message ?? "no rows returned"} — nothing written`);
+      await saveCronLog(today, log, false);
+      return NextResponse.json({ error: "app_data read failed", log }, { status: 503 });
+    }
 
     const dataMap: Record<string, string> = {};
     for (const row of rows ?? []) {
@@ -508,13 +517,19 @@ export async function GET(request: Request) {
     const netWorth = portfolioTotal + cryptoTotalUsd + owedToMe - iOwe;
     const netWorthNoSuper = portfolioNoSuper + cryptoTotalUsd + owedToMe - iOwe;
 
-    // Net worth snapshot — append new entry each run
-    updates.push({
-      key: "networth_snapshots",
-      value: JSON.stringify([...nwSnapshots, { date: sydneyTime, value: netWorth, valueNoSuper: netWorthNoSuper, currency: "USD", portfolio: portfolioTotal, crypto: cryptoTotalUsd }]),
-      updated_at: now,
-    });
-    log.push(`Net worth: $${netWorth.toFixed(0)} (portfolio=$${portfolioTotal.toFixed(0)} crypto=$${cryptoTotalUsd.toFixed(0)} owed=$${owedToMe.toFixed(0)} debt=$${iOwe.toFixed(0)}) USD`);
+    // Net worth snapshot — append new entry each run, but only when something
+    // was actually valued; a debts-only figure is a partial read, not a reading.
+    const hasValuation = portfolioTotal > 0 || cryptoTotalUsd > 0;
+    if (hasValuation) {
+      updates.push({
+        key: "networth_snapshots",
+        value: JSON.stringify([...nwSnapshots, { date: sydneyTime, value: netWorth, valueNoSuper: netWorthNoSuper, currency: "USD", portfolio: portfolioTotal, crypto: cryptoTotalUsd }]),
+        updated_at: now,
+      });
+      log.push(`Net worth: $${netWorth.toFixed(0)} (portfolio=$${portfolioTotal.toFixed(0)} crypto=$${cryptoTotalUsd.toFixed(0)} owed=$${owedToMe.toFixed(0)} debt=$${iOwe.toFixed(0)}) USD`);
+    } else {
+      log.push(`Net worth: skipped — no portfolio or crypto value`);
+    }
 
     // ── Write updates to KV ──
     if (updates.length > 0) {
@@ -537,7 +552,9 @@ export async function GET(request: Request) {
       if (cryptoTotalUsd > 0) {
         snapshotInserts.push({ type: "crypto", date: sydneyTime, value: cryptoTotalUsd, currency: "USD" });
       }
-      snapshotInserts.push({ type: "networth", date: sydneyTime, value: netWorth, value_no_super: netWorthNoSuper, currency: "USD", portfolio: portfolioTotal, crypto: cryptoTotalUsd });
+      if (hasValuation) {
+        snapshotInserts.push({ type: "networth", date: sydneyTime, value: netWorth, value_no_super: netWorthNoSuper, currency: "USD", portfolio: portfolioTotal, crypto: cryptoTotalUsd });
+      }
       if (snapshotInserts.length > 0) {
         await supabase.from("snapshots").insert(snapshotInserts);
       }
