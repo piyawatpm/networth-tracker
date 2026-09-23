@@ -3,9 +3,10 @@ import Observation
 import SwiftUI
 
 /// The app's single source of truth, mirroring the web's DataProvider: load
-/// every KV blob once, decode, expose typed collections; writes re-encode the
-/// whole array back to its blob (the same convention the web app uses, so the
-/// two clients can't corrupt each other's shape).
+/// every KV blob once, decode, expose typed collections. Writes to LIST blobs
+/// apply one change to the latest server copy (compare-and-swap, see
+/// ListChange.swift) and then adopt the merged result — never the whole local
+/// array, which would erase whatever another device added meanwhile.
 extension Notification.Name {
     /// Posted whenever a quick-add lands in Supabase — the store refreshes
     /// immediately instead of waiting for a staleness window.
@@ -378,6 +379,19 @@ final class DataStore {
     /// Coalesces overlapping refresh triggers (foreground + timer + intent
     /// signal can all fire together) into one network pass.
     private var refreshInFlight = false
+    /// Our own list writes, per key: the updated_at of the server row adopted
+    /// and a sequence number. A refresh whose fetch was issued BEFORE such a
+    /// write landed may carry the pre-write row; for that key it's skipped
+    /// rather than making the saved entry vanish until the next refresh.
+    @ObservationIgnored private var adoptedWrites: [String: (updatedAt: String?, sequence: Int)] = [:]
+    @ObservationIgnored private var writeSequence = 0
+    /// Settings blobs whose stored value exists but didn't decode. They are
+    /// written whole, so writes to these are refused rather than replacing a
+    /// value this build can't read with our default.
+    @ObservationIgnored private var unreadableSettings: Set<String> = []
+    /// Per-transaction bookkeeping so a retried save never logs twice or moves
+    /// its holding twice (see PortfolioTxLedger).
+    private let txLedger = PortfolioTxLedger()
 
     // MARK: Session
 
@@ -477,13 +491,23 @@ final class DataStore {
         isLoading = rawBlobs.isEmpty // skeletons only when there's no cache
         loadError = nil
         do {
-            // Delta fetch: only blobs whose updated_at moved since last sync.
-            // First run (no watermark) pulls everything.
+            // Delta fetch: rows whose updated_at moved past the watermark
+            // (minus a look-back margin, see fetchAppData). First run (no
+            // watermark) pulls everything.
+            let issuedAt = writeSequence
             async let blobsTask = api.fetchAppData(since: blobsSyncedAt)
             async let ratesTask = api.fetchFxRates()
 
-            let (changed, stamp) = try await blobsTask
+            let (rows, stamp) = try await blobsTask
             blobsSyncedAt = stamp
+            // Writes of ours that landed while this fetch was in flight: its
+            // rows for those keys may be the pre-write copies. Writes that
+            // landed before it was issued are already reflected — forget them.
+            let racing = adoptedWrites.filter { $0.value.sequence > issuedAt }
+            adoptedWrites = racing
+            let changed = AppDataSync.rowsToApply(
+                rows, cached: rawBlobs, adoptedDuringFetch: racing.mapValues(\.updatedAt)
+            )
             if !changed.isEmpty {
                 rawBlobs.merge(changed) { _, new in new }
                 decode(rawBlobs)
@@ -512,67 +536,54 @@ final class DataStore {
             startLive()
 
             lastRefreshed = Date().timeIntervalSince1970
-            // Encode+write off-main: serializing 6MB of JSON on the main
-            // actor after every refresh was a visible hitch. The struct is a
-            // value copy, so the store can keep mutating while it writes.
-            let snapshot = DiskCache(
-                version: DiskCache.currentVersion,
-                blobs: rawBlobs,
-                networthHistory: networthHistory,
-                portfolioHistory: portfolioHistory,
-                cryptoHistory: cryptoHistory,
-                fxRates: Money.rates,
-                livePrices: livePrices,
-                savedAt: lastRefreshed,
-                blobsSyncedAt: blobsSyncedAt
-            )
-            Task.detached(priority: .utility) { snapshot.save() }
+            saveDiskCache()
         } catch {
             loadError = error.localizedDescription
         }
         isLoading = false
     }
 
+    /// Encode+write off-main: serializing 6MB of JSON on the main actor after
+    /// every refresh was a visible hitch. The struct is a value copy, so the
+    /// store can keep mutating while it writes.
+    private func saveDiskCache() {
+        // Nothing loaded yet (no cache, no refresh) — don't persist a hollow
+        // store over what the next launch could fetch in full.
+        guard lastRefreshed > 0 else { return }
+        let snapshot = DiskCache(
+            version: DiskCache.currentVersion,
+            blobs: rawBlobs,
+            networthHistory: networthHistory,
+            portfolioHistory: portfolioHistory,
+            cryptoHistory: cryptoHistory,
+            fxRates: Money.rates,
+            livePrices: livePrices,
+            savedAt: lastRefreshed,
+            blobsSyncedAt: blobsSyncedAt
+        )
+        Task.detached(priority: .utility) { snapshot.save() }
+    }
+
     /// Manually pull the latest Hostplus super unit price and reprice the
-    /// holding as units × price (calibrating units once — see HostplusAPI). iOS
-    /// reads holdings from the `portfolio_holdings` blob, so we reprice locally
-    /// and write the blob back to Supabase, keeping web / cron / mobile in sync.
-    /// The daily cron does this automatically; this is the on-demand button.
+    /// holding as units × price (calibrating units once — see HostplusAPI).
+    /// The reprice is computed from the SERVER's holdings and written as a
+    /// patch of units / value / currency, keeping web / cron / mobile in sync
+    /// without overwriting the rest of the list. The daily cron does this
+    /// automatically; this is the on-demand button.
     func refreshHostplus() async {
         guard isSignedIn, !isRefreshingHostplus else { return }
-        let targets = holdings.enumerated().filter {
-            HostplusAPI.optionNameByTicker[$0.element.ticker.uppercased()] != nil
-                && $0.element.units > 0
-        }
-        guard !targets.isEmpty else { return }
+        // Local pre-check only — spares the network when nothing is tracked.
+        guard holdings.contains(where: {
+            HostplusAPI.optionNameByTicker[$0.ticker.uppercased()] != nil && $0.units > 0
+        }) else { return }
 
         isRefreshingHostplus = true
         defer { isRefreshingHostplus = false }
         do {
             let prices = try await HostplusAPI.latestPrices()
-            var changed = false
-            for (idx, holding) in targets {
-                guard let name = HostplusAPI.optionNameByTicker[holding.ticker.uppercased()],
-                      let price = prices[name], price > 0 else { continue }
-                let r = HostplusAPI.reprice(
-                    units: holding.units,
-                    currentValue: holding.currentValue,
-                    price: price
-                )
-                if abs(r.currentValue - holding.currentValue) > 0.01
-                    || abs(r.units - holding.units) > 1e-6 {
-                    holdings[idx].units = r.units
-                    holdings[idx].currentValue = r.currentValue
-                    holdings[idx].currency = "AUD"
-                    changed = true
-                }
+            try await commitList("portfolio_holdings") { holdings in
+                HostplusAPI.repriceChange(holdings: holdings, prices: prices)
             }
-            guard changed else { return }
-            let encoded = try JSONEncoder().encode(holdings)
-            let value = String(decoding: encoded, as: UTF8.self)
-            try await api.writeAppData(key: "portfolio_holdings", value: value)
-            rawBlobs["portfolio_holdings"] = value
-            recomputeDerived()
         } catch {
             loadError = error.localizedDescription
         }
@@ -599,12 +610,23 @@ final class DataStore {
         tickerMappings = blob("crypto_ticker_mappings", [String: String].self) ?? [:]
         stablecoinTags = blob("crypto_stablecoin_tags", [String: Bool].self) ?? [:]
         exchangeOverrides = blob("crypto_exchange_overrides", [String: String].self) ?? [:]
-        cryptoCashTags = blob("crypto_cash_tags", [String: Bool].self) ?? [:]
-        earnExclusions = Set(blob("earn_exclusions", [String].self) ?? [])
+        // Settings blobs are rewritten whole: note which exist but don't
+        // decode, so their writes are refused instead of overwriting them.
+        var unreadable: Set<String> = []
+        func setting<T: Decodable>(_ key: String, _ type: T.Type) -> T? {
+            if SettingsBlob.isUnreadable(blobs[key], as: type) {
+                unreadable.insert(key)
+                return nil
+            }
+            return blob(key, type)
+        }
+        cryptoCashTags = setting("crypto_cash_tags", [String: Bool].self) ?? [:]
+        earnExclusions = Set(setting("earn_exclusions", [String].self) ?? [])
         hostplusPriceHistory = blob("hostplus_price_history", [String: [String: Double]].self) ?? [:]
         goals = blob("networth_goals", [NetworthGoal].self) ?? []
         portfolioGroups = blob("portfolio_groups", [PortfolioGroup].self) ?? []
-        forecastAssumptions = blob("forecast_assumptions", ForecastAssumptions.self) ?? .default
+        forecastAssumptions = setting("forecast_assumptions", ForecastAssumptions.self) ?? .default
+        unreadableSettings = unreadable
         coinImages = blob("crypto_coin_images", [String: String].self) ?? [:]
         stockLogos = blob("portfolio_stock_logos", [String: String].self) ?? [:]
         recurringIncome = blob("recurring_income_templates", [RecurringTemplate].self) ?? []
@@ -634,132 +656,189 @@ final class DataStore {
         }
     }
 
-    // MARK: Writes (whole-blob, like the web)
+    // MARK: Writes
+    //
+    // LIST blobs never go out whole. Each write applies one change (upserts +
+    // deletes by id) to the LATEST server copy under a compare-and-swap on
+    // updated_at (ListSync), then the store adopts the merged server list — so
+    // entries another device added show up here instead of being overwritten.
+    // A failed or unreadable server read throws and writes nothing. Nothing is
+    // applied locally ahead of the server: a write that loses every retry
+    // leaves no phantom row behind.
+    //
+    // Settings-like blobs (currency, cash tags, forecast levers, exclusions)
+    // still write whole via `persist` — but never over a stored value this
+    // build couldn't decode.
 
+    /// Whole-value write — settings-like blobs only.
     private func persist<T: Encodable>(_ key: String, _ value: T) async throws {
+        try ensureWritable(key)
         let data = try JSONEncoder().encode(value)
         let json = String(decoding: data, as: UTF8.self)
         try await api.writeAppData(key: key, value: json)
     }
 
-    func saveIncome(_ entry: IncomeEntry) async throws {
-        if let index = income.firstIndex(where: { $0.id == entry.id }) {
-            income[index] = entry
-        } else {
-            income.append(entry)
+    /// One change to one list blob, then adopt the server's merged list.
+    /// `change` runs against the freshest server list (again on every retry),
+    /// off the main actor — it must capture values only, never store state.
+    @discardableResult
+    private func commitList(
+        _ key: String,
+        _ change: @Sendable ([JSONValue]) throws -> ListChange?
+    ) async throws -> ListCommit {
+        let result = try await api.mutateList(key: key, change: change)
+        adoptServerList(key, result)
+        return result
+    }
+
+    /// Refuse a whole-value write over a stored value that exists but didn't
+    /// decode: our in-memory copy is a default, not the user's data.
+    private func ensureWritable(_ key: String) throws {
+        if unreadableSettings.contains(key) { throw ListBlobError.unreadableSetting(key: key) }
+    }
+
+    /// Replace one list's in-memory state with the server's copy, stored in
+    /// rawBlobs (and the disk cache) in the same raw form refresh stores. The
+    /// delta watermark is NOT advanced: the next refresh re-pulls this row
+    /// harmlessly, whereas advancing it could skip another device's write
+    /// that landed in between. The row's updated_at is remembered so a refresh
+    /// already in flight can't put the pre-write copy back (see refresh()).
+    private func adoptServerList(_ key: String, _ commit: ListCommit) {
+        writeSequence += 1
+        adoptedWrites[key] = (commit.updatedAt, writeSequence)
+        rawBlobs[key] = commit.value
+        let data = Data(commit.value.utf8)
+        // Same decode rule as decode(_:), so a write and a refresh agree.
+        func list<T: Decodable>(_ type: T.Type) -> [T] {
+            (try? JSONDecoder().decode([T].self, from: data)) ?? []
+        }
+        switch key {
+        case "income_entries": income = list(IncomeEntry.self)
+        case "expense_entries": expenses = list(ExpenseEntry.self)
+        case "portfolio_holdings": holdings = list(PortfolioHolding.self)
+        case "portfolio_transactions": portfolioTxs = list(PortfolioTransaction.self)
+        case "debt_records": debts = list(DebtRecord.self)
+        case "debt_transactions": debtTxs = list(DebtTransaction.self)
+        case "networth_goals": goals = list(NetworthGoal.self)
+        case "portfolio_groups": portfolioGroups = list(PortfolioGroup.self)
+        default: decode(rawBlobs)
+        }
+        if key == "debt_records" || key == "debt_transactions" {
+            rebuildOverlays() // the debt overlay replays debts + their ledger
         }
         recomputeDerived()
-        try await persist("income_entries", income)
+        saveDiskCache()
+    }
+
+    func saveIncome(_ entry: IncomeEntry) async throws {
+        let upsert = try ListUpsert(record: entry)
+        try await commitList("income_entries") { _ in ListChange(upserts: [upsert]) }
     }
 
     func deleteIncome(_ id: String) async throws {
-        income.removeAll { $0.id == id }
-        recomputeDerived()
-        try await persist("income_entries", income)
+        try await commitList("income_entries") { _ in ListChange(deletes: [id]) }
     }
 
     func saveExpense(_ entry: ExpenseEntry) async throws {
-        if let index = expenses.firstIndex(where: { $0.id == entry.id }) {
-            expenses[index] = entry
-        } else {
-            expenses.append(entry)
-        }
-        recomputeDerived()
-        try await persist("expense_entries", expenses)
+        let upsert = try ListUpsert(record: entry)
+        try await commitList("expense_entries") { _ in ListChange(upserts: [upsert]) }
     }
 
     func deleteExpense(_ id: String) async throws {
-        expenses.removeAll { $0.id == id }
-        recomputeDerived()
-        try await persist("expense_entries", expenses)
+        try await commitList("expense_entries") { _ in ListChange(deletes: [id]) }
     }
 
+    /// Log a buy/sell, then reconcile its holding: two writes, each its own
+    /// compare-and-swap. The holding moves by exactly what the log write
+    /// changed in the MERGED transaction log (the server's log before and
+    /// after it), applied to the SERVER's copy of the holding — see
+    /// PortfolioMath.holdingChange; only units / cost / value change.
+    ///
+    /// Call it again with the SAME transaction (same id) to retry. The ledger
+    /// makes that safe: never logged twice, the holding never moved twice. If
+    /// only the holding write failed this throws HoldingNotUpdated, and the
+    /// retry runs just that write.
     func savePortfolioTx(_ tx: PortfolioTransaction) async throws {
-        let before = PortfolioMath.derivePosition(
-            portfolioTxs.filter { $0.holdingId == tx.holdingId }
+        try await txLedger.save(
+            tx,
+            writeLog: { upsert in
+                try await self.commitList("portfolio_transactions") { _ in ListChange(upserts: [upsert]) }
+            },
+            writeHolding: { move in
+                try await self.commitList("portfolio_holdings") { holdings in try move.change(for: holdings) }
+            }
         )
-        portfolioTxs.append(tx)
-
-        // Reconcile the holding exactly like the web page does: units and
-        // cost move by the replay delta, keeping any baseline the log doesn't
-        // explain, and value rescales at the last-known price per unit. This
-        // matters most for super — its balance is units × price (cron), so a
-        // buy that doesn't grow units would be erased by the next reprice and
-        // the contribution would read as an instant loss on the perf page.
-        if let index = holdings.firstIndex(where: { $0.id == tx.holdingId }) {
-            let after = PortfolioMath.derivePosition(
-                portfolioTxs.filter { $0.holdingId == tx.holdingId }
-            )
-            var holding = holdings[index]
-            let baseUnits = holding.units - before.units
-            let baseCost = holding.amountInvested - before.costBasis
-            let pricePerUnit = holding.units > 1e-9
-                ? holding.currentValue / holding.units : 0
-
-            var units = baseUnits + after.units
-            var amountInvested = baseCost + after.costBasis
-            if abs(units) < 1e-9 { units = 0 }
-            if amountInvested < 1e-9 { amountInvested = 0 }
-
-            holding.units = units
-            holding.amountInvested = amountInvested
-            holding.currentValue = units == 0
-                ? 0
-                : (pricePerUnit > 0 ? pricePerUnit * units : holding.currentValue)
-            holdings[index] = holding
-            try await persist("portfolio_holdings", holdings)
-        }
-
-        recomputeDerived()
-        try await persist("portfolio_transactions", portfolioTxs)
     }
 
     /// Flip one crypto token in/out of the dry-powder set (crypto_cash_tags,
     /// the same blob the web crypto page's Cash dialog writes).
     func setCryptoCash(_ token: String, _ isCash: Bool) async {
-        cryptoCashTags[token] = isCash
-        do { try await persist("crypto_cash_tags", cryptoCashTags) }
-        catch { loadError = error.localizedDescription }
+        do {
+            try ensureWritable("crypto_cash_tags")
+            cryptoCashTags[token] = isCash
+            try await persist("crypto_cash_tags", cryptoCashTags)
+        } catch {
+            loadError = error.localizedDescription
+        }
     }
 
-    /// Flip a holding's cash flag and persist the holdings blob.
+    /// Set a holding's cash flag — a one-field patch on the server's copy, so
+    /// the cron's latest reprice of that holding isn't overwritten.
     func setHoldingCash(_ holdingId: String, _ isCash: Bool) async {
-        guard let index = holdings.firstIndex(where: { $0.id == holdingId }) else { return }
-        holdings[index].isCash = isCash
-        do { try await persist("portfolio_holdings", holdings) }
-        catch { loadError = error.localizedDescription }
+        do {
+            try await commitList("portfolio_holdings") { _ in
+                ListChange(upserts: [.patch(id: holdingId, ["isCash": .bool(isCash)])])
+            }
+        } catch {
+            loadError = error.localizedDescription
+        }
     }
 
-    /// Replace the group list and persist — small blob, whole-list writes.
-    func savePortfolioGroups(_ groups: [PortfolioGroup]) async {
-        portfolioGroups = groups
-        do { try await persist("portfolio_groups", groups) }
-        catch { loadError = error.localizedDescription }
+    /// Add or edit one holding group — a list key, so only this group is
+    /// written and groups added on the web survive.
+    func savePortfolioGroup(_ group: PortfolioGroup) async {
+        do {
+            let upsert = try ListUpsert(record: group)
+            try await commitList("portfolio_groups") { _ in ListChange(upserts: [upsert]) }
+        } catch {
+            loadError = error.localizedDescription
+        }
+    }
+
+    func deletePortfolioGroup(_ id: String) async {
+        do {
+            try await commitList("portfolio_groups") { _ in ListChange(deletes: [id]) }
+        } catch {
+            loadError = error.localizedDescription
+        }
     }
 
     /// Upsert a net-worth goal — same blob the web's GoalSection edits.
     func saveGoal(_ goal: NetworthGoal) async throws {
-        if let index = goals.firstIndex(where: { $0.id == goal.id }) {
-            goals[index] = goal
-        } else {
-            goals.append(goal)
-        }
-        try await persist("networth_goals", goals)
+        let upsert = try ListUpsert(record: goal)
+        try await commitList("networth_goals") { _ in ListChange(upserts: [upsert]) }
     }
 
-    /// Forecast levers; local flip first so the page answers instantly.
+    /// Forecast levers; local flip first so the page answers instantly —
+    /// unless the stored levers couldn't be read, which refuses the write.
     func saveForecastAssumptions(_ next: ForecastAssumptions) async {
-        forecastAssumptions = next
-        do { try await persist("forecast_assumptions", next) }
-        catch { loadError = error.localizedDescription }
+        do {
+            try ensureWritable("forecast_assumptions")
+            forecastAssumptions = next
+            try await persist("forecast_assumptions", next)
+        } catch {
+            loadError = error.localizedDescription
+        }
     }
 
     /// Flip one earn event in or out of the excluded set and persist. Errors
     /// surface via loadError but the local flip stays — the list re-syncs on
-    /// the next refresh either way.
+    /// the next refresh either way. A stored set this build can't read is
+    /// never overwritten (the flip doesn't happen).
     func setEarnExcluded(_ key: String, _ excluded: Bool) async {
-        if excluded { earnExclusions.insert(key) } else { earnExclusions.remove(key) }
         do {
+            try ensureWritable("earn_exclusions")
+            if excluded { earnExclusions.insert(key) } else { earnExclusions.remove(key) }
             try await persist("earn_exclusions", earnExclusions.sorted())
         } catch {
             loadError = error.localizedDescription
@@ -767,36 +846,28 @@ final class DataStore {
     }
 
     func saveDebt(_ debt: DebtRecord) async throws {
-        if let index = debts.firstIndex(where: { $0.id == debt.id }) {
-            debts[index] = debt
-        } else {
-            debts.append(debt)
-        }
-        recomputeDerived()
-        try await persist("debt_records", debts)
+        let upsert = try ListUpsert(record: debt)
+        try await commitList("debt_records") { _ in ListChange(upserts: [upsert]) }
     }
 
     /// Removes the record AND its ledger — orphan transactions would silently
-    /// distort net worth forever.
+    /// distort net worth forever. Record first (orphaned rows are ignored by
+    /// the net-worth math; a record stripped of its ledger is not), then every
+    /// ledger row the SERVER holds for it, including any another device added.
     func deleteDebt(_ id: String) async throws {
-        debts.removeAll { $0.id == id }
-        debtTxs.removeAll { $0.debtId == id }
-        recomputeDerived()
-        try await persist("debt_records", debts)
-        recomputeDerived()
-        try await persist("debt_transactions", debtTxs)
+        try await commitList("debt_records") { _ in ListChange(deletes: [id]) }
+        try await commitList("debt_transactions") { fresh in
+            ListChange.deleting(where: "debtId", equals: id, in: fresh)
+        }
     }
 
     func saveDebtTx(_ tx: DebtTransaction) async throws {
-        debtTxs.append(tx)
-        recomputeDerived()
-        try await persist("debt_transactions", debtTxs)
+        let upsert = try ListUpsert(record: tx)
+        try await commitList("debt_transactions") { _ in ListChange(upserts: [upsert]) }
     }
 
     func deleteDebtTx(_ id: String) async throws {
-        debtTxs.removeAll { $0.id == id }
-        recomputeDerived()
-        try await persist("debt_transactions", debtTxs)
+        try await commitList("debt_transactions") { _ in ListChange(deletes: [id]) }
     }
 
     /// Display currency, synced through the same `preferred_currency` blob the
@@ -1271,11 +1342,11 @@ enum BackgroundRefresher {
                   )) != nil else { return }
         }
         let cached = DiskCache.load()
-        guard let (changed, stamp) = try? await api.fetchAppData(
+        guard let (rows, stamp) = try? await api.fetchAppData(
             since: cached?.blobsSyncedAt
         ) else { return }
         var blobs = cached?.blobs ?? [:]
-        blobs.merge(changed) { _, new in new }
+        blobs.merge(rows.mapValues(\.value)) { _, new in new }
 
         let rates = (try? await api.fetchFxRates()) ?? [:]
         func merged(_ type: String, _ current: [SnapshotPoint]) async -> [SnapshotPoint] {

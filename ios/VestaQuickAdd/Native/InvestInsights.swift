@@ -286,11 +286,7 @@ struct HoldingGroupsCard: View {
                     .contextMenu {
                         Button("Edit", systemImage: "pencil") { editing = group }
                         Button("Delete", systemImage: "trash", role: .destructive) {
-                            Task {
-                                await store.savePortfolioGroups(
-                                    store.portfolioGroups.filter { $0.id != group.id }
-                                )
-                            }
+                            Task { await store.deletePortfolioGroup(group.id) }
                         }
                     }
 
@@ -429,14 +425,11 @@ struct GroupEditorSheet: View {
     private func save() {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty, !selected.isEmpty else { return }
-        var groups = store.portfolioGroups
-        if let group, let index = groups.firstIndex(where: { $0.id == group.id }) {
-            groups[index].name = trimmed
-            groups[index].tickers = selected.sorted()
-        } else {
-            groups.append(PortfolioGroup(name: trimmed, tickers: selected.sorted()))
-        }
-        Task { await store.savePortfolioGroups(groups) }
+        // Only this group is written — groups added on the web survive.
+        var saved = group ?? PortfolioGroup(name: trimmed, tickers: [])
+        saved.name = trimmed
+        saved.tickers = selected.sorted()
+        Task { await store.savePortfolioGroup(saved) }
         dismiss()
     }
 }

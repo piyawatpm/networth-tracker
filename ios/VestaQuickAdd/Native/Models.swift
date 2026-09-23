@@ -54,7 +54,7 @@ struct IncomeEntry: Identifiable, Codable, Equatable {
     }
 
     /// `derived` must never reach storage — those rows are recomputed, not kept.
-    enum CodingKeys: String, CodingKey {
+    enum CodingKeys: String, CodingKey, CaseIterable {
         case id, type, description, amount, currency, date, source, notes
         case isPassive, isRecurring, recurringId, createdAt
     }
@@ -78,6 +78,11 @@ struct ExpenseEntry: Identifiable, Codable, Equatable {
     /// Written by the quick-add endpoint; preserved so replay dedupe survives edits.
     var clientId: String?
     var source: String?
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case id, type, description, amount, currency, vendor, date, notes, images
+        case createdAt, paymentMethod, isRecurring, recurringId, isOneOff, clientId, source
+    }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -135,6 +140,11 @@ struct PortfolioHolding: Identifiable, Codable, Equatable {
     var isEmergencyFund: Bool?
     var isCash: Bool?
 
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case id, name, ticker, type, accountType, broker, country, link, units
+        case amountInvested, currentValue, currency, notes, createdAt, isEmergencyFund, isCash
+    }
+
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
@@ -168,6 +178,11 @@ struct PortfolioTransaction: Identifiable, Codable, Equatable {
     var date: String
     var notes: String
     var createdAt: Double
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case id, holdingId, holdingName, type, units, pricePerUnit, totalAmount
+        case currency, date, notes, createdAt
+    }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -208,6 +223,10 @@ struct DebtRecord: Identifiable, Codable, Equatable {
     var images: [String]
     var createdAt: Double
 
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case id, person, direction, reason, originalAmount, currency, notes, images, createdAt
+    }
+
     init(
         id: String = UUID().uuidString, person: String, direction: String,
         reason: String = "", originalAmount: Double, currency: String,
@@ -242,6 +261,10 @@ struct DebtTransaction: Identifiable, Codable, Equatable {
     var notes: String
     var images: [String]
     var createdAt: Double
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case id, debtId, amount, date, notes, images, createdAt
+    }
 
     init(
         id: String = UUID().uuidString, debtId: String, amount: Double,
@@ -286,6 +309,10 @@ struct NetworthGoal: Identifiable, Codable, Equatable {
     /// from "when will I get there?" into "what would it take by then?".
     var targetDate: String?
 
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case id, name, amount, currency, setAt, achievedAt, targetDate
+    }
+
     init(
         id: String = UUID().uuidString, name: String, amount: Double, currency: String,
         setAt: Double = Date().timeIntervalSince1970 * 1000, achievedAt: Double? = nil,
@@ -320,6 +347,10 @@ struct PortfolioGroup: Identifiable, Codable, Equatable {
     var name: String
     var tickers: [String]
     var createdAt: Double
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case id, name, tickers, createdAt
+    }
 
     init(id: String = UUID().uuidString, name: String, tickers: [String],
          createdAt: Double = Date().timeIntervalSince1970 * 1000) {
@@ -432,6 +463,48 @@ struct SnapshotPoint: Identifiable, Codable, Equatable {
     var portfolio: Double?
     var crypto: Double?
     var id: String { date }
+}
+
+// MARK: - List records
+//
+// The models stored in app_data LIST blobs. Writes go through ListUpsert
+// (see ListChange.swift), which owns exactly `storageKeys` on the server
+// object: a key the model knows but encodes as absent (a cleared optional)
+// is removed, while keys only other clients know survive. Derived from
+// CodingKeys so it can never drift from what the encoder writes — and the
+// custom init(from:) above references every case, so a new field can't be
+// added without its key.
+
+extension IncomeEntry: ListRecord {
+    static let storageKeys = Set(CodingKeys.allCases.map(\.stringValue))
+}
+
+extension ExpenseEntry: ListRecord {
+    static let storageKeys = Set(CodingKeys.allCases.map(\.stringValue))
+}
+
+extension PortfolioHolding: ListRecord {
+    static let storageKeys = Set(CodingKeys.allCases.map(\.stringValue))
+}
+
+extension PortfolioTransaction: ListRecord {
+    static let storageKeys = Set(CodingKeys.allCases.map(\.stringValue))
+}
+
+extension DebtRecord: ListRecord {
+    static let storageKeys = Set(CodingKeys.allCases.map(\.stringValue))
+}
+
+extension DebtTransaction: ListRecord {
+    static let storageKeys = Set(CodingKeys.allCases.map(\.stringValue))
+}
+
+extension NetworthGoal: ListRecord {
+    static let storageKeys = Set(CodingKeys.allCases.map(\.stringValue))
+}
+
+extension PortfolioGroup: ListRecord {
+    static let storageKeys = Set(CodingKeys.allCases.map(\.stringValue))
 }
 
 // MARK: - Category labels/colors (mirrors constants.ts exactly)

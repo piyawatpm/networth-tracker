@@ -121,4 +121,27 @@ enum HostplusAPI {
         }
         return (u, u * price)
     }
+
+    /// Reprice every Hostplus-tracked holding in the SERVER's holdings list
+    /// (not the app's copy — the cron may have moved units since), as patches
+    /// of units / currentValue / currency only. Nil when nothing moved.
+    static func repriceChange(holdings: [JSONValue], prices: [String: Double]) -> ListChange? {
+        var patches: [ListUpsert] = []
+        for stored in holdings {
+            guard let id = stored["id"]?.stringValue,
+                  let holding = try? stored.decode(PortfolioHolding.self),
+                  let name = optionNameByTicker[holding.ticker.uppercased()],
+                  holding.units > 0,
+                  let price = prices[name], price > 0 else { continue }
+            let r = reprice(units: holding.units, currentValue: holding.currentValue, price: price)
+            guard abs(r.currentValue - holding.currentValue) > 0.01
+                    || abs(r.units - holding.units) > 1e-6 else { continue }
+            patches.append(.patch(id: id, [
+                "units": .number(r.units),
+                "currentValue": .number(r.currentValue),
+                "currency": .string("AUD"),
+            ]))
+        }
+        return patches.isEmpty ? nil : ListChange(upserts: patches)
+    }
 }

@@ -477,6 +477,10 @@ struct DebtForm: View {
     @State private var notes = ""
     @State private var saving = false
     @State private var error: String?
+    /// A new debt's id and timestamp, fixed when the form opens, so Save
+    /// tapped again after a failure re-saves it instead of duplicating it.
+    @State private var newId = UUID().uuidString
+    @State private var newCreatedAt = Date().timeIntervalSince1970 * 1000
 
     private var parsedAmount: Double? {
         let value = Double(amount.replacingOccurrences(of: ",", with: ""))
@@ -538,7 +542,8 @@ struct DebtForm: View {
         saving = true
         do {
             var debt = editing ?? DebtRecord(
-                person: person, direction: direction, originalAmount: value, currency: currency
+                id: newId, person: person, direction: direction, originalAmount: value,
+                currency: currency, createdAt: newCreatedAt
             )
             debt.person = person
             debt.direction = direction
@@ -571,6 +576,9 @@ struct DebtTxForm: View {
     @State private var notes = ""
     @State private var saving = false
     @State private var error: String?
+    /// Fixed when the form opens, so a retried Save can't log the repayment twice.
+    @State private var newId = UUID().uuidString
+    @State private var newCreatedAt = Date().timeIntervalSince1970 * 1000
 
     private var parsedAmount: Double? {
         let value = Double(amount.replacingOccurrences(of: ",", with: ""))
@@ -619,10 +627,12 @@ struct DebtTxForm: View {
             // Positive reduces the loan, negative grows it — the signed-net
             // convention every other surface (web, cron) already uses.
             try await store.saveDebtTx(DebtTransaction(
+                id: newId,
                 debtId: debt.id,
                 amount: kind == .repayment ? value : -value,
                 date: formatter.string(from: date),
-                notes: notes
+                notes: notes,
+                createdAt: newCreatedAt
             ))
             dismiss()
         } catch {

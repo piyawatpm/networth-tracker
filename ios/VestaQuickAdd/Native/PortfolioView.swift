@@ -690,6 +690,13 @@ struct PortfolioTxForm: View {
     @State private var date = Date()
     @State private var saving = false
     @State private var error: String?
+    /// Fixed for the sheet's lifetime: Save tapped again after a failure
+    /// re-saves the SAME transaction (idempotent) instead of logging a second.
+    @State private var txId = UUID().uuidString
+    @State private var createdAt = Date().timeIntervalSince1970 * 1000
+    /// Logged, but the holding wasn't updated: the form locks and the button
+    /// retries only the holding step.
+    @State private var logged = false
 
     private var parsedUnits: Double? { Double(units.replacingOccurrences(of: ",", with: "")) }
     private var parsedTotal: Double? { Double(total.replacingOccurrences(of: ",", with: "")) }
@@ -697,15 +704,18 @@ struct PortfolioTxForm: View {
     var body: some View {
         NavigationStack {
             Form {
-                Picker("Type", selection: $type) {
-                    Text("Buy").tag("buy")
-                    Text("Sell").tag("sell")
-                }
-                .pickerStyle(.segmented)
+                Group {
+                    Picker("Type", selection: $type) {
+                        Text("Buy").tag("buy")
+                        Text("Sell").tag("sell")
+                    }
+                    .pickerStyle(.segmented)
 
-                TextField("Units", text: $units).keyboardType(.decimalPad)
-                TextField("Total \(holding.currency)", text: $total).keyboardType(.decimalPad)
-                DatePicker("Date", selection: $date, displayedComponents: .date)
+                    TextField("Units", text: $units).keyboardType(.decimalPad)
+                    TextField("Total \(holding.currency)", text: $total).keyboardType(.decimalPad)
+                    DatePicker("Date", selection: $date, displayedComponents: .date)
+                }
+                .disabled(logged) // already saved — only the holding step is left
 
                 if let u = parsedUnits, let t = parsedTotal, u > 0 {
                     LabeledContent("Price / unit") {
@@ -721,19 +731,24 @@ struct PortfolioTxForm: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button(logged ? "Close" : "Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { Task { await save() } }
-                        .disabled(parsedUnits == nil || parsedTotal == nil || saving)
+                    Button(logged ? "Retry" : "Save") {
+                        // Set synchronously so a double tap can't start two saves.
+                        guard !saving else { return }
+                        saving = true
+                        Task { await save() }
+                    }
+                    .disabled(parsedUnits == nil || parsedTotal == nil || saving)
                 }
             }
         }
     }
 
     private func save() async {
+        defer { saving = false }
         guard let u = parsedUnits, let t = parsedTotal, u > 0, t > 0 else { return }
-        saving = true
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = SydneyTime.zone
@@ -743,6 +758,7 @@ struct PortfolioTxForm: View {
             // quote currency — the "Paid in" mislabel bug came from breaking
             // exactly this.
             try await store.savePortfolioTx(PortfolioTransaction(
+                id: txId,
                 holdingId: holding.id,
                 holdingName: holding.name,
                 type: type,
@@ -750,12 +766,15 @@ struct PortfolioTxForm: View {
                 pricePerUnit: t / u,
                 totalAmount: t,
                 currency: holding.currency,
-                date: formatter.string(from: date)
+                date: formatter.string(from: date),
+                createdAt: createdAt
             ))
             dismiss()
+        } catch let partial as HoldingNotUpdated {
+            logged = true
+            self.error = partial.localizedDescription
         } catch {
             self.error = error.localizedDescription
         }
-        saving = false
     }
 }

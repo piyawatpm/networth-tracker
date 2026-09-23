@@ -172,8 +172,9 @@ actor SupabaseAPI {
         try await refreshIfNeeded()
         guard let session else { throw SupabaseError.notSignedIn }
 
-        var url = SupabaseConfig.url.appendingPathComponent("rest/v1/\(path)")
-        url = url.appending(queryItems: query)
+        // PostgRESTURL percent-encodes "+", which would otherwise reach
+        // PostgREST as a space (a timestamp filter then fails with 22007).
+        let url = PostgRESTURL.make(base: SupabaseConfig.url, path: "rest/v1/\(path)", query: query)
         var request = URLRequest(url: url, timeoutInterval: 30)
         request.httpMethod = method
         request.setValue(SupabaseConfig.publishableKey, forHTTPHeaderField: "apikey")
@@ -225,17 +226,16 @@ actor SupabaseAPI {
     /// Append one quick-add expense straight to the blob — the token-free
     /// replacement for the /api/quick-expense endpoint. Same idempotency
     /// contract: a replayed clientId is acknowledged, never double-added.
+    ///
+    /// Goes through the compare-and-swap list write, so it can only ADD this
+    /// entry to the latest server list. A failed read or a blob that isn't a
+    /// JSON array THROWS (the PendingQueue keeps the item and retries later);
+    /// it never starts over from an empty list, which is how one undecodable
+    /// entry could once make an Apple Pay tap overwrite every expense.
     func appendExpense(_ pending: PendingExpense) async throws {
         try await ensureSession()
 
-        var entries: [ExpenseEntry] = []
-        if let raw = try await fetchAppDataValue(key: "expense_entries"),
-           let data = raw.data(using: .utf8) {
-            entries = (try? JSONDecoder().decode([ExpenseEntry].self, from: data)) ?? []
-        }
-        if entries.contains(where: { $0.clientId == pending.clientId }) { return }
-
-        entries.append(ExpenseEntry(
+        let entry = ExpenseEntry(
             type: pending.type,
             description: pending.note,
             amount: (pending.amount * 100).rounded() / 100,
@@ -245,31 +245,135 @@ actor SupabaseAPI {
             paymentMethod: "other",
             clientId: pending.clientId,
             source: "ios"
-        ))
-        let encoded = try JSONEncoder().encode(entries)
-        try await writeAppData(
-            key: "expense_entries",
-            value: String(decoding: encoded, as: UTF8.self)
+        )
+        let upsert = try ListUpsert(record: entry)
+        let clientId = pending.clientId
+        _ = try await mutateList(key: "expense_entries") { fresh in
+            // Checked against the fresh list on every attempt, so a retry
+            // racing an earlier upload of the same tap backs off instead.
+            ListChange.appending(upsert, unlessAny: "clientId", equals: clientId, in: fresh)
+        }
+    }
+
+    // MARK: - List blobs (compare-and-swap)
+
+    /// Apply one change to the LATEST server copy of a list blob — see
+    /// ListChange.swift for the protocol. `change` is rebuilt from the fresh
+    /// server list on every attempt (nil = nothing to do). Throws, writing
+    /// nothing, when the row can't be read or isn't a JSON array; returns the
+    /// merged list as it now stands on the server.
+    func mutateList(
+        key: String,
+        change: @Sendable ([JSONValue]) throws -> ListChange?
+    ) async throws -> ListCommit {
+        try await ListSync.commit(
+            key: key,
+            fetch: { try await self.fetchListRow(key: key) },
+            patch: { value, expected, stamp in
+                try await self.patchListRow(key: key, value: value, expected: expected, stamp: stamp)
+            },
+            insert: { value, stamp in
+                try await self.insertListRow(key: key, value: value, stamp: stamp)
+            },
+            change: change
         )
     }
 
-    /// KV blobs — ALL of them when `since` is nil, otherwise only rows whose
-    /// updated_at moved past it. The delta path makes a quiet app-open cost a
-    /// few KB instead of re-downloading the multi-hundred-KB CSV blobs.
-    /// Returns the newest updated_at seen, to thread into the next call.
+    /// The row as it stands right now, or nil when the key doesn't exist yet.
+    /// Unlike fetchAppDataValue this keeps "no row" (may start from []) apart
+    /// from "row whose value is null" (refused), and carries updated_at.
+    private func fetchListRow(key: String) async throws -> ListRow? {
+        let data = try await restRequest(
+            "GET", path: "app_data",
+            query: [
+                URLQueryItem(name: "key", value: "eq.\(key)"),
+                URLQueryItem(name: "select", value: "value,updated_at"),
+            ]
+        )
+        struct Row: Decodable {
+            let value: String?
+            let updatedAt: String?
+            enum CodingKeys: String, CodingKey {
+                case value
+                case updatedAt = "updated_at"
+            }
+        }
+        guard let row = try JSONDecoder().decode([Row].self, from: data).first else { return nil }
+        return ListRow(value: row.value, updatedAt: row.updatedAt)
+    }
+
+    /// Write only if updated_at still equals the value we read. False = zero
+    /// rows matched: another writer got in between.
+    private func patchListRow(
+        key: String, value: String, expected: String?, stamp: String
+    ) async throws -> Bool {
+        let body = try JSONSerialization.data(
+            withJSONObject: ["value": value, "updated_at": stamp],
+            options: [.withoutEscapingSlashes]
+        )
+        let returned = try await restRequest(
+            "PATCH", path: "app_data",
+            query: [
+                URLQueryItem(name: "key", value: "eq.\(key)"),
+                URLQueryItem(name: "updated_at", value: ListSync.casFilter(expected: expected)),
+                // Echo just enough to count rows, not the whole blob back.
+                URLQueryItem(name: "select", value: "key,updated_at"),
+            ],
+            body: body
+        )
+        return try Self.rowCount(returned) > 0
+    }
+
+    /// Create the row. False = it already exists (409): someone created it
+    /// after our read, so the caller re-reads and merges into theirs.
+    private func insertListRow(key: String, value: String, stamp: String) async throws -> Bool {
+        let body = try JSONSerialization.data(
+            withJSONObject: ["key": key, "value": value, "updated_at": stamp],
+            options: [.withoutEscapingSlashes]
+        )
+        do {
+            let returned = try await restRequest(
+                "POST", path: "app_data",
+                query: [URLQueryItem(name: "select", value: "key,updated_at")],
+                body: body
+            )
+            return try Self.rowCount(returned) > 0
+        } catch SupabaseError.http(409, _) {
+            return false
+        }
+    }
+
+    /// Rows in a return=representation response. Anything but an array is an
+    /// ambiguous answer, so it throws rather than guessing either way.
+    private static func rowCount(_ data: Data) throws -> Int {
+        guard let rows = try JSONSerialization.jsonObject(with: data) as? [Any] else {
+            throw SupabaseError.http(0, "unexpected write response")
+        }
+        return rows.count
+    }
+
+    /// KV blobs — ALL of them when `since` is nil, otherwise the rows whose
+    /// updated_at is past the watermark MINUS a look-back margin: every writer
+    /// stamps updated_at with its own clock, so a write to one key can carry a
+    /// stamp slightly before the watermark another key set, and a strict
+    /// `> watermark` would miss it until that key changed again. The margin
+    /// re-sends some unchanged rows; callers skip values equal to what they
+    /// already hold (AppDataSync.rowsToApply). The delta path still keeps a
+    /// quiet app-open to a few KB instead of re-downloading the CSV blobs.
+    /// Returns every row with its updated_at, and the newest updated_at seen
+    /// to thread into the next call.
     func fetchAppData(since: String? = nil) async throws
-        -> (blobs: [String: String], maxUpdatedAt: String?) {
+        -> (rows: [String: AppDataRow], maxUpdatedAt: String?) {
         // A "+00:00" offset in a query string decodes to a SPACE server-side
-        // ("…24.604 00:00" → Postgres 22007). Normalize to the Z suffix,
-        // which is offset-free and URL-safe; a watermark that still carries a
-        // "+" after that can't be sent safely — drop it and fetch everything.
+        // ("…24.604 00:00" → Postgres 22007), so the watermark is stored in
+        // the Z form; one that still carries a "+" is dropped (full fetch).
         func urlSafe(_ stamp: String) -> String? {
             let z = stamp.replacingOccurrences(of: "+00:00", with: "Z")
             return z.contains("+") ? nil : z
         }
         var query = [URLQueryItem(name: "select", value: "key,value,updated_at")]
-        if let since, let safe = urlSafe(since) {
-            query.append(URLQueryItem(name: "updated_at", value: "gt.\(safe)"))
+        if let floor = AppDataSync.deltaFloor(watermark: since) {
+            query.append(URLQueryItem(name: "updated_at", value: "gt.\(floor)"))
         }
         let data = try await restRequest("GET", path: "app_data", query: query)
         struct Row: Codable {
@@ -282,18 +386,20 @@ actor SupabaseAPI {
             }
         }
         let rows = try JSONDecoder().decode([Row].self, from: data)
-        var result: [String: String] = [:]
+        var result: [String: AppDataRow] = [:]
         var maxStamp: String? = since
         for row in rows {
-            result[row.key] = row.value ?? ""
+            result[row.key] = AppDataRow(value: row.value ?? "", updatedAt: row.updatedAt)
             if let stamp = row.updatedAt, stamp > (maxStamp ?? "") { maxStamp = stamp }
         }
         // Store the watermark pre-normalized so the cache never holds a "+".
         return (result, maxStamp.flatMap(urlSafe))
     }
 
-    /// Read-modify-write of one blob. Same last-write-wins semantics the web
-    /// app's own debounced persist has — no new failure mode introduced.
+    /// Whole-value, last-write-wins write — ONLY for settings-like blobs
+    /// (currency, cash tags, forecast levers, earn exclusions). List blobs —
+    /// entries, holdings, debts, goals, portfolio_groups — go through
+    /// `mutateList`: overwriting a list erases other devices' entries.
     func writeAppData(key: String, value: String) async throws {
         let iso = ISO8601DateFormatter().string(from: Date())
         let body = try JSONSerialization.data(withJSONObject: [

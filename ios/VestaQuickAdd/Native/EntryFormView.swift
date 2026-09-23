@@ -23,6 +23,11 @@ struct EntryFormView: View {
     @State private var saving = false
     @State private var error: String?
     @State private var savedPulse = false
+    /// A new entry's id and timestamp, fixed when the form opens: Save tapped
+    /// again after a failure (say, a lost response) re-saves the SAME entry
+    /// instead of adding a duplicate.
+    @State private var newId = UUID().uuidString
+    @State private var newCreatedAt = Date().timeIntervalSince1970 * 1000
     @FocusState private var amountFocused: Bool
 
     private var isEditing: Bool { editingIncome != nil || editingExpense != nil }
@@ -195,8 +200,8 @@ struct EntryFormView: View {
             switch kind {
             case .income:
                 var entry = editingIncome ?? IncomeEntry(
-                    type: category, description: descriptionText, amount: value,
-                    currency: currency, date: dateString(date)
+                    id: newId, type: category, description: descriptionText, amount: value,
+                    currency: currency, date: dateString(date), createdAt: newCreatedAt
                 )
                 entry.type = category
                 entry.description = descriptionText
@@ -208,8 +213,8 @@ struct EntryFormView: View {
                 try await store.saveIncome(entry)
             case .expense:
                 var entry = editingExpense ?? ExpenseEntry(
-                    type: category, description: descriptionText, amount: value,
-                    currency: currency, date: dateString(date)
+                    id: newId, type: category, description: descriptionText, amount: value,
+                    currency: currency, date: dateString(date), createdAt: newCreatedAt
                 )
                 entry.type = category
                 entry.description = descriptionText
