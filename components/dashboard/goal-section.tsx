@@ -384,13 +384,16 @@ function ManageGoalsDialog({
 // ---------------------------------------------------------------------------
 
 export function GoalSection({ netWorth, format }: GoalSectionProps) {
-  const [goals, setGoals] = useCloudStorage<Goal[]>("networth_goals", []);
+  const [goals, setGoals, patchGoals] = useCloudStorage<Goal[]>("networth_goals", []);
   const [oldGoal, setOldGoal] = useCloudStorage<{ amount: number; currency: string; setAt: number } | null>("networth_goal", null);
-  if (oldGoal && goals.length === 0) {
+  // One-time migration of the legacy single goal — in an effect, not during
+  // render (a render can run twice and would save twice).
+  useEffect(() => {
+    if (!oldGoal || goals.length > 0) return;
     const migrated: Goal = { id: crypto.randomUUID(), name: "Net Worth Goal", amount: oldGoal.amount, currency: oldGoal.currency, setAt: oldGoal.setAt, achievedAt: null };
-    setGoals([migrated]);
+    setGoals((prev) => (prev.length === 0 ? [migrated] : prev));
     setOldGoal(null);
-  }
+  }, [oldGoal, goals.length, setGoals, setOldGoal]);
 
   const [manageOpen, setManageOpen] = useState(false);
   const { convert } = useCurrency();
@@ -413,20 +416,20 @@ export function GoalSection({ netWorth, format }: GoalSectionProps) {
     };
   }, [assumptions, incomeEntries, expenseEntries, convert]);
 
-  // Auto-mark achieved goals when netWorth changes
+  // Auto-mark achieved goals when netWorth changes — as a patch on the latest
+  // stored goal (re-checked against ITS amount), so a goal edited on another
+  // device isn't overwritten by this screen's copy.
   useEffect(() => {
-    let changed = false;
-    const updated = goals.map((g) => {
-      if (g.achievedAt) return g;
-      const goalVal = convert(g.amount, g.currency);
-      if (netWorth >= goalVal) {
-        changed = true;
-        return { ...g, achievedAt: Date.now() };
-      }
-      return g;
-    });
-    if (changed) setGoals(updated);
-  }, [netWorth, goals, convert, setGoals]);
+    const reached = (g: { achievedAt?: unknown; amount?: unknown; currency?: unknown }) =>
+      !g.achievedAt && netWorth >= convert(Number(g.amount ?? 0), String(g.currency ?? ""));
+    const now = Date.now();
+    patchGoals(
+      goals.filter(reached).map((g) => ({
+        id: g.id,
+        apply: (x) => (reached(x) ? { ...x, achievedAt: now } : x),
+      })),
+    );
+  }, [netWorth, goals, convert, patchGoals]);
 
   const sortedGoals = useMemo(() => {
     const withPct = goals.map((g) => {

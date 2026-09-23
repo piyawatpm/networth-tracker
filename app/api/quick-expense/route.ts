@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getSydneyDateString } from "@/lib/utils/timezone";
 import { EXPENSE_TYPE_LABELS } from "@/lib/utils/constants";
+import { quickExpenseId } from "@/lib/utils/entry-helpers";
+import type { ListItem } from "@/lib/storage/list-change";
+import { supabaseKvStore, writeListChanges } from "@/lib/storage/kv-cas";
 
 // Quick-add endpoint for the iOS Action Button app.
 //
@@ -147,10 +150,25 @@ export async function POST(req: NextRequest) {
   }
 
   const paymentMethod = str(b.paymentMethod, "other");
-  const currency = str(b.currency) || (await readKv<string>(CURRENCY_KEY, "AUD"));
+  // The default currency must actually be read: falling back to AUD when the
+  // read fails would silently store a THB (or USD) expense as AUD.
+  let currency = str(b.currency);
+  if (!currency) {
+    try {
+      const stored = await supabaseKvStore(supabase).read(CURRENCY_KEY);
+      currency = stored ? (JSON.parse(stored.value) as string) : "AUD";
+    } catch (err) {
+      return NextResponse.json(
+        { error: `default currency unavailable: ${err instanceof Error ? err.message : "read failed"}` },
+        { status: 503 },
+      );
+    }
+  }
 
+  const clientId = str(b.clientId);
   const entry: ExpenseRecord = {
-    id: crypto.randomUUID(),
+    // Per-tap id: two retries of one tap that race each other store it once.
+    id: clientId ? quickExpenseId(clientId) : crypto.randomUUID(),
     type: str(b.type, "other") || "other",
     description: str(b.description),
     // Round to cents — a float from a phone keypad shouldn't add 0.30000000004.
@@ -168,46 +186,40 @@ export async function POST(req: NextRequest) {
   };
 
   try {
-    const existing = await readKv<ExpenseRecord[]>(EXPENSES_KEY, []);
-    if (!Array.isArray(existing)) {
-      return NextResponse.json(
-        { error: "expense store is not an array — refusing to overwrite it" },
-        { status: 500 },
-      );
-    }
+    const kv = supabaseKvStore(supabase);
 
     // Idempotency: the phone retries queued items after a dropped connection,
     // and a retry must not create a duplicate. `clientId` is stable per queued
     // item, so a replay is recognised and acknowledged instead of re-added.
-    const clientId = str(b.clientId);
     if (clientId) {
-      const already = existing.find(
-        (e) => (e as ExpenseRecord & { clientId?: string })?.clientId === clientId,
-      );
+      const stored = await kv.read(EXPENSES_KEY); // throws when the read fails
+      const existing: unknown = stored ? JSON.parse(stored.value) : [];
+      const already = Array.isArray(existing)
+        ? (existing as (ExpenseRecord & { clientId?: string })[]).find((e) => e?.clientId === clientId)
+        : undefined;
       if (already) {
         return NextResponse.json({ entry: already, duplicate: true });
       }
       (entry as ExpenseRecord & { clientId?: string }).clientId = clientId;
     }
 
-    const next = [...existing, entry];
-    const { error } = await supabase.from("app_data").upsert(
-      {
-        key: EXPENSES_KEY,
-        value: JSON.stringify(next),
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "key" },
-    );
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+    // Added to the LATEST stored list with a compare-and-swap — as an insert:
+    // a replay whose entry is already stored (maybe edited since) leaves the
+    // stored one alone. A failed or non-list read writes nothing; it used to
+    // fall back to [] and save a one-entry list over every expense.
+    const row = await writeListChanges(kv, EXPENSES_KEY, [
+      { upserts: [], deletes: [], inserts: [entry as unknown as ListItem] },
+    ]);
+    const list = JSON.parse(row.value) as ExpenseRecord[];
+    const stored = list.find((e) => e?.id === entry.id);
+    if (stored && JSON.stringify(stored) !== JSON.stringify(entry)) {
+      return NextResponse.json({ entry: stored, duplicate: true });
     }
-
-    return NextResponse.json({ entry, total: next.length });
+    return NextResponse.json({ entry, total: list.length });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "write failed" },
-      { status: 500 },
+      { status: 503 },
     );
   }
 }

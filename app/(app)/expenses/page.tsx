@@ -19,7 +19,7 @@ import {
   EXPENSE_TYPE_LABELS,
   EXPENSE_TYPE_COLORS,
 } from "@/lib/utils/constants";
-import { sumConverted, filterByDateRange } from "@/lib/utils/entry-helpers";
+import { sumConverted, filterByDateRange, recurringEntryId } from "@/lib/utils/entry-helpers";
 import {
   getCurrentMonthKey,
   getLastMonthKey,
@@ -82,7 +82,7 @@ import { ManageCategoriesDialog } from "@/components/shared/manage-categories-di
 const RECURRING_EXPENSE_CONFIG = {
   storageKey: "recurring_expense_templates",
   createEntry: (template: RecurringExpense, date: string): ExpenseEntry => ({
-    id: crypto.randomUUID(),
+    id: recurringEntryId(template.id, date),
     type: template.type,
     description: template.description,
     amount: template.amount,
@@ -141,7 +141,7 @@ export default function ExpensesPage() {
     updateTemplate,
     deleteTemplate,
     toggleTemplate,
-  } = useRecurringEntries(entries, setEntries, RECURRING_EXPENSE_CONFIG);
+  } = useRecurringEntries(setEntries, RECURRING_EXPENSE_CONFIG);
 
   // ---- State ----------------------------------------------------------------
 

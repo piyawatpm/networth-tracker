@@ -18,7 +18,7 @@ import {
   INCOME_TYPE_LABELS,
   INCOME_TYPE_COLORS,
 } from "@/lib/utils/constants";
-import { sumConverted, filterByDateRange } from "@/lib/utils/entry-helpers";
+import { sumConverted, filterByDateRange, recurringEntryId } from "@/lib/utils/entry-helpers";
 import {
   getCurrentMonthKey,
   getLastMonthKey,
@@ -84,7 +84,7 @@ import { ComparisonView } from "@/components/expenses/comparison-view";
 const RECURRING_INCOME_CONFIG = {
   storageKey: "recurring_income_templates",
   createEntry: (template: RecurringIncome, date: string): IncomeEntry => ({
-    id: crypto.randomUUID(),
+    id: recurringEntryId(template.id, date),
     type: template.type,
     description: template.description,
     amount: template.amount,
@@ -140,7 +140,7 @@ export default function IncomePage() {
     updateTemplate,
     deleteTemplate,
     toggleTemplate,
-  } = useRecurringEntries(entries, setEntries, RECURRING_INCOME_CONFIG);
+  } = useRecurringEntries(setEntries, RECURRING_INCOME_CONFIG);
 
   // Dynamic income categories
   const {

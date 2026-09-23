@@ -2,11 +2,12 @@
 
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useCloudStorage } from "@/components/providers/data-provider";
+import type { ListUpdate } from "@/lib/storage/list-change";
 import { useCurrency } from "@/components/providers/currency-provider";
 import type { PortfolioHolding, HoldingType, AccountType, PortfolioTransaction } from "@/lib/utils/types";
 import { getSydneyDateString } from "@/lib/utils/timezone";
 import { TransactionHistory } from "@/components/portfolio/transaction-history";
-import { derivePosition } from "@/lib/utils/portfolio-transactions";
+import { derivePosition, reconcileHoldingPosition } from "@/lib/utils/portfolio-transactions";
 import {
   getPriceCache,
   setPriceCache,
@@ -45,7 +46,10 @@ import {
 } from "./_components/portfolio-constants";
 
 export default function PortfolioPage() {
-  const [holdings, setHoldings] = useCloudStorage<PortfolioHolding[]>(
+  // Price updates go through patchHoldings: each is computed from the LATEST
+  // stored holding, so a price refresh can't revert or delete a holding that
+  // changed elsewhere (phone, cron) while prices were being fetched.
+  const [holdings, setHoldings, patchHoldings] = useCloudStorage<PortfolioHolding[]>(
     "portfolio_holdings",
     []
   );
@@ -139,7 +143,7 @@ export default function PortfolioPage() {
   // publishes a daily unit price, so it's fetched on manual refresh / mount,
   // not every poll tick.
   const fetchPrices = useCallback(
-    async (force = false, includeHostplus = true) => {
+    async (force = false, includeHostplus = true, save = true) => {
       const autoHoldings = holdings.filter(
         (h) => h.ticker && canAutoUpdate(h.ticker)
       );
@@ -158,7 +162,9 @@ export default function PortfolioPage() {
       setLastFetchStatus(null);
 
       const cache = getPriceCache();
-      const updatedHoldings = [...holdings];
+      // Not a copy of `holdings` to save back later — by then it may be stale.
+      // Each price becomes an update applied to the latest stored holding.
+      const updates: ListUpdate[] = [];
       let attempted = 0;
       let updatedCount = 0;
       let errors = 0;
@@ -187,15 +193,12 @@ export default function PortfolioPage() {
                 currency: result.currency,
                 updatedAt: Date.now(),
               };
-              const idx = updatedHoldings.findIndex(
-                (h) => h.ticker.toUpperCase() === result.ticker.toUpperCase()
-              );
-              if (idx >= 0) {
-                const h = updatedHoldings[idx];
+              const ticker = result.ticker.toUpperCase();
+              const h = holdings.find((x) => x.ticker.toUpperCase() === ticker);
+              if (h) {
                 // Store currentValue in the PRICE's currency; the display layer
                 // converts to the user's preferred currency.
                 const newValue = h.units * result.price;
-                const newCurrency = result.currency || h.currency;
                 if (Math.abs(newValue - h.currentValue) > 0.01) {
                   addUpdateLog({
                     holdingId: h.id,
@@ -205,7 +208,15 @@ export default function PortfolioPage() {
                     source: "auto",
                     timestamp: Date.now(),
                   });
-                  updatedHoldings[idx] = { ...h, currentValue: newValue, currency: newCurrency };
+                  const price: number = result.price;
+                  const currency: string | undefined = result.currency;
+                  updates.push({
+                    id: h.id,
+                    apply: (x) =>
+                      String(x.ticker ?? "").toUpperCase() === ticker
+                        ? { ...x, currentValue: Number(x.units ?? 0) * price, currency: currency || x.currency }
+                        : x, // re-ticketed meanwhile: this price no longer applies
+                  });
                   updatedCount++;
                 }
               }
@@ -232,23 +243,36 @@ export default function PortfolioPage() {
                 errors++;
                 continue;
               }
-              cache[target.ticker.toUpperCase()] = { price, currency: "AUD", updatedAt: Date.now() };
-              const idx = updatedHoldings.findIndex((h) => h.id === target.id);
-              if (idx >= 0) {
-                const h = updatedHoldings[idx];
-                const r = repriceHostplusHolding(h, price);
-                if (Math.abs(r.currentValue - h.currentValue) > 0.01 || Math.abs(r.units - h.units) > 1e-6) {
-                  addUpdateLog({
-                    holdingId: h.id,
-                    holdingName: h.name,
-                    oldValue: h.currentValue,
-                    newValue: r.currentValue,
-                    source: "auto",
-                    timestamp: Date.now(),
-                  });
-                  updatedHoldings[idx] = { ...h, units: r.units, currentValue: r.currentValue, currency: "AUD" };
-                  updatedCount++;
-                }
+              const ticker = target.ticker.toUpperCase();
+              cache[ticker] = { price, currency: "AUD", updatedAt: Date.now() };
+              const h = target;
+              const r = repriceHostplusHolding(h, price);
+              if (Math.abs(r.currentValue - h.currentValue) > 0.01 || Math.abs(r.units - h.units) > 1e-6) {
+                addUpdateLog({
+                  holdingId: h.id,
+                  holdingName: h.name,
+                  oldValue: h.currentValue,
+                  newValue: r.currentValue,
+                  source: "auto",
+                  timestamp: Date.now(),
+                });
+                updates.push({
+                  id: h.id,
+                  // Repriced from the latest units/value, so a contribution
+                  // logged meanwhile isn't undone by this older copy.
+                  apply: (x) =>
+                    String(x.ticker ?? "").toUpperCase() === ticker
+                      ? {
+                          ...x,
+                          ...repriceHostplusHolding(
+                            { units: Number(x.units ?? 0), currentValue: Number(x.currentValue ?? 0) },
+                            price,
+                          ),
+                          currency: "AUD",
+                        }
+                      : x,
+                });
+                updatedCount++;
               }
             }
           } catch {
@@ -258,7 +282,7 @@ export default function PortfolioPage() {
 
         setPriceCache(cache);
         setPriceCacheState({ ...cache });
-        if (updatedCount > 0) setHoldings(updatedHoldings);
+        patchHoldings(updates, { save });
         setUpdateLog(getUpdateLog());
         setLastFetchStatus(
           `Updated ${updatedCount} of ${attempted} holdings` +
@@ -268,7 +292,7 @@ export default function PortfolioPage() {
         setIsFetching(false);
       }
     },
-    [holdings, setHoldings]
+    [holdings, patchHoldings]
   );
 
   // Auto-fetch on mount (if stale)
@@ -293,7 +317,7 @@ export default function PortfolioPage() {
 
     const tick = () => {
       if (document.visibilityState !== "hidden") {
-        fetchPricesRef.current(true, false); // intraday poll: stocks only
+        fetchPricesRef.current(true, false, false); // intraday poll: stocks only, on screen only
       }
       const next = pollIntervalForSession(getUsMarketSession());
       timer = setTimeout(tick, next);
@@ -329,21 +353,26 @@ export default function PortfolioPage() {
   useEffect(() => {
     if (Object.keys(finnhubPrices).length === 0) return;
 
-    setHoldings((prev) => {
-      let changed = false;
-      const updated = prev.map((h) => {
-        const ticker = h.ticker?.toUpperCase();
-        const trade = finnhubPrices[ticker];
-        if (!trade) return h;
-
-        const newValue = h.units * trade.price;
-        if (Math.abs(newValue - h.currentValue) < 0.01) return h;
-
-        changed = true;
-        return { ...h, currentValue: newValue };
+    // Each tick is an update computed from the latest stored holding — it can
+    // re-value a holding, never revert its units or bring back a deleted one.
+    const updates: ListUpdate[] = [];
+    for (const h of holdings) {
+      const ticker = h.ticker?.toUpperCase();
+      const trade = finnhubPrices[ticker];
+      if (!trade) continue;
+      if (Math.abs(h.units * trade.price - h.currentValue) < 0.01) continue;
+      updates.push({
+        id: h.id,
+        apply: (x) =>
+          String(x.ticker ?? "").toUpperCase() === ticker
+            ? { ...x, currentValue: Number(x.units ?? 0) * trade.price }
+            : x,
       });
-      return changed ? updated : prev;
-    });
+    }
+    // On screen only: ticks arrive every second or two, and saving each one
+    // made every other device's holding save race this tab. Prices are stored
+    // by the cron every 5 minutes and by this page on load / manual refresh.
+    patchHoldings(updates, { save: false });
   }, [finnhubPrices]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function startEditValue(h: PortfolioHolding) {
@@ -363,9 +392,7 @@ export default function PortfolioPage() {
         timestamp: Date.now(),
       });
 
-      setHoldings((prev) =>
-        prev.map((p) => (p.id === h.id ? { ...p, currentValue: newVal } : p))
-      );
+      patchHoldings([{ id: h.id, apply: (x) => ({ ...x, currentValue: newVal }) }]);
       setUpdateLog(getUpdateLog());
     }
     setEditingValueId(null);
@@ -501,16 +528,21 @@ export default function PortfolioPage() {
   useEffect(() => {
     if (holdings.length === 0 || transactions.length === 0) return;
     const quoteCurrencyById = new Map(holdings.map((h) => [h.id, h.currency]));
-    let changed = false;
-    const repaired = transactions.map((tx) => {
-      const quote = quoteCurrencyById.get(tx.holdingId);
-      if (!quote || tx.currency === quote) return tx;
-      if (tx.notes === "Initial holding") return tx;
-      if (Math.abs(tx.totalAmount - tx.units * tx.pricePerUnit) > 0.01) return tx;
-      changed = true;
-      return { ...tx, currency: quote };
-    });
-    if (changed) setTransactions(repaired);
+    const repair = (list: PortfolioTransaction[]) => {
+      let changed = false;
+      const repaired = list.map((tx) => {
+        const quote = quoteCurrencyById.get(tx.holdingId);
+        if (!quote || tx.currency === quote) return tx;
+        if (tx.notes === "Initial holding") return tx;
+        if (Math.abs(tx.totalAmount - tx.units * tx.pricePerUnit) > 0.01) return tx;
+        changed = true;
+        return { ...tx, currency: quote };
+      });
+      return changed ? repaired : list;
+    };
+    // Computed on the latest list (an updater), returning it untouched when
+    // nothing matches — so this can neither overwrite newer entries nor loop.
+    if (repair(transactions) !== transactions) setTransactions(repair);
   }, [holdings, transactions, setTransactions]);
 
   // Re-derive a holding's units, cost basis and current value from its
@@ -520,35 +552,22 @@ export default function PortfolioPage() {
   // predates transaction tracking. currentValue is rescaled at the last-known
   // price/unit so unrealized P&L stays correct between price fetches — and
   // forever, for manual holdings that have no live price.
+  //
+  // Applied as a patch to the LATEST stored holding: it moves the holding by
+  // exactly what this change moved its log (after − before), so a buy logged
+  // on the phone since this page loaded isn't overwritten by this copy.
   function reconcileHolding(
     holdingId: string,
     oldTxs: PortfolioTransaction[],
     newTxs: PortfolioTransaction[],
   ) {
-    setHoldings((prev) =>
-      prev.map((h) => {
-        if (h.id !== holdingId) return h;
-        const before = derivePosition(oldTxs, h.currency, convert);
-        const after = derivePosition(newTxs, h.currency, convert);
-        const baseUnits = h.units - before.units;
-        const baseCost = h.amountInvested - before.costBasis;
-        const pricePerUnit = h.units > 1e-9 ? h.currentValue / h.units : 0;
-
-        let units = baseUnits + after.units;
-        let amountInvested = baseCost + after.costBasis;
-        if (Math.abs(units) < 1e-9) units = 0;
-        if (amountInvested < 1e-9) amountInvested = 0;
-
-        const currentValue =
-          units === 0
-            ? 0
-            : pricePerUnit > 0
-              ? pricePerUnit * units
-              : h.currentValue;
-
-        return { ...h, units, amountInvested, currentValue };
-      }),
-    );
+    patchHoldings([
+      {
+        id: holdingId,
+        apply: (stored) =>
+          reconcileHoldingPosition(stored as unknown as PortfolioHolding, oldTxs, newTxs, convert) as unknown as typeof stored,
+      },
+    ]);
   }
 
   function handleTransaction(tx: PortfolioTransaction) {

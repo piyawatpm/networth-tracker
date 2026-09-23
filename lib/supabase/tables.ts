@@ -5,29 +5,14 @@ import { SupabaseClient } from "@supabase/supabase-js";
 // between camelCase TypeScript and snake_case PostgreSQL.
 // =============================================================================
 
-// ---------------------------------------------------------------------------
-// 1. Entity table mapping
-// ---------------------------------------------------------------------------
-
-export interface EntityTableConfig {
-  table: string;
-  idField: string; // PK column in snake_case
-}
-
-export const ENTITY_TABLES: Record<string, EntityTableConfig> = {
-  income_entries:               { table: "income_entries",               idField: "id" },
-  expense_entries:              { table: "expense_entries",              idField: "id" },
-  recurring_income_templates:   { table: "recurring_income_templates",   idField: "id" },
-  recurring_expense_templates:  { table: "recurring_expense_templates",  idField: "id" },
-  portfolio_holdings:           { table: "portfolio_holdings",           idField: "id" },
-  portfolio_transactions:       { table: "portfolio_transactions",       idField: "id" },
-  debt_records:                 { table: "debt_records",                 idField: "id" },
-  debt_transactions:            { table: "debt_transactions",            idField: "id" },
-  networth_goals:               { table: "networth_goals",               idField: "id" },
-};
+// Lists and settings live in app_data (see lib/storage/list-change.ts). The
+// relational entity tables (income_entries, expense_entries, …) are no longer
+// read or written by the app: they were a mirror that went stale whenever a
+// phone saved, and the web booting from one erased four income entries on
+// 2026-09-23. `snapshots` remains a real table — chart history's source of truth.
 
 // ---------------------------------------------------------------------------
-// 2. Snapshot and category key mappings
+// 1. Snapshot key mapping
 // ---------------------------------------------------------------------------
 
 /** Maps useCloudStorage keys → snapshot type values in the unified snapshots table */
@@ -37,14 +22,8 @@ export const SNAPSHOT_KEYS: Record<string, string> = {
   networth_snapshots:  "networth",
 };
 
-/** Maps useCloudStorage keys → kind values in custom_categories table */
-export const CATEGORY_KEYS: Record<string, string> = {
-  custom_income_categories:  "income",
-  custom_expense_categories: "expense",
-};
-
 // ---------------------------------------------------------------------------
-// 3. Case converters
+// 2. Case converters
 // ---------------------------------------------------------------------------
 
 /** Converts a camelCase key to snake_case. E.g. "createdAt" → "created_at" */
@@ -72,54 +51,8 @@ export function rowToCamel(obj: Record<string, unknown>): Record<string, unknown
 }
 
 // ---------------------------------------------------------------------------
-// 4. Sync helpers (used by DataProvider.persist())
+// 3. Snapshot sync (used by DataProvider.persist())
 // ---------------------------------------------------------------------------
-
-/**
- * Upserts all rows into the entity table (converted to snake_case), then
- * deletes any rows in the DB whose `id` is NOT in the provided set.
- * This handles add/edit/delete in two operations.
- */
-export async function syncEntityTable(
-  supabase: SupabaseClient,
-  table: string,
-  rows: Record<string, unknown>[]
-): Promise<void> {
-  const snakeRows = rows.map(rowToSnake);
-
-  if (snakeRows.length > 0) {
-    const { error: upsertError } = await supabase
-      .from(table)
-      .upsert(snakeRows);
-
-    if (upsertError) {
-      console.warn(`[syncEntityTable] upsert failed for "${table}":`, upsertError.message);
-      return;
-    }
-
-    const ids = snakeRows.map((r) => r["id"] as string);
-    const inList = `(${ids.map((id) => `'${id}'`).join(",")})`;
-
-    const { error: deleteError } = await supabase
-      .from(table)
-      .delete()
-      .not("id", "in", inList);
-
-    if (deleteError) {
-      console.warn(`[syncEntityTable] delete stale rows failed for "${table}":`, deleteError.message);
-    }
-  } else {
-    // Empty array — delete all rows from the table
-    const { error: deleteError } = await supabase
-      .from(table)
-      .delete()
-      .neq("id", "");
-
-    if (deleteError) {
-      console.warn(`[syncEntityTable] delete all rows failed for "${table}":`, deleteError.message);
-    }
-  }
-}
 
 /**
  * APPEND-ONLY sync for snapshots. Snapshots are immutable history, and the
@@ -129,33 +62,39 @@ export async function syncEntityTable(
  * wiped weeks of history. Instead we read the dates already stored and insert
  * only the genuinely-new ones. The server table is the canonical superset.
  *
+ * Returns how many rows were added. Throws when the stored dates can't be read
+ * or an insert fails — a restore must not report success it didn't have.
+ *
  * (Bulk wipes are handled explicitly elsewhere — Settings → Clear has its own
- * delete path; this function is only used by the normal save flow.)
+ * delete path.)
  */
 export async function syncSnapshots(
   supabase: SupabaseClient,
   snapshotType: string,
   rows: Record<string, unknown>[]
-): Promise<void> {
-  if (rows.length === 0) return;
+): Promise<number> {
+  if (rows.length === 0) return 0;
 
-  // Read the dates already stored for this type (paginated — the archive can be
-  // large) so we only ever ADD what's missing and never duplicate or delete.
-  const existingDates = new Set<unknown>();
+  // The dates already stored for this type. Ordered keyset pages: an unordered
+  // .range() walk isn't stable, so it could skip dates (→ duplicate inserts).
+  const existingDates = new Set<string>();
   const PAGE = 1000;
-  for (let from = 0; ; from += PAGE) {
-    const { data, error } = await supabase
+  for (let cursor: string | null = null; ; ) {
+    let query = supabase
       .from("snapshots")
       .select("date")
       .eq("type", snapshotType)
-      .range(from, from + PAGE - 1);
-    if (error) {
-      console.warn(`[syncSnapshots] could not read existing dates for "${snapshotType}":`, error.message);
-      return; // bail rather than risk inserting duplicates
-    }
-    if (!data || data.length === 0) break;
-    for (const r of data) existingDates.add((r as { date: unknown }).date);
-    if (data.length < PAGE) break;
+      .order("date", { ascending: true })
+      .limit(PAGE);
+    if (cursor !== null) query = query.gt("date", cursor);
+    const { data, error } = await query;
+    if (error) throw new Error(`Couldn't read stored ${snapshotType} snapshots: ${error.message}`);
+    const page = (data ?? []) as { date: string }[];
+    for (const r of page) existingDates.add(r.date);
+    if (page.length === 0) break;
+    // Rows sharing the last date on a full page may continue — but only the
+    // SET of dates matters here, and that date is already in it.
+    cursor = page[page.length - 1].date;
   }
 
   const insertRows = rows
@@ -166,51 +105,12 @@ export async function syncSnapshots(
       snake["type"] = snapshotType;
       return snake;
     })
-    .filter((row) => !existingDates.has(row["date"]));
+    .filter((row) => !existingDates.has(row["date"] as string));
 
-  if (insertRows.length === 0) return;
-
-  const { error: insertError } = await supabase
-    .from("snapshots")
-    .insert(insertRows);
-
-  if (insertError) {
-    console.warn(`[syncSnapshots] insert failed for type "${snapshotType}":`, insertError.message);
+  // Request-sized chunks: a full-history restore is tens of thousands of rows.
+  for (let i = 0; i < insertRows.length; i += 500) {
+    const { error } = await supabase.from("snapshots").insert(insertRows.slice(i, i + 500));
+    if (error) throw new Error(`Couldn't add ${snapshotType} snapshots: ${error.message}`);
   }
-}
-
-/**
- * Deletes all categories for the given kind, then inserts the new set.
- * Adds the `kind` field.
- */
-export async function syncCategories(
-  supabase: SupabaseClient,
-  kind: string,
-  rows: Record<string, unknown>[]
-): Promise<void> {
-  const { error: deleteError } = await supabase
-    .from("custom_categories")
-    .delete()
-    .eq("kind", kind);
-
-  if (deleteError) {
-    console.warn(`[syncCategories] delete failed for kind "${kind}":`, deleteError.message);
-    return;
-  }
-
-  if (rows.length === 0) return;
-
-  const insertRows = rows.map((row) => {
-    const snake = rowToSnake(row);
-    snake["kind"] = kind;
-    return snake;
-  });
-
-  const { error: insertError } = await supabase
-    .from("custom_categories")
-    .insert(insertRows);
-
-  if (insertError) {
-    console.warn(`[syncCategories] insert failed for kind "${kind}":`, insertError.message);
-  }
+  return insertRows.length;
 }

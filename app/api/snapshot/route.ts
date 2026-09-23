@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { fetchExtendedStockQuote } from "@/lib/utils/stock-prices";
 import { computeDebtTotals } from "@/lib/utils/debts";
+import type { ListChange } from "@/lib/storage/list-change";
+import { supabaseKvStore, writeListChanges } from "@/lib/storage/kv-cas";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -94,11 +96,18 @@ export async function POST(request: NextRequest) {
     const nwSnapshots = parse<{ date: string; value: number }[]>("networth_snapshots", []);
     const cryptoSnapshots = parse<{ date: string; value: number; currency: string }[]>("crypto_snapshots", []);
 
+    // Holdings are stored as changes applied to the LATEST list (see
+    // lib/storage/kv-cas.ts) — writing this request's copy whole would undo
+    // any holding edit saved while prices were being fetched.
+    const holdingUpdates: NonNullable<ListChange["updates"]> = [];
+
     // Apply manual value updates
     if (manualUpdates && Object.keys(manualUpdates).length > 0) {
       holdings = holdings.map((h) => {
         if (manualUpdates[h.id] !== undefined) {
-          return { ...h, currentValue: manualUpdates[h.id] };
+          const value = manualUpdates[h.id];
+          holdingUpdates.push({ id: h.id, apply: (x) => ({ ...x, currentValue: value }) });
+          return { ...h, currentValue: value };
         }
         return h;
       });
@@ -113,18 +122,35 @@ export async function POST(request: NextRequest) {
       if (quote) {
         h.currentValue = (h.units ?? 0) * quote.price;
         if (quote.currency) h.currency = quote.currency;
+        const ticker = h.ticker;
+        holdingUpdates.push({
+          id: h.id,
+          apply: (x) =>
+            x.ticker === ticker // re-tickered meanwhile: this price no longer applies
+              ? {
+                  ...x,
+                  currentValue: Number(x.units ?? 0) * quote.price,
+                  ...(quote.currency ? { currency: quote.currency } : {}),
+                }
+              : x,
+        });
         stockUpdatedCount++;
         if (quote.extended) stockExtendedCount++;
       }
     }
 
     // Persist holdings if anything changed (manual updates or stock refresh)
-    if ((manualUpdates && Object.keys(manualUpdates).length > 0) || stockUpdatedCount > 0) {
-      await supabase.from("app_data").upsert({
-        key: "portfolio_holdings",
-        value: JSON.stringify(holdings),
-        updated_at: new Date().toISOString(),
-      }, { onConflict: "key" });
+    if (holdingUpdates.length > 0) {
+      try {
+        await writeListChanges(supabaseKvStore(supabase), "portfolio_holdings", [
+          { upserts: [], deletes: [], updates: holdingUpdates },
+        ]);
+      } catch (e) {
+        return NextResponse.json(
+          { error: `holdings not saved: ${e instanceof Error ? e.message : String(e)}` },
+          { status: 503 },
+        );
+      }
     }
 
     // Portfolio totals — convert each holding to display currency
@@ -209,7 +235,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Also mirror to relational tables (graceful — tables may not exist)
+    // Chart history: append to the snapshots table (the list mirror tables are
+    // no longer written — see lib/supabase/tables.ts)
     try {
       const snapshotInserts: Record<string, unknown>[] = [];
       if (portfolioTotal > 0) {
@@ -224,16 +251,7 @@ export async function POST(request: NextRequest) {
       if (snapshotInserts.length > 0) {
         await supabase.from("snapshots").insert(snapshotInserts);
       }
-
-      // Update holdings that changed
-      for (const h of holdings) {
-        if (manualUpdates?.[h.id] !== undefined || stockHoldings.find((s) => s.id === h.id)) {
-          await supabase.from("portfolio_holdings")
-            .update({ current_value: h.currentValue, currency: h.currency })
-            .eq("id", h.id);
-        }
-      }
-    } catch { /* tables may not exist — KV write already succeeded */ }
+    } catch { /* table may not exist — KV write already succeeded */ }
 
     // Debug: list each holding for verification
     const holdingsDebug = holdings

@@ -29,8 +29,12 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
-import { rowToCamel, rowToSnake } from "@/lib/supabase/tables";
+import { rowToCamel, rowToSnake, SNAPSHOT_KEYS, syncSnapshots } from "@/lib/supabase/tables";
 import { clearSnapshotCache } from "@/lib/storage/snapshot-cache";
+import type { ListItem } from "@/lib/storage/list-change";
+import { supabaseKvStore, writeListChanges } from "@/lib/storage/kv-cas";
+import { fetchAllSnapshots } from "@/lib/storage/snapshot-export";
+import { restoreMissing } from "@/lib/storage/restore";
 
 // ---------------------------------------------------------------------------
 // Page
@@ -47,51 +51,28 @@ export default function SettingsPage() {
   // ---- Export ----------------------------------------------------------------
   async function handleExport() {
     try {
+      setStatus({ type: "success", message: "Exporting your full history…" });
       const supabase = createClient();
       const obj: Record<string, unknown> = {};
 
-      // Entity tables — read from proper tables, convert to camelCase
-      const entityTables = [
-        "income_entries", "expense_entries",
-        "recurring_income_templates", "recurring_expense_templates",
-        "portfolio_holdings", "portfolio_transactions",
-        "debt_records", "debt_transactions", "networth_goals",
-      ];
+      // Lists and settings come from app_data, the store every device keeps
+      // current. (This used to read the relational mirror tables, which could
+      // be empty or stale; an export taken then silently held no entries.)
+      const { data: kvData, error: kvError } = await supabase.from("app_data").select("key, value");
+      if (kvError || !kvData) throw new Error(kvError?.message ?? "app_data read returned nothing");
+      for (const row of kvData) {
+        try { obj[row.key] = JSON.parse(row.value); } catch { obj[row.key] = row.value; }
+      }
 
-      await Promise.all(
-        entityTables.map(async (table) => {
-          const { data } = await supabase.from(table).select("*");
-          obj[table] = (data ?? []).map((r) => rowToCamel(r as Record<string, unknown>));
-        }),
-      );
-
-      // Snapshots — export split by type (backward compatible key names)
-      const { data: snapshots } = await supabase.from("snapshots").select("*").order("date");
-      const allSnaps = (snapshots ?? []).map((r) => rowToCamel(r as Record<string, unknown>));
-      obj["portfolio_snapshots"] = allSnaps.filter((s) => s.type === "portfolio").map(({ id, type, createdAt, ...rest }) => rest);
-      obj["crypto_snapshots"] = allSnaps.filter((s) => s.type === "crypto").map(({ id, type, createdAt, ...rest }) => rest);
-      obj["networth_snapshots"] = allSnaps.filter((s) => s.type === "networth").map(({ id, type, createdAt, ...rest }) => rest);
-
-      // Custom categories — export split by kind (backward compatible)
-      const { data: cats } = await supabase.from("custom_categories").select("*");
-      obj["custom_income_categories"] = (cats ?? []).filter((c) => c.kind === "income").map(({ kind, ...r }) => r);
-      obj["custom_expense_categories"] = (cats ?? []).filter((c) => c.kind === "expense").map(({ kind, ...r }) => r);
-
-      // Cron logs
-      const { data: cronLogs } = await supabase.from("cron_logs").select("*").order("created_at", { ascending: false }).limit(30);
-      obj["cron_log"] = (cronLogs ?? []).map((r) => ({
-        date: r.date,
-        timestamp: r.timestamp,
-        success: r.success,
-        log: typeof r.log === "string" ? JSON.parse(r.log) : r.log,
-      }));
-
-      // KV settings (everything remaining in app_data)
-      const { data: kvData } = await supabase.from("app_data").select("key, value");
-      for (const row of kvData ?? []) {
-        if (!obj[row.key]) {
-          try { obj[row.key] = JSON.parse(row.value); } catch { obj[row.key] = row.value; }
-        }
+      // Snapshots — the FULL history from the snapshots table, split by type
+      // (backward compatible key names). The app_data blobs are only a recent
+      // mirror, and a single select is capped at 1000 rows.
+      const snapshots = await fetchAllSnapshots(supabase);
+      for (const [key, type] of Object.entries(SNAPSHOT_KEYS)) {
+        obj[key] = (snapshots[type] ?? []).map((r) => {
+          const { id: _id, type: _type, createdAt: _createdAt, ...rest } = rowToCamel(r);
+          return rest;
+        });
       }
 
       // Download as JSON
@@ -116,94 +97,40 @@ export default function SettingsPage() {
   function handleImport(file: File) {
     const reader = new FileReader();
     reader.onload = async (e) => {
+      let obj: unknown;
       try {
-        const obj = JSON.parse(e.target?.result as string);
-        if (typeof obj !== "object" || obj === null) throw new Error("Invalid backup format");
-
+        obj = JSON.parse(e.target?.result as string);
+        if (typeof obj !== "object" || obj === null || Array.isArray(obj)) throw new Error();
+      } catch {
+        setStatus({ type: "error", message: "Failed to import — not a Vesta backup file" });
+        return;
+      }
+      try {
+        setStatus({ type: "success", message: "Restoring what's missing…" });
         const supabase = createClient();
+        // Restores what's MISSING only: a backup is older than what's stored,
+        // so nothing stored is replaced or deleted (see lib/storage/restore.ts).
+        const summary = await restoreMissing(obj as Record<string, unknown>, {
+          store: supabaseKvStore(supabase),
+          appendSnapshots: (type, rows) => syncSnapshots(supabase, type, rows),
+        });
 
-        // Entity tables
-        const entityTables = [
-          "income_entries", "expense_entries",
-          "recurring_income_templates", "recurring_expense_templates",
-          "portfolio_holdings", "portfolio_transactions",
-          "debt_records", "debt_transactions", "networth_goals",
-        ];
-        for (const table of entityTables) {
-          if (obj[table] && Array.isArray(obj[table])) {
-            const snakeRows = (obj[table] as Record<string, unknown>[]).map(rowToSnake);
-            if (snakeRows.length > 0) {
-              await supabase.from(table).upsert(snakeRows);
-            }
-          }
-        }
-
-        // Snapshots
-        const snapshotKeys: Record<string, string> = {
-          portfolio_snapshots: "portfolio",
-          crypto_snapshots: "crypto",
-          networth_snapshots: "networth",
-        };
-        for (const [key, type] of Object.entries(snapshotKeys)) {
-          if (obj[key] && Array.isArray(obj[key])) {
-            // Delete existing, then insert
-            await supabase.from("snapshots").delete().eq("type", type);
-            const rows = (obj[key] as Record<string, unknown>[]).map((r) => {
-              const snake = rowToSnake(r);
-              delete snake["id"];
-              snake["type"] = type;
-              return snake;
-            });
-            if (rows.length > 0) {
-              // Insert in chunks of 500
-              for (let i = 0; i < rows.length; i += 500) {
-                await supabase.from("snapshots").insert(rows.slice(i, i + 500));
-              }
-            }
-          }
-        }
-
-        // Custom categories
-        const categoryKeys: Record<string, string> = {
-          custom_income_categories: "income",
-          custom_expense_categories: "expense",
-        };
-        for (const [key, kind] of Object.entries(categoryKeys)) {
-          if (obj[key] && Array.isArray(obj[key])) {
-            await supabase.from("custom_categories").delete().eq("kind", kind);
-            const rows = (obj[key] as Record<string, unknown>[]).map((r) => ({ ...r, kind }));
-            if (rows.length > 0) {
-              await supabase.from("custom_categories").insert(rows);
-            }
-          }
-        }
-
-        // KV settings — everything else goes to app_data
-        const tableKeys = new Set([
-          ...entityTables,
-          ...Object.keys(snapshotKeys),
-          ...Object.keys(categoryKeys),
-          "cron_log",
-        ]);
-        const kvRows: { key: string; value: string; updated_at: string }[] = [];
-        for (const [key, value] of Object.entries(obj)) {
-          if (!tableKeys.has(key)) {
-            kvRows.push({ key, value: JSON.stringify(value), updated_at: new Date().toISOString() });
-          }
-        }
-        if (kvRows.length > 0) {
-          await supabase.from("app_data").upsert(kvRows, { onConflict: "key" });
-        }
-
-        // Import does delete-then-insert on the snapshots table, so any
-        // localStorage snapshot cache we built up before is now stale.
-        // Wipe it; next page load will rebuild from the imported data.
+        // New snapshot rows may have landed; let the next load rebuild the
+        // local snapshot cache from the table.
         clearSnapshotCache();
 
-        setStatus({ type: "success", message: `Imported data. Reloading...` });
-        setTimeout(() => window.location.reload(), 1000);
-      } catch {
-        setStatus({ type: "error", message: "Failed to import — invalid file format" });
+        setStatus({
+          type: "success",
+          message:
+            `Restored ${summary.entriesAdded} missing entries, ${summary.snapshotsAdded} snapshot points` +
+            ` and ${summary.keysAdded.length} settings; kept ${summary.keysKept.length} settings you already had. Reloading...`,
+        });
+        setTimeout(() => window.location.reload(), 2500);
+      } catch (err) {
+        setStatus({
+          type: "error",
+          message: `Import stopped partway: ${err instanceof Error ? err.message : "unknown error"}. Nothing stored was replaced — it's safe to retry.`,
+        });
       }
     };
     reader.readAsText(file);
@@ -243,9 +170,22 @@ export default function SettingsPage() {
   // ---- Seed sample data ---------------------------------------------------
   async function handleSeed() {
     try {
+      const supabase = createClient();
+      // Sample data is for a brand-new account only: merged into real data it
+      // would read as real entries (and its recurring templates would keep
+      // generating fake ones every week).
+      const store = supabaseKvStore(supabase);
+      for (const key of ["income_entries", "expense_entries", "portfolio_holdings", "debt_records"]) {
+        const row = await store.read(key);
+        const list: unknown = row ? JSON.parse(row.value) : [];
+        if (Array.isArray(list) && list.length > 0) {
+          setStatus({ type: "error", message: "Sample data can only be loaded into an empty account" });
+          setTimeout(() => setStatus(null), 5000);
+          return;
+        }
+      }
       const { generateSampleData } = await import("@/app/(app)/seed/page");
       const data = generateSampleData();
-      const supabase = createClient();
 
       // Entity tables
       const entityInserts = [
@@ -258,9 +198,10 @@ export default function SettingsPage() {
         { table: "recurring_expense_templates", data: data.recurringExpenseTemplates },
         { table: "networth_goals", data: data.networthGoals },
       ];
+      // Merged by id into app_data — sample rows are added, nothing is removed.
       for (const { table, data: rows } of entityInserts) {
         if (rows && Array.isArray(rows) && rows.length > 0) {
-          await supabase.from(table).upsert(rows.map((r) => rowToSnake(r as Record<string, unknown>)));
+          await writeListChanges(store, table, [{ upserts: rows as ListItem[], deletes: [] }]);
         }
       }
 
@@ -281,16 +222,13 @@ export default function SettingsPage() {
         }
       }
 
-      // KV data (crypto CSV, settings)
-      const kvRows = [
-        { key: "crypto_csv_text", value: JSON.stringify(data.cryptoCsvText) },
-        { key: "enabled_currencies", value: JSON.stringify(["AUD", "USD", "THB", "EUR"]) },
-        data.priceUpdateLog ? { key: "price_update_log", value: JSON.stringify(data.priceUpdateLog) } : null,
-      ].filter(Boolean).map((r) => ({ ...r!, updated_at: new Date().toISOString() }));
-
-      if (kvRows.length > 0) {
-        await supabase.from("app_data").upsert(kvRows, { onConflict: "key" });
-      }
+      // KV data (crypto CSV, settings) — only where nothing is stored yet.
+      const kvSeed: [string, unknown][] = [
+        ["crypto_csv_text", data.cryptoCsvText],
+        ["enabled_currencies", ["AUD", "USD", "THB", "EUR"]],
+        ...(data.priceUpdateLog ? [["price_update_log", data.priceUpdateLog] as [string, unknown]] : []),
+      ];
+      for (const [key, value] of kvSeed) await store.insert(key, JSON.stringify(value));
 
       // Seeding inserts fresh snapshots directly (bypassing persist()), so
       // the localStorage cache must be invalidated to avoid mixing seeded

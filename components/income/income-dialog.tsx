@@ -89,6 +89,9 @@ export function IncomeDialog({ entry, onSave, onCreateRecurring, trigger, catego
     if (!isValid) return;
 
     const saved: IncomeEntry = {
+      // Start from the original so fields this form doesn't show survive an
+      // edit (e.g. the phone's clientId / source on a quick-added entry).
+      ...entry,
       id: entry?.id ?? crypto.randomUUID(),
       type: type as IncomeType,
       description: description.trim(),

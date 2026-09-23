@@ -26,6 +26,23 @@ export function hashCode(s: string): number {
   return hash;
 }
 
+/**
+ * Id of the entry a recurring template generates for one date. Deterministic
+ * on purpose: the cron and a web tab can both generate the same occurrence,
+ * and a shared id makes the second save replace the first instead of adding a
+ * duplicate (lists are saved as upserts by id — see lib/storage/list-change.ts).
+ */
+export function recurringEntryId(templateId: string, date: string): string {
+  return `rec-${templateId}-${date}`;
+}
+
+/** Id of a quick-add expense: derived from the phone's per-tap clientId, so
+ *  two retries of one tap racing each other store it once (same id → the
+ *  second save replaces the first). */
+export function quickExpenseId(clientId: string): string {
+  return `quick-${clientId}`;
+}
+
 /** Advance a YYYY-MM-DD date string by one day */
 export function nextDay(dateStr: string): string {
   const [y, m, d] = dateStr.split("-").map(Number);

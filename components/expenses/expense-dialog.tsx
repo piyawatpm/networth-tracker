@@ -97,6 +97,9 @@ export function ExpenseDialog({ entry, onSave, onCreateRecurring, trigger, categ
     if (!description.trim() || isNaN(parsedAmount) || parsedAmount <= 0) return;
 
     const saved: ExpenseEntry = {
+      // Start from the original so fields this form doesn't show survive an
+      // edit (e.g. the phone's clientId / source on a quick-added entry).
+      ...entry,
       id: entry?.id ?? crypto.randomUUID(),
       type,
       description: description.trim(),

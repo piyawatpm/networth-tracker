@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { computeOccurrences } from "@/lib/utils/timezone";
+import { recurringEntryId } from "@/lib/utils/entry-helpers";
 import { fetchExtendedStockQuote } from "@/lib/utils/stock-prices";
 import { computeDebtTotals } from "@/lib/utils/debts";
 import {
@@ -8,6 +9,8 @@ import {
   repriceHostplusHolding,
   HOSTPLUS_OPTION_BY_TICKER,
 } from "@/lib/utils/hostplus";
+import type { ListChange, ListItem } from "@/lib/storage/list-change";
+import { supabaseKvStore, writeListChanges } from "@/lib/storage/kv-cas";
 
 // Use secret key for server-side cron (bypasses RLS)
 const supabase = createClient(
@@ -93,6 +96,25 @@ function generateRecurringEntries<T extends RecurringTemplate>(
   }
 
   return { newEntries, updatedTemplates };
+}
+
+/** Advance each template's lastGeneratedDate on its LATEST stored version
+ *  (never backwards) — the user's own edits to the template are kept. */
+function recordGeneratedThrough(
+  change: { updates: NonNullable<ListChange["updates"]> },
+  templates: RecurringTemplate[],
+) {
+  for (const t of templates) {
+    const through = t.lastGeneratedDate;
+    if (!through) continue;
+    change.updates.push({
+      id: t.id,
+      apply: (x) => {
+        const stored = typeof x.lastGeneratedDate === "string" ? x.lastGeneratedDate : "";
+        return stored >= through ? x : { ...x, lastGeneratedDate: through };
+      },
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -200,6 +222,21 @@ export async function GET(request: Request) {
 
     const updates: { key: string; value: string; updated_at: string }[] = [];
     const now = new Date().toISOString();
+    // Lists the user also edits (holdings, entries, templates) are never
+    // written whole: this run's changes are applied to the LATEST stored list
+    // at the end, so anything saved while prices were being fetched survives.
+    const listChanges = new Map<
+      string,
+      ListChange & { updates: NonNullable<ListChange["updates"]>; inserts: NonNullable<ListChange["inserts"]> }
+    >();
+    const changeFor = (key: string) => {
+      let change = listChanges.get(key);
+      if (!change) {
+        change = { upserts: [], deletes: [], updates: [], inserts: [] };
+        listChanges.set(key, change);
+      }
+      return change;
+    };
 
     // ── 0. Update stock prices (Yahoo primary — includes pre/post, Finnhub fallback) ──
     // Hostplus super options don't quote on Yahoo — priced separately in 0b.
@@ -217,13 +254,26 @@ export async function GET(request: Request) {
         if (quote) {
           h.currentValue = h.units * quote.price;
           if (quote.currency) h.currency = quote.currency;
+          // Stored: priced from the holding's units at WRITE time, not this
+          // run's copy — units edited mid-run are kept and valued correctly.
+          const ticker = h.ticker;
+          changeFor("portfolio_holdings").updates.push({
+            id: h.id,
+            apply: (x) =>
+              x.ticker === ticker // re-tickered meanwhile: this price no longer applies
+                ? {
+                    ...x,
+                    currentValue: Number(x.units ?? 0) * quote.price,
+                    ...(quote.currency ? { currency: quote.currency } : {}),
+                  }
+                : x,
+          });
           updatedCount++;
           if (quote.extended) extendedCount++;
           stateCounts[quote.marketState] = (stateCounts[quote.marketState] ?? 0) + 1;
         }
       }
       if (updatedCount > 0) {
-        updates.push({ key: "portfolio_holdings", value: JSON.stringify(holdings), updated_at: now });
         const stateSummary = Object.entries(stateCounts).map(([k, v]) => `${k}:${v}`).join(" ");
         log.push(`Stock prices: ${updatedCount}/${stockHoldings.length} updated (${extendedCount} from pre/post; ${stateSummary})`);
       } else {
@@ -257,12 +307,23 @@ export async function GET(request: Request) {
           h.units = r.units;
           h.currentValue = r.currentValue;
           h.currency = "AUD";
+          // Stored: repriced from the latest units/value, so a contribution
+          // logged mid-run isn't undone by this run's older copy.
+          const ticker = h.ticker;
+          changeFor("portfolio_holdings").updates.push({
+            id: h.id,
+            apply: (x) =>
+              x.ticker === ticker
+                ? {
+                    ...x,
+                    ...repriceHostplusHolding({ units: Number(x.units ?? 0), currentValue: Number(x.currentValue ?? 0) }, price),
+                    currency: "AUD",
+                  }
+                : x,
+          });
           repriced++;
         }
         if (repriced > 0) {
-          const idx = updates.findIndex((u) => u.key === "portfolio_holdings");
-          if (idx >= 0) updates[idx].value = JSON.stringify(holdings);
-          else updates.push({ key: "portfolio_holdings", value: JSON.stringify(holdings), updated_at: now });
           const sample = HOSTPLUS_OPTION_BY_TICKER[hostplusHoldings[0].ticker];
           log.push(`Hostplus: ${repriced} super holding(s) repriced (${sample}=$${(priceByCode.get(sample) ?? 0).toFixed(4)})`);
 
@@ -325,7 +386,7 @@ export async function GET(request: Request) {
         incomeEntries,
         today,
         (template, date) => ({
-          id: crypto.randomUUID(),
+          id: recurringEntryId(template.id, date),
           type: template.type ?? "other",
           description: template.description ?? "",
           amount: template.amount ?? 0,
@@ -341,9 +402,10 @@ export async function GET(request: Request) {
       );
 
       if (newEntries.length > 0) {
-        const allIncome = [...incomeEntries, ...newEntries];
-        updates.push({ key: "income_entries", value: JSON.stringify(allIncome), updated_at: now });
-        updates.push({ key: "recurring_income_templates", value: JSON.stringify(updatedTemplates), updated_at: now });
+        // Inserted, not upserted: if this occurrence is already stored (a web
+        // tab generated it, or the user edited it since), the stored one stays.
+        changeFor("income_entries").inserts.push(...(newEntries as ListItem[]));
+        recordGeneratedThrough(changeFor("recurring_income_templates"), updatedTemplates);
         log.push(`Recurring income: generated ${newEntries.length} entries`);
       } else {
         log.push(`Recurring income: no new entries needed`);
@@ -359,7 +421,7 @@ export async function GET(request: Request) {
         expenseEntries,
         today,
         (template, date) => ({
-          id: crypto.randomUUID(),
+          id: recurringEntryId(template.id, date),
           type: template.type ?? "other",
           description: template.description ?? "",
           amount: template.amount ?? 0,
@@ -376,9 +438,10 @@ export async function GET(request: Request) {
       );
 
       if (newEntries.length > 0) {
-        const allExpenses = [...expenseEntries, ...newEntries];
-        updates.push({ key: "expense_entries", value: JSON.stringify(allExpenses), updated_at: now });
-        updates.push({ key: "recurring_expense_templates", value: JSON.stringify(updatedTemplates), updated_at: now });
+        // Inserted, not upserted: if this occurrence is already stored (a web
+        // tab generated it, or the user edited it since), the stored one stays.
+        changeFor("expense_entries").inserts.push(...(newEntries as ListItem[]));
+        recordGeneratedThrough(changeFor("recurring_expense_templates"), updatedTemplates);
         log.push(`Recurring expenses: generated ${newEntries.length} entries`);
       } else {
         log.push(`Recurring expenses: no new entries needed`);
@@ -542,9 +605,37 @@ export async function GET(request: Request) {
       }
     }
 
-    // ── Also mirror to relational tables (graceful — tables may not exist) ──
+    // ── Lists: this run's changes, applied to the LATEST stored copy ──
+    // (compare-and-swap on updated_at; re-applied if a device saved meanwhile)
+    const kv = supabaseKvStore(supabase);
+    // A template's lastGeneratedDate may only advance once its entries are
+    // stored — otherwise those occurrences would never be generated again.
+    const entriesOf: Record<string, string> = {
+      recurring_income_templates: "income_entries",
+      recurring_expense_templates: "expense_entries",
+    };
+    const ordered = [...listChanges].sort(([a], [b]) => Number(a in entriesOf) - Number(b in entriesOf));
+    const failedKeys = new Set<string>();
+    for (const [key, change] of ordered) {
+      if (entriesOf[key] && failedKeys.has(entriesOf[key])) {
+        failedKeys.add(key);
+        log.push(`${key}: skipped — ${entriesOf[key]} wasn't saved, so the next run generates them again`);
+        continue;
+      }
+      try {
+        await writeListChanges(kv, key, [change]);
+      } catch (e) {
+        failedKeys.add(key);
+        log.push(`${key}: not saved — ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    const listsSaved = failedKeys.size === 0;
+
+    // ── Chart history: append to the snapshots table ──
+    // (The old mirror of lists into income_entries/expense_entries/… tables is
+    // gone: the web booted from those tables while they were stale, and that
+    // erased four income entries on 2026-09-23. app_data is the only list store.)
     try {
-      // Append new snapshots to the snapshots table
       const snapshotInserts: Record<string, unknown>[] = [];
       if (portfolioTotal > 0) {
         snapshotInserts.push({ type: "portfolio", date: sydneyTime, value: portfolioNoSuper, value_with_super: portfolioTotal, currency: "USD" });
@@ -558,59 +649,19 @@ export async function GET(request: Request) {
       if (snapshotInserts.length > 0) {
         await supabase.from("snapshots").insert(snapshotInserts);
       }
-
-      // Update portfolio holdings that had prices refreshed (stocks + Hostplus)
-      for (const h of [...stockHoldings, ...hostplusHoldings]) {
-        await supabase.from("portfolio_holdings")
-          .update({ current_value: h.currentValue, currency: h.currency })
-          .eq("id", h.id);
-      }
-
-      // Insert new recurring income/expense entries (if generated)
-      for (const update of updates) {
-        if (update.key === "income_entries" || update.key === "expense_entries") {
-          // Find new entries (those with recurringId set to a template from this run)
-          // For simplicity, we trust the updates array — parse new ones and insert
-          const all = JSON.parse(update.value);
-          // Get existing entry IDs from the table (only new ones need insertion)
-          const { data: existing } = await supabase.from(update.key).select("id");
-          const existingIds = new Set((existing ?? []).map((r: { id: string }) => r.id));
-          const newOnes = all.filter((e: { id: string }) => !existingIds.has(e.id));
-          if (newOnes.length > 0) {
-            const snakeNew = newOnes.map((e: Record<string, unknown>) => {
-              const out: Record<string, unknown> = {};
-              for (const [k, v] of Object.entries(e)) {
-                out[k.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`)] = v;
-              }
-              return out;
-            });
-            await supabase.from(update.key).insert(snakeNew);
-          }
-        }
-        // Update recurring template lastGeneratedDate
-        if (update.key === "recurring_income_templates" || update.key === "recurring_expense_templates") {
-          const templates = JSON.parse(update.value);
-          for (const t of templates) {
-            if (t.lastGeneratedDate) {
-              await supabase.from(update.key)
-                .update({ last_generated_date: t.lastGeneratedDate })
-                .eq("id", t.id);
-            }
-          }
-        }
-      }
-      log.push(`Mirrored to relational tables: ${snapshotInserts.length} snapshots`);
+      log.push(`Snapshots table: ${snapshotInserts.length} rows appended`);
     } catch (e) {
-      log.push(`Table mirror failed (KV write succeeded): ${String(e)}`);
+      log.push(`Snapshots table insert failed (KV write succeeded): ${String(e)}`);
     }
 
-    log.push(`Done. ${updates.length} keys updated.`);
-    await saveCronLog(today, log, true);
+    const keysUpdated = updates.length + listChanges.size;
+    log.push(`Done. ${keysUpdated} keys updated.`);
+    await saveCronLog(today, log, listsSaved);
 
     return NextResponse.json({
-      ok: true,
+      ok: listsSaved,
       date: today,
-      keysUpdated: updates.length,
+      keysUpdated,
       log,
     });
   } catch (e) {

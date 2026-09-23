@@ -35,6 +35,40 @@ export function derivePosition(
 }
 
 /**
+ * A holding after a transaction change: moved by exactly what the change moved
+ * its log (after − before). Units/cost the log doesn't explain (legacy or
+ * manually-set positions) stay as an opening baseline, and currentValue is
+ * rescaled at the last-known price per unit. Apply it to the LATEST stored
+ * holding: the delta then composes with changes made elsewhere meanwhile.
+ */
+export function reconcileHoldingPosition<H extends { units: number; amountInvested: number; currentValue: number; currency: string }>(
+  h: H,
+  oldTxs: PortfolioTransaction[],
+  newTxs: PortfolioTransaction[],
+  convert: (amount: number, from: string, to?: string) => number,
+): H {
+  const before = derivePosition(oldTxs, h.currency, convert);
+  const after = derivePosition(newTxs, h.currency, convert);
+  const baseUnits = h.units - before.units;
+  const baseCost = h.amountInvested - before.costBasis;
+  const pricePerUnit = h.units > 1e-9 ? h.currentValue / h.units : 0;
+
+  let units = baseUnits + after.units;
+  let amountInvested = baseCost + after.costBasis;
+  if (Math.abs(units) < 1e-9) units = 0;
+  if (amountInvested < 1e-9) amountInvested = 0;
+
+  const currentValue =
+    units === 0
+      ? 0
+      : pricePerUnit > 0
+        ? pricePerUnit * units
+        : h.currentValue;
+
+  return { ...h, units, amountInvested, currentValue };
+}
+
+/**
  * The shared replay behind both `derivePosition` and `deriveRealizedSales`.
  *
  * `onSale` fires once per sell with that sell's own realized P&L, so the

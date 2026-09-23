@@ -203,8 +203,7 @@ Hard rules:
   RLS is what makes this repo shareable at all.
 - Set **`CRON_SECRET`** in Vercel env so `/api/cron/snapshot` can only be
   triggered by Vercel's scheduler (the route allows unauthenticated calls
-  when the secret is unset). `/api/migrate` is gated behind
-  `QUICK_ADD_TOKEN` and fails closed.
+  when the secret is unset).
 - History note (2026-08-24): an owner password that had been committed was
   rotated (dead) and scrubbed from git history; if you fork an old mirror,
   the credentials in it do not work.
